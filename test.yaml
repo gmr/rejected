@@ -1,31 +1,44 @@
 %YAML 1.2
 ---
-Locations: 
-  base: /Users/gmr/Desktop/rejected
-  logs: logs
+Location: 
+    base: /Users/gmr/Source/rejected
+    logs: logs
+    
 Logging:
- #  filename: log.txt
- format: "%(levelname) -10s %(asctime)s %(message)s"
- # Valid values: debug, info, warning, error, critical
- level: debug
+    filename: log.txt
+    format: "%(levelname) -10s %(asctime)s %(message)s"
+    # Valid values: debug, info, warning, error, critical
+    level: debug
+
+Connections:
+    mq07:
+        host: mq07
+        port: 5672
+        user: guest
+        pass: guest
+        ssl: False
+        vhost: /
+
+Exchanges:
+    Email:
+        auto_delete: False
+        connections: [mq07]
+        durable: True
+        type: direct
+
 Queues:
- Queue:
-   Name: /test/queue
-   Exchange: test
-   Function: testFunction
-   Brokers:
-     Host: localhost
-     Port: 5672
-     User: guest
-     Pass: guest
-     Qty: 5
- Queue:
-   Name: /test/queue_too
-   Exchange: test
-   Function: testFunction
-   Brokers:
-     Host: localhost
-     Port: 5672
-     User: guest
-     Pass: guest
-     Qty: 5
+    Hotmail:
+        auto_delete: False
+        durable: True
+        exclusive: False
+
+Bindings:
+    Email.Hotmail:
+        handler: rejected.email.deliver
+        exchange: Email
+        queue: Hotmail
+        no_ack: False
+        requeue_on_error: False
+        consumers:
+            min: 10
+            max: 25

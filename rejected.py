@@ -10,7 +10,6 @@ Copyright 2009 Insider Guides, Inc.
 """
 
 import amqplib.client_0_8 as amqp
-import daemon
 import logging
 import sys
 import optparse
@@ -20,20 +19,23 @@ import threading
 import time
 import yaml
 
-from monitors import alice
+import mcp
+
+# Number of seconds to sleep between polls
+mcp_poll_delay = 5
 
 version = '0.1'
-
-def consume():
-
-    return True
         
 def shutdown(signum = 0, frame = None):
+    global mcp
+    
     logging.info('Graceful shutdown initiated.')
+    mcp.shutdown()
     os._exit(signum)
 
 def main():
-
+    global mcp, mcp_poll_delay
+    
     usage = "usage: %prog [options]"
     version_string = "%%prog %s" % version
     description = "rejected.py consumer daemon"
@@ -179,9 +181,23 @@ def main():
     # Set our signal handler so we can gracefully shutdown
     signal.signal(signal.SIGTERM, shutdown)
 
+    # Start the Master Control Program ;-)
+    mcp = mcp.mcp(config, options)
+    
+    # Kick off our core connections
+    mcp.start()
+    
+    # Loop until someone wants us to stop
     while 1:
         try:
-            time.sleep(1000)
+            
+            # Sleep is so much more CPU friendly than pass
+            time.sleep(mcp_poll_delay)
+            
+            # Check to see if we need to adjust our threads
+            if options.single_thread is not True:
+                mcp.poll()
+            
         except (KeyboardInterrupt, SystemExit):
             shutdown()
         

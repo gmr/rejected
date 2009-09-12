@@ -22,7 +22,6 @@ Connections:
 Exchanges:
     Email:
         auto_delete: False
-        connections: [mq07]
         durable: True
         type: direct
 
@@ -34,11 +33,17 @@ Queues:
 
 Bindings:
     Email.Hotmail:
+        connections: [mq07]
         handler: rejected.email.deliver
         exchange: Email
         queue: Hotmail
         no_ack: False
         requeue_on_error: False
         consumers:
+            # Minimum number of consumers for this binding per connection
             min: 10
+            # Maximum number of consumers for this binding per connection
             max: 25
+            # Number of pending messages before spawning 1 additional consumer
+            # 200 pending == 2 addition, etc
+            threshold: 100

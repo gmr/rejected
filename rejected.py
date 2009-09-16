@@ -44,8 +44,6 @@ class consumerThread( threading.Thread ):
         self.messages_processed = 0
         self.throttle = False
         
-        print self.config['Bindings'][self.binding_name]
-        print self.config['Bindings'][self.binding_name]['throttle']
         if self.config['Bindings'][self.binding_name].has_key('throttle'):
             logging.debug('Setting message throttle to %i message(s) per second' % 
                             self.config['Bindings'][self.binding_name]['throttle']

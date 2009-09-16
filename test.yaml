@@ -39,11 +39,13 @@ Bindings:
         queue: Hotmail
         no_ack: False
         requeue_on_error: False
+        # Number of messages per second to throttle to *per consumer*
+        throttle: 5
         consumers:
             # Minimum number of consumers for this binding per connection
-            min: 10
+            min: 1
             # Maximum number of consumers for this binding per connection
-            max: 25
+            max: 5
             # Number of pending messages before spawning 1 additional consumer
             # 200 pending == 2 addition, etc
             threshold: 100

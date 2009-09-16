@@ -38,10 +38,21 @@ class consumerThread( threading.Thread ):
         # Variables held for future use
         self.binding_name = binding_name
         self.connect_name = connect_name
+        self.locked = False
         self.running = True
         self.thread_name = thread_name
         self.messages_processed = 0
-
+        self.throttle = False
+        
+        print self.config['Bindings'][self.binding_name]
+        print self.config['Bindings'][self.binding_name]['throttle']
+        if self.config['Bindings'][self.binding_name].has_key('throttle'):
+            logging.debug('Setting message throttle to %i message(s) per second' % 
+                            self.config['Bindings'][self.binding_name]['throttle']
+                         )
+            self.throttle = True
+            self.limit = self.config['Bindings'][self.binding_name]['throttle']
+            
         # Init the Thread Object itself
         threading.Thread.__init__(self)  
 
@@ -56,7 +67,10 @@ class consumerThread( threading.Thread ):
                                 ssl = configuration['ssl'],
                                 virtual_host = configuration['vhost'] )
 
-    def getInformation(self):
+    def disconnect( self ):
+        self.connection.close()
+
+    def get_information(self):
         """ Grab Information from the Thread """
 
         return { 
@@ -65,6 +79,13 @@ class consumerThread( threading.Thread ):
                  'queue': self.queue_name,
                  'processed': self.messages_processed
                }
+
+    def is_locked( self ):
+        return self.locked
+        
+    def lock( self ):
+        #logging.debug('Locking this thread to prevent shutdown.')
+        self.locked = True
 
     def run( self ):
         """ Meat of the queue consumer code """
@@ -104,47 +125,72 @@ class consumerThread( threading.Thread ):
                                  exchange = exchange,
                                  routing_key = self.binding_name )
 
-        # Let the consuming start
-        self.consumer_tag = self.channel.basic_consume( 
-                                queue = self.queue_name, 
-                                no_ack = self.config['Bindings'][self.binding_name]['no_ack'],
-                                callback = self.receive )
-
-        # Set our prefetch QOS
-        self.channel.basic_qos( 0, 0, False )
-
         # Wait for messages
         logging.debug( 'Waiting on messages for "%s"' %  self.thread_name )
 
+        # Initialize our throttle variable if we need it
+        interval_start = None
+        
         # Loop as long as the thread is running
         while self.running == True:
             try:
-                self.channel.wait()
+                # Get a message
+                message =  self.channel.basic_get(self.queue_name)
             except AttributeError:
+                # Disconnect and start over
+                self.disconnect()
+                self.run()
                 break
             except IOError:
+                # Disconnect and start over
+                self.disconnect()
+                self.run()
                 break
+             
+            if self.throttle is True and interval_start is None:  
+                interval_start = time.clock()
+                interval_count = 0
+            
+            # If we got a valid message
+            if message is not None:
+                self.lock()
+                self.channel.basic_ack(message.delivery_tag)
+                self.process(message)
+                self.unlock()
+            else:
+                # Disconnect and start over
+                self.disconnect()
+                self.run()
+                break
+
+            if self.throttle is True:
+                duration = time.clock() - interval_start
+                interval_count += 1
+                if duration <= 1 and interval_count >= self.limit:
+                    sleep_time = 1 - duration
+                    logging.debug('Throttling to %i message(s) per second on %s, waiting %f seconds.' % 
+                                    ( self.limit, self.thread_name, sleep_time ) )
+                    time.sleep(sleep_time)
+                    interval_start = None
                 
-    def receive(self, message):
-        """ Receive a message """
-        
-        if message is not None:
-            #logging.debug('Received a message on "%s".' % self.thread_name)
-            #print message.body
-            self.channel.basic_ack(message.delivery_tag)
-            self.messages_processed += 1
+    def process(self, message):
+        """ Process a message """
+
+        #logging.debug('Received a message on "%s".' % self.thread_name)
+       # print '%s on %s' % (message.body, self.thread_name)
+        self.messages_processed += 1
         
     def shutdown(self):
         """ Gracefully close the connection """
-        
-        logging.debug('Shutting down consumer "%s"' % self.thread_name )
-        
-        # Let the loop know we're not looping
-        self.running = False
-        try:
-            self.connection.close()
-        except IOError:
-            pass
+
+        if self.running is True:
+            logging.debug('Shutting down consumer "%s"' % self.thread_name )
+            self.running = False
+        #self.connection.close()
+
+    def unlock( self ):
+        #logging.debug('Unlocking this thread to allow shutdown.')
+        self.locked = False
     
 class mcp:
     """ Master Control Process keeps track of threads and threading needs """
@@ -154,15 +200,18 @@ class mcp:
         self.alice = alice()
         self.bindings = []
         self.config = config
-        pass
+        self.shutdown_pending = False
 
     def poll(self):
         logging.debug('MCP Polling')
+        
+        if self.shutdown_pending is True:
+            return
+        
         for binding in self.bindings:
-            new_threads = {}
-            for thread in binding['threads']:
-                info = binding['threads'][thread].getInformation()
-                data = self.alice.getQueueDepth(info['connection'], info['queue'])
+            for thread_name, thread in binding['threads'].items():
+                info = thread.get_information()
+                data = self.alice.get_queue_depth(info['connection'], info['queue'])
                 
                 # Easier to work with variables
                 queue_depth = int(data['depth'])
@@ -170,7 +219,7 @@ class mcp:
                 max = self.config['Bindings'][info['binding']]['consumers']['max']
                 threshold = self.config['Bindings'][info['binding']]['consumers']['threshold']
 
-                if queue_depth > threshold and binding['threadCount'] < max:
+                if queue_depth > threshold and len(binding['threads']) < max:
                     
                     logging.info( 'Spawning worker thread for connection "%s" binding "%s": %i messages pending, %i threshhold, %i min, %i max, %i consumers active.' % 
                                     ( info['connection'], 
@@ -179,66 +228,82 @@ class mcp:
                                       threshold,
                                       min,
                                       max,
-                                      binding['threadCount'] ) )
+                                      len(binding['threads']) ) )
 
                     # Create a unique thread name
-                    thread_name = '%s_%s_%i' % ( info['connection'], 
+                    new_thread_name = '%s_%s_%i' % ( info['connection'], 
                                                  info['binding'], 
-                                                 binding['threadCount'])
+                                                 len(binding['threads']))
 
                     # Create the new thread making it use self.consume
-                    thread = consumerThread( self.config,
-                                             thread_name, 
-                                             info['binding'], 
-                                             info['connection'] );
-
+                    new_thread = consumerThread( self.config,
+                                                 new_thread_name, 
+                                                 info['binding'], 
+                                                 info['connection'] );
+ 
                     # Add to our dictionary of active threads
-                    new_threads[thread_name] = thread
-                    
-                    # Increment our thread counter
-                    binding['threadCount']  += 1
+                    binding['threads'][new_thread_name] = new_thread
 
                     # Set the name of the thread for future use
-                    thread.setName(thread_name)
+                    new_thread.setName(new_thread_name)
 
                     # Start the thread
-                    thread.start()
+                    new_thread.start()
                     
                     # We only want 1 new thread at a time
                     break
 
-            # Append any new threads
-            if len(new_threads) > 0:
-                binding['threads'].update(new_threads)
-
             # Check if our queue depth is below our threshold and we have more than the min amount
-            if queue_depth < threshold and binding['threadCount'] > min:
+            if queue_depth < threshold and len(binding['threads']) > min:
 
                 # Remove a thread
-                for thread in binding['threads']:
-                    logging.info( 'Removed worker thread for connection "%s" binding "%s": %i messages pending, %i threshhold, %i min, %i max, %i consumers active.' % 
-                                    ( info['connection'], 
-                                      info['binding'], 
-                                      queue_depth, 
-                                      threshold,
-                                      min,
-                                      max,
-                                      binding['threadCount'] ) )
-                                      
-                    binding['threads'][thread].shutdown()
-                    binding['threadCount']  -= 1
-                    del_thread = True
-                    break;
-
-                # Remove it from our thread dictionary
-                del binding['threads'][thread] 
+                for thread_name, thread in binding['threads'].items():
+                    if thread.isLocked() == False:
+                        logging.info( 'Removed worker thread for connection "%s" binding "%s": %i messages pending, %i threshhold, %i min, %i max, %i consumers active.' % 
+                                        ( info['connection'], 
+                                          info['binding'], 
+                                          queue_depth, 
+                                          threshold,
+                                          min,
+                                          max,
+                                          len(binding['threads']) ) )
+                                  
+                        thread.shutdown()
+                        del binding['threads'][thread_name]
+                        break;
 
     def shutdown(self):
         logging.debug('MCP Shutting Down')
-        for binding in self.bindings:
-            for thread in binding['threads']:
-                binding['threads'][thread].shutdown()
+        # Get the thread count
+        threads = self.threadCount()
+        
+        # Keep track of the fact we're shutting down
+        self.shutdown_pending = True
+        
+        # Loop as long as we have running threads
+        while  threads > 0:
+            
+            # Loop through all of the bindings and try and shutdown their threads
+            for binding in self.bindings:
+                
+                # Loop through all the threads in this binding
+                for thread_name, thread in binding['threads'].items():
 
+                    # Let the thread know we want to shutdown
+                    thread.shutdown()
+
+                    # If the thread is not locked, shut down the thread
+                    if thread.is_locked() is False:
+                        del binding['threads'][thread_name]
+
+            # Get our updated thread count and only sleep then loop if it's > 0, 
+            threads = self.threadCount()
+            
+            # If we have any threads left, sleep for a second before trying again
+            if threads > 0:
+                logging.debug('Waiting on %i threads to cleanly shutdown.' % threads )
+                time.sleep(1)
+                    
     def start(self):
         logging.debug('MCP Starting Up')
 
@@ -247,7 +312,6 @@ class mcp:
             binding = { 'name': binding_name }
             binding['queue'] = self.config['Bindings'][binding_name]['queue']
             binding['threads'] = {}
-            binding['threadCount'] = 0
 
             # For each connection, kick off the min consumers and start consuming
             for connect_name in self.config['Bindings'][binding_name]['connections']:
@@ -265,8 +329,6 @@ class mcp:
 
                     # Add to our dictionary of active threads
                     binding['threads'][thread_name] = thread
-                    
-                    binding['threadCount'] += 1
 
                     # Set the name of the thread for future use
                     thread.setName(thread_name)
@@ -276,6 +338,13 @@ class mcp:
 
             # Append this binding to our binding stack
             self.bindings.append(binding)
+        
+    def threadCount(self):
+        """ Return the total number of working threads managed by the MCP """
+        count = 0
+        for binding in self.bindings:
+            count += len(binding['threads'])
+        return count
 
 def shutdown(signum = 0, frame = None):
     global mcp
@@ -341,6 +410,7 @@ def main():
             config = yaml.load(stream)
     except:
             print "\nError: Invalid or missing configuration file \"%s\"\n" % options.config
+            raise
             sys.exit(1)
     
     # Set logging levels dictionary

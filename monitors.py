@@ -14,15 +14,14 @@ import json
 import logging
 import sys
 import os
-import unittest
 import urllib
 
 class alice:
+    
     def __init__(self):
         logging.debug('Alice Monitor created')
-        pass
         
-    def getQueueDepth(self, host = 'localhost', queue_name = 'test' ):
+    def get_queue_depth(self, host = 'localhost', queue_name = 'test' ):
         
         # Get the queue data by passing in various flags
         url = 'http://%s:8161/queues/root/name/consumers/messages/messages_ready' % host
@@ -37,14 +36,3 @@ class alice:
 
         # We didn't find the queue in the list, so return 0's
         return { 'consumers': 0, 'depth': 0}
-
-class aliceTests(unittest.TestCase):
-    def setUp(self):
-        pass
-
-
-if __name__ == '__main__':
-    #unittest.main()
-    
-    a = alice()
-    print a.getQueueDepth('mq07', 'Hotmail')

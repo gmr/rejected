@@ -25,7 +25,7 @@ def main():
     chan.queue_bind(queue="Hotmail", exchange="Email",
                   routing_key="Email.Hotmail")
     
-    for i in range(0, 100000):
+    for i in range(0, 1000000):
     	msg = amqp.Message("Test message %i!" % i)
     	msg.properties["delivery_mode"] = 2
     	chan.basic_publish(msg,exchange="Email",routing_key="Email.Hotmail")    

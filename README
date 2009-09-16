@@ -1,0 +1,13 @@
+rejected.py is a multi-threaded AMQP 0.8 consumer framework. It has been developed for and tested against RabbitMQ 1.6.0. For more information, check out the Getting Started? page.
+
+Features Include:
+
+ * Elastic scaling of consumers based upon demand
+ * Specify a min # of consumers, max # of consumers and threshold to spawn new threads
+ * Throttling of messages per second
+ * Allows for multiple brokers per binding
+
+Requirements:
+ * amqplib
+ * pyyaml
+ * alice

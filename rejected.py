@@ -42,8 +42,9 @@ class consumerThread( threading.Thread ):
         self.running = True
         self.thread_name = thread_name
         self.messages_processed = 0
-        self.throttle = False
         
+        # If we have throttle config use it
+        self.throttle = False
         if self.config['Bindings'][self.binding_name].has_key('throttle'):
             logging.debug('Setting message throttle to %i message(s) per second' % 
                             self.config['Bindings'][self.binding_name]['throttle']
@@ -90,6 +91,15 @@ class consumerThread( threading.Thread ):
 
         logging.debug( 'In consumer run for thread "%s"' % self.thread_name )
 
+        # Import our processor class
+        import_name = self.config['Bindings'][self.binding_name]['import']
+        class_name = self.config['Bindings'][self.binding_name]['processor']
+        class_module = getattr(__import__(import_name), class_name)
+        processor_class = getattr(class_module, class_name)
+        logging.info('Creating message processor: %s.%s in %s' % 
+                     ( import_name, class_name, self.thread_name ) )
+        processor = processor_class()
+            
         # Connect to the AMQP Broker
         self.connection = self.connect( self.config['Connections'][self.connect_name] )
         
@@ -151,9 +161,22 @@ class consumerThread( threading.Thread ):
             
             # If we got a valid message
             if message is not None:
+                
+                # Lock the thread until we finish
                 self.lock()
+                
+                # Ack the message back to the broker
                 self.channel.basic_ack(message.delivery_tag)
-                self.process(message)
+                
+                # Process the message
+                if processor.process(message) is True:
+                    self.messages_processed += 1
+                else:
+                    # An error occurred
+                    # @todo add code here
+                    pass
+                    
+                # Unlock the thread, safe to shutdown
                 self.unlock()
             else:
                 # Disconnect and start over
@@ -176,7 +199,7 @@ class consumerThread( threading.Thread ):
 
         #logging.debug('Received a message on "%s".' % self.thread_name)
        # print '%s on %s' % (message.body, self.thread_name)
-        self.messages_processed += 1
+
         
     def shutdown(self):
         """ Gracefully close the connection """
@@ -523,4 +546,6 @@ def main():
         
 # Only execute the code if invoked as an application
 if __name__ == '__main__':
+    # Get our sub-path going
+    sys.path.insert(0, 'processors')
     main()

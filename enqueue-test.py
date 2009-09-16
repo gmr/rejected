@@ -11,7 +11,6 @@ import amqplib.client_0_8 as amqp
 import sys
 import os
 
-
 def main():
     conn = amqp.Connection(host="mq07:5672 ", userid="guest",
         password="guest", virtual_host="/", insist=False)
@@ -29,9 +28,6 @@ def main():
     	msg = amqp.Message("Test message %i!" % i)
     	msg.properties["delivery_mode"] = 2
     	chan.basic_publish(msg,exchange="Email",routing_key="Email.Hotmail")    
-    
-    pass
-
 
 if __name__ == '__main__':
     main()

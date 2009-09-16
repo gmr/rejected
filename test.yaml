@@ -33,19 +33,20 @@ Queues:
 
 Bindings:
     Email.Hotmail:
+        import: processors.test_processor
+        processor: test_processor 
         connections: [mq07]
-        handler: rejected.email.deliver
         exchange: Email
         queue: Hotmail
-        no_ack: False
+        max_errors: 5
         requeue_on_error: False
         # Number of messages per second to throttle to *per consumer*
-        throttle: 5
+        #throttle: 5
         consumers:
             # Minimum number of consumers for this binding per connection
             min: 1
             # Maximum number of consumers for this binding per connection
-            max: 5
+            max: 50
             # Number of pending messages before spawning 1 additional consumer
             # 200 pending == 2 addition, etc
             threshold: 100

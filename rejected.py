@@ -150,11 +150,13 @@ class consumerThread( threading.Thread ):
                 message =  self.channel.basic_get(self.queue_name)
             except AttributeError:
                 # Disconnect and start over
+                logging.info('Attribut Error in %s' % self.thread_name)
                 self.disconnect()
                 self.run()
                 break
             except IOError:
                 # Disconnect and start over
+                logging.info('IO Error in %s' % self.thread_name)
                 self.disconnect()
                 self.run()
                 break
@@ -186,9 +188,8 @@ class consumerThread( threading.Thread ):
                 self.unlock()
             else:
                 # Disconnect and start over
-                self.disconnect()
-                self.run()
-                break
+                logging.debug('Received a None message, waiting 1 second')
+                time.sleep(1)
 
             # If we're throttling
             if self.throttle is True:
@@ -208,7 +209,7 @@ class consumerThread( threading.Thread ):
                     # Sleep and setup for the next interval
                     time.sleep(sleep_time)
                     interval_start = None
-                
+                    
     def shutdown(self):
         """ Gracefully close the connection """
 

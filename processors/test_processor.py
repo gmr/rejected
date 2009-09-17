@@ -1,7 +1,9 @@
 """ Test processing class """
+import logging
+
 class test_processor:
     
     def process(self, message):
         
-        print 'In test_processor.test: %s' % message.body
+        logging.debug('In test_processor.test: %s' % message.body)
         return True

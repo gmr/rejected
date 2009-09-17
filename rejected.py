@@ -67,6 +67,7 @@ class consumerThread( threading.Thread ):
                                 virtual_host = configuration['vhost'] )
 
     def disconnect( self ):
+        """ Disconnect from the AMQP Broker """
         self.connection.close()
 
     def get_information(self):
@@ -80,10 +81,13 @@ class consumerThread( threading.Thread ):
                }
 
     def is_locked( self ):
+        """ What is the lock status for the MCP? """
+        
         return self.locked
         
     def lock( self ):
-        #logging.debug('Locking this thread to prevent shutdown.')
+        """ Lock the thread so the MCP does not destroy it until we're done processing a message """
+
         self.locked = True
 
     def run( self ):
@@ -154,7 +158,9 @@ class consumerThread( threading.Thread ):
                 self.disconnect()
                 self.run()
                 break
-             
+            
+            # If throttling is turned on and we're ready to start this interval of processing
+            # Set the start and count 
             if self.throttle is True and interval_start is None:  
                 interval_start = time.clock()
                 interval_count = 0
@@ -173,7 +179,7 @@ class consumerThread( threading.Thread ):
                     self.messages_processed += 1
                 else:
                     # An error occurred
-                    # @todo add code here
+                    # @todo add error counting and exit code here
                     pass
                     
                 # Unlock the thread, safe to shutdown
@@ -184,54 +190,70 @@ class consumerThread( threading.Thread ):
                 self.run()
                 break
 
+            # If we're throttling
             if self.throttle is True:
+                # Get the duration from when we starting this interval to now
                 duration = time.clock() - interval_start
                 interval_count += 1
+                
+                # If the duration is less than 1 second and we've processed up to (or over) our max
                 if duration <= 1 and interval_count >= self.limit:
+                    
+                    # Figure out how much time to sleep
                     sleep_time = 1 - duration
+                    
                     logging.debug('Throttling to %i message(s) per second on %s, waiting %f seconds.' % 
                                     ( self.limit, self.thread_name, sleep_time ) )
+                    
+                    # Sleep and setup for the next interval
                     time.sleep(sleep_time)
                     interval_start = None
                 
-    def process(self, message):
-        """ Process a message """
-
-        #logging.debug('Received a message on "%s".' % self.thread_name)
-       # print '%s on %s' % (message.body, self.thread_name)
-
-        
     def shutdown(self):
         """ Gracefully close the connection """
 
         if self.running is True:
             logging.debug('Shutting down consumer "%s"' % self.thread_name )
             self.running = False
+            
+        # This is hanging for me at times, non-predictably
         #self.connection.close()
 
     def unlock( self ):
-        #logging.debug('Unlocking this thread to allow shutdown.')
+        """ Unlock the thread so MCP can shut us down """
         self.locked = False
     
 class mcp:
     """ Master Control Process keeps track of threads and threading needs """
 
     def __init__(self, config, options):
+        
         logging.debug('MCP Created')
+        
         self.alice = alice()
         self.bindings = []
         self.config = config
         self.shutdown_pending = False
 
     def poll(self):
+        """ Check the Alice daemon for queue depths for each binding """
+        
         logging.debug('MCP Polling')
         
+        # If we're shutting down, no need to do this, can make it take longer
         if self.shutdown_pending is True:
             return
         
+        # Loop through each binding
         for binding in self.bindings:
+            
+            # Go through the threads to check the queue depths for each server
             for thread_name, thread in binding['threads'].items():
+                
+                # Get our thread data such as the connection and queue it's using
                 info = thread.get_information()
+                
+                # Check the queue depth for the connection and queue
                 data = self.alice.get_queue_depth(info['connection'], info['queue'])
                 
                 # Easier to work with variables
@@ -240,6 +262,7 @@ class mcp:
                 max = self.config['Bindings'][info['binding']]['consumers']['max']
                 threshold = self.config['Bindings'][info['binding']]['consumers']['threshold']
 
+                # If our queue depth exceeds the threshold and we haven't maxed out make a new worker
                 if queue_depth > threshold and len(binding['threads']) < max:
                     
                     logging.info( 'Spawning worker thread for connection "%s" binding "%s": %i messages pending, %i threshhold, %i min, %i max, %i consumers active.' % 
@@ -271,7 +294,7 @@ class mcp:
                     # Start the thread
                     new_thread.start()
                     
-                    # We only want 1 new thread at a time
+                    # We only want 1 new thread per poll as to not overwhelm the consumer system
                     break
 
             # Check if our queue depth is below our threshold and we have more than the min amount
@@ -288,13 +311,21 @@ class mcp:
                                           min,
                                           max,
                                           len(binding['threads']) ) )
-                                  
+                        
+                        # Shutdown the thread gracefully          
                         thread.shutdown()
+                        
+                        # Remove it from the stack
                         del binding['threads'][thread_name]
+                        
+                        # We only want to remove one thread per poll
                         break;
 
     def shutdown(self):
+        """ Graceful shutdown of the MCP means shutting down threads too """
+        
         logging.debug('MCP Shutting Down')
+        
         # Get the thread count
         threads = self.threadCount()
         
@@ -326,10 +357,13 @@ class mcp:
                 time.sleep(1)
                     
     def start(self):
+        """ Initialize all of the consumer threads when the MCP comes to life """
         logging.debug('MCP Starting Up')
 
+        # Loop through all of the bindings
         for binding_name in self.config['Bindings']:
-
+            
+            # Create the dictionary values for this binding
             binding = { 'name': binding_name }
             binding['queue'] = self.config['Bindings'][binding_name]['queue']
             binding['threads'] = {}
@@ -362,12 +396,14 @@ class mcp:
         
     def threadCount(self):
         """ Return the total number of working threads managed by the MCP """
+        
         count = 0
         for binding in self.bindings:
             count += len(binding['threads'])
         return count
 
 def shutdown(signum = 0, frame = None):
+    """ Application Wide Graceful Shutdown """
     global mcp
     
     logging.info('Graceful shutdown initiated.')
@@ -376,6 +412,7 @@ def shutdown(signum = 0, frame = None):
     os._exit(signum)
 
 def main():
+    """ Main Application Handler """
     global mcp, mcp_poll_delay
     
     usage = "usage: %prog [options]"
@@ -546,6 +583,9 @@ def main():
         
 # Only execute the code if invoked as an application
 if __name__ == '__main__':
-    # Get our sub-path going
+    
+    # Get our sub-path going for processor imports
     sys.path.insert(0, 'processors')
+    
+    # Run the main function
     main()

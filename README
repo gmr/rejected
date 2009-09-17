@@ -8,6 +8,7 @@ Features Include:
  * Allows for multiple brokers per binding
 
 Requirements:
+
  * amqplib
  * pyyaml
  * alice

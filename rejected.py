@@ -30,34 +30,40 @@ class consumerThread( threading.Thread ):
     
     def __init__( self, configuration, thread_name, binding_name, connect_name ):
 
-        logging.debug('Initializing a Consumer class in thread "%s"' % thread_name)
+        logging.debug( 'Initializing a Consumer class in thread "%s"' % thread_name )
 
         # Rejected full Configuration
         self.config = configuration
+        
+        # Binding to make code more readable
+        binding = self.config['Bindings'][binding_name]
 
-        # Variables held for future use
+        # Initialize object wide variables
+        self.auto_ack = binding['consumers']['auto_ack']
         self.binding_name = binding_name
         self.connect_name = connect_name
         self.errors = 0
         self.interval_count = 0
         self.interval_start = None
         self.locked = False
-        self.max_errors = self.config['Bindings'][self.binding_name]['max_errors']
+        self.max_errors = binding['consumers']['max_errors']
         self.messages_processed = 0
+        self.requeue_on_error = binding['consumers']['requeue_on_error']
         self.running = True
         self.queue_name = None
         self.thread_name = thread_name
-        self.throttle_count = 0
-        self.throttle_duration = 0
         
         # If we have throttle config use it
         self.throttle = False
-        if self.config['Bindings'][self.binding_name].has_key('throttle'):
-            logging.debug('Setting message throttle to %i message(s) per second' % 
-                            self.config['Bindings'][self.binding_name]['throttle']
-                         )
+        if binding['consumers'].has_key('throttle'):
+            logging.debug( 'Setting message throttle to %i message(s) per second' % 
+                            binding['consumers']['throttle'] )
             self.throttle = True
-            self.limit = self.config['Bindings'][self.binding_name]['throttle']
+            self.throttle_threshold = binding['consumers']['throttle']
+
+            # Initialize throttling variables
+            self.throttle_count = 0
+            self.throttle_duration = 0
             
         # Init the Thread Object itself
         threading.Thread.__init__(self)  
@@ -65,7 +71,8 @@ class consumerThread( threading.Thread ):
     def connect( self, configuration ):
         """ Connect to an AMQP Broker  """
 
-        logging.debug('Creating a new connection for "%s" in thread "%s"' % ( self.binding_name, self.thread_name ) )
+        logging.debug( 'Creating a new connection for "%s" in thread "%s"' % 
+                        ( self.binding_name, self.thread_name ) )
 
         return amqp.Connection( host ='%s:%s' % ( configuration['host'], configuration['port'] ),
                                 userid = configuration['user'], 
@@ -108,8 +115,8 @@ class consumerThread( threading.Thread ):
         class_name = self.config['Bindings'][self.binding_name]['processor']
         class_module = getattr(__import__(import_name), class_name)
         processor_class = getattr(class_module, class_name)
-        logging.info('Creating message processor: %s.%s in %s' % 
-                     ( import_name, class_name, self.thread_name ) )
+        logging.info( 'Creating message processor: %s.%s in %s' % 
+                      ( import_name, class_name, self.thread_name ) )
         self.processor = processor_class()
             
         # Connect to the AMQP Broker
@@ -130,34 +137,40 @@ class consumerThread( threading.Thread ):
                                     auto_delete = queue_auto_delete )
 
         # Create / Connect to the Exchange
-        exchange = self.config['Bindings'][self.binding_name]['exchange']
-        exchange_auto_delete = self.config['Exchanges'][exchange]['auto_delete']
-        exchange_durable = self.config['Exchanges'][exchange]['durable']
-        exchange_type = self.config['Exchanges'][exchange]['type']
+        self.exchange = self.config['Bindings'][self.binding_name]['exchange']
+        exchange_auto_delete = self.config['Exchanges'][self.exchange]['auto_delete']
+        exchange_durable = self.config['Exchanges'][self.exchange]['durable']
+        exchange_type = self.config['Exchanges'][self.exchange]['type']
         
-        self.channel.exchange_declare( exchange = exchange, 
+        self.channel.exchange_declare( exchange = self.exchange, 
                                        type = exchange_type, 
                                        durable = exchange_durable,
                                        auto_delete = exchange_auto_delete)
 
         # Bind to the Queue / Exchange
         self.channel.queue_bind( queue = self.queue_name, 
-                                 exchange = exchange,
+                                 exchange = self.exchange,
                                  routing_key = self.binding_name )
 
         # Wait for messages
         logging.debug( 'Waiting on messages for "%s"' %  self.thread_name )
 
-
-        self.channel.basic_consume(queue=self.queue_name, no_ack=True,
-                                    callback=self.process, consumer_tag=self.thread_name)
+        # Let AMQP know to send us messages
+        self.channel.basic_consume( queue = self.queue_name, 
+                                    no_ack = self.auto_ack,
+                                    callback = self.process, 
+                                    consumer_tag = self.thread_name )
 
         # Initialize our throttle variable if we need it
         interval_start = None
         
         # Loop as long as the thread is running
         while self.running == True:
+            
+            # Wait on messages
             self.channel.wait()
+   
+        logging.debug( 'Exiting consumerThread.run() for %s' % self.thread_name )
    
     def process(self, message):
         """ Process a message from Rabbit"""
@@ -168,10 +181,33 @@ class consumerThread( threading.Thread ):
     
         # Lock while we're processing
         self.lock()
+        
+        # If we're not auto-acking at the broker level, do so here, but why?
+        if self.auto_ack is False:
+            self.channel.basic_ack( message.delivery_tag )
+        
+        # Process the message, if it returns True, we're all good
         if self.processor.process(message) is True:
             self.messages_processed += 1
+        
+        # It's returned False, so we should check our our check
+        # We don't want to have out-of-control errors
         else:
+            # Unlock
+            self.unlock()
+            
+            # Do we need to requeue?  If so, lets send it
+            if self.requeue_on_error is True:
+                msg = amqp.Message(message.body)
+                msg.properties['delivery_mode'] = 2
+                self.channel.basic_publish( msg,
+                                            exchange = self.exchange,
+                                            routing_key = self.binding_name )
+            
+            # Keep track of how many errors we've had
             self.errors += 1
+            
+            # If we've had too many according to the configuration, shutdown
             if self.errors >= self.max_errors:
                 logging.error( 'Received %i errors, shutting down thread "%s"' % self.thread_name )
                 self.shutdown()
@@ -188,7 +224,7 @@ class consumerThread( threading.Thread ):
             self.interval_count += 1
 
             # If the duration is less than 1 second and we've processed up to (or over) our max
-            if self.throttle_duration <= 1 and self.interval_count >= self.limit:
+            if self.throttle_duration <= 1 and self.interval_count >= self.throttle_threshold:
             
                 # Increment our throttle count
                 self.throttle_count += 1
@@ -196,8 +232,8 @@ class consumerThread( threading.Thread ):
                 # Figure out how much time to sleep
                 sleep_time = 1 - self.throttle_duration
                 
-                #logging.debug('Throttling to %i message(s) per second on %s, waiting %f seconds.' % 
-                #                ( self.limit, self.thread_name, sleep_time ) )
+                logging.debug( 'Throttling to %i message(s) per second on %s, waiting %f seconds.' % 
+                               ( self.throttle_threshold, self.thread_name, sleep_time ) )
                 
                 # Sleep and setup for the next interval
                 time.sleep(sleep_time)
@@ -217,7 +253,7 @@ class consumerThread( threading.Thread ):
         """ Gracefully close the connection """
 
         if self.running is True:
-            logging.debug('Shutting down consumer "%s"' % self.thread_name )
+            logging.debug( 'Shutting down consumer "%s"' % self.thread_name )
             self.running = False
             
         # This is hanging for me at times, non-predictably
@@ -233,7 +269,7 @@ class mcp:
 
     def __init__(self, config, options):
         
-        logging.debug('MCP Created')
+        logging.debug( 'Master Control Process Created' )
         
         self.alice = alice()
         self.bindings = []
@@ -246,7 +282,7 @@ class mcp:
         """ Check the Alice daemon for queue depths for each binding """
         global mcp_poll_delay
         
-        logging.debug('MCP Polling')
+        logging.debug( 'Master Control Program Polling' )
         
         # Cache the monitor queue depth checks
         cache_lookup = {}
@@ -375,7 +411,7 @@ class mcp:
                         break;
             
             mps = float(total_processed) / duration_since_last_poll
-            logging.debug('MCP Poll Results: %i total messages processed in %f seconds (%f mps). %i threads throttled themselves %i times.' %
+            logging.info('MCP Poll Results: %i total messages processed in %f seconds (%f mps). %i threads throttled themselves %i times.' %
                            ( total_processed, duration_since_last_poll, mps, len(binding['threads']), total_throttled ) )
             
             # Get our last poll time
@@ -384,7 +420,7 @@ class mcp:
     def shutdown(self):
         """ Graceful shutdown of the MCP means shutting down threads too """
         
-        logging.debug('MCP Shutting Down')
+        logging.debug( 'Master Control Process Shutting Down' )
         
         # Get the thread count
         threads = self.threadCount()
@@ -413,12 +449,12 @@ class mcp:
             
             # If we have any threads left, sleep for a second before trying again
             if threads > 0:
-                logging.debug('Waiting on %i threads to cleanly shutdown.' % threads )
+                logging.debug( 'Waiting on %i threads to cleanly shutdown.' % threads )
                 time.sleep(1)
                     
     def start(self):
         """ Initialize all of the consumer threads when the MCP comes to life """
-        logging.debug('MCP Starting Up')
+        logging.debug( 'Master Control Process Starting Up' )
 
         # Loop through all of the bindings
         for binding_name in self.config['Bindings']:
@@ -466,9 +502,9 @@ def shutdown(signum = 0, frame = None):
     """ Application Wide Graceful Shutdown """
     global mcp
     
-    logging.info('Graceful shutdown initiated.')
+    logging.info( 'Graceful shutdown initiated.' )
     mcp.shutdown()
-    logging.debug('Graceful shutdown complete')
+    logging.debug( 'Graceful shutdown complete' )
     os._exit(signum)
 
 def main():
@@ -600,7 +636,7 @@ def main():
             sys.exit(1)
         
         # Let the debugging person know we've forked
-        logging.debug('After child fork')
+        logging.debug( 'rejected.py has forked into the background.' )
         
         # Detach from parent environment
         os.chdir(config['Location']['base']) 

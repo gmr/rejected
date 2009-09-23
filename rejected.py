@@ -38,16 +38,17 @@ class consumerThread( threading.Thread ):
         # Variables held for future use
         self.binding_name = binding_name
         self.connect_name = connect_name
+        self.errors = 0
+        self.interval_count = 0
+        self.interval_start = None
         self.locked = False
+        self.max_errors = self.config['Bindings'][self.binding_name]['max_errors']
+        self.messages_processed = 0
         self.running = True
         self.queue_name = None
         self.thread_name = thread_name
-        self.messages_processed = 0
-        self.interval_count = 0
-        self.interval_start = None
         self.throttle_count = 0
-        self.max_errors = self.config['Bindings'][self.binding_name]['max_errors']
-        self.errors = 0
+        self.throttle_duration = 0
         
         # If we have throttle config use it
         self.throttle = False
@@ -183,30 +184,34 @@ class consumerThread( threading.Thread ):
         if self.throttle is True:
         
             # Get the duration from when we starting this interval to now
-            duration = time.time() - self.interval_start
+            self.throttle_duration += time.time() - self.interval_start
             self.interval_count += 1
 
             # If the duration is less than 1 second and we've processed up to (or over) our max
-            if duration <= 1 and self.interval_count >= self.limit:
+            if self.throttle_duration <= 1 and self.interval_count >= self.limit:
             
                 # Increment our throttle count
                 self.throttle_count += 1
                 
                 # Figure out how much time to sleep
-                sleep_time = 1 - duration
+                sleep_time = 1 - self.throttle_duration
                 
                 #logging.debug('Throttling to %i message(s) per second on %s, waiting %f seconds.' % 
                 #                ( self.limit, self.thread_name, sleep_time ) )
                 
                 # Sleep and setup for the next interval
                 time.sleep(sleep_time)
-                self.interval_start = None
+
+                # Reset our counters
                 self.interval_count = 0
+                self.interval_start = None
+                self.throttle_duration = 0
                 
             # Else if our duration is more than a second restart our counters
-            elif duration >= 1:
+            elif self.throttle_duration >= 1:
+                self.interval_count = 0   
                 self.interval_start = None
-                self.interval_count = 0          
+                self.throttle_duration = 0       
                     
     def shutdown(self):
         """ Gracefully close the connection """
@@ -233,6 +238,7 @@ class mcp:
         self.alice = alice()
         self.bindings = []
         self.config = config
+        self.last_poll = None
         self.shutdown_pending = False
         self.thread_stats = {}
 
@@ -248,6 +254,12 @@ class mcp:
         # default total counts
         total_processed = 0
         total_throttled = 0
+        
+        # Get our delay since last poll
+        if self.last_poll is not None:
+            duration_since_last_poll = time.time() - self.last_poll
+        else:
+            duration_since_last_poll = mcp_poll_delay
         
         # If we're shutting down, no need to do this, can make it take longer
         if self.shutdown_pending is True:
@@ -267,22 +279,26 @@ class mcp:
                 
                     # Calculate our processed & throttled amount                    
                     processed = info['processed'] - self.thread_stats[thread_name]['processed']  
-                    throttled = info['throttle_count'] - self.thread_stats[thread_name]['throttled']  
-          
+                    throttled = info['throttle_count'] - self.thread_stats[thread_name]['throttle_count']  
+                
                     # Totals for MCP Stats
                     total_processed += processed
                     total_throttled += throttled
                     
-                    mps = float(processed) / float(mcp_poll_delay)      
-                    logging.debug( '%s processed %i messages in %i seconds (%f mps) - Throttled %i times' % 
-                        ( thread_name, processed,  mcp_poll_delay, mps, throttled ) )
+                    mps = float(processed) / duration_since_last_poll      
+                    logging.debug( '%s processed %i messages in %f seconds (%f mps) - Throttled %i times' % 
+                        ( thread_name, processed,  duration_since_last_poll, mps, throttled ) )
                 else:
                     # Initialize our thread stats dictionary
                     self.thread_stats[thread_name] = {}
+                    
+                    # Totals for MCP Stats
+                    total_processed += info['processed']
+                    total_throttled += info['throttle_count']
 
                 # Set our thread processed # count for next time
                 self.thread_stats[thread_name]['processed'] = info['processed']   
-                self.thread_stats[thread_name]['throttled'] = info['throttle_count']   
+                self.thread_stats[thread_name]['throttle_count'] = info['throttle_count']   
                 
                 # Check the queue depth for the connection and queue
                 cache_name = '%s-%s' % ( info['connection'], info['queue'] )
@@ -358,9 +374,12 @@ class mcp:
                         # We only want to remove one thread per poll
                         break;
             
-            mps = float(total_processed) / float(mcp_poll_delay)
-            logging.debug('MCP Poll Results: %i total messages processed in %i seconds (%f mps). %i threads throttled themselves %i times.' %
-                           ( total_processed, mcp_poll_delay, mps, len(binding['threads']), total_throttled ) )
+            mps = float(total_processed) / duration_since_last_poll
+            logging.debug('MCP Poll Results: %i total messages processed in %f seconds (%f mps). %i threads throttled themselves %i times.' %
+                           ( total_processed, duration_since_last_poll, mps, len(binding['threads']), total_throttled ) )
+            
+            # Get our last poll time
+            self.last_poll = time.time()
         
     def shutdown(self):
         """ Graceful shutdown of the MCP means shutting down threads too """

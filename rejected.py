@@ -40,8 +40,10 @@ class consumerThread( threading.Thread ):
         self.connect_name = connect_name
         self.locked = False
         self.running = True
+        self.queue_name = None
         self.thread_name = thread_name
         self.messages_processed = 0
+        
         
         # If we have throttle config use it
         self.throttle = False
@@ -147,7 +149,11 @@ class consumerThread( threading.Thread ):
         while self.running == True:
             try:
                 # Get a message
+                start_time = time.time()
                 message =  self.channel.basic_get(self.queue_name)
+                wait_duration = time.time() - start_time
+                if wait_duration > 1:
+                    logging.debug('Waited %f seconds for a message' % wait_duration)
             except AttributeError:
                 # Disconnect and start over
                 logging.info('Attribut Error in %s' % self.thread_name)
@@ -164,7 +170,7 @@ class consumerThread( threading.Thread ):
             # If throttling is turned on and we're ready to start this interval of processing
             # Set the start and count 
             if self.throttle is True and interval_start is None:  
-                interval_start = time.clock()
+                interval_start = time.time()
                 interval_count = 0
             
             # If we got a valid message
@@ -177,12 +183,16 @@ class consumerThread( threading.Thread ):
                 self.channel.basic_ack(message.delivery_tag)
                 
                 # Process the message
+                start_time = time.time()
                 if processor.process(message) is True:
                     self.messages_processed += 1
                 else:
                     # An error occurred
                     # @todo add error counting and exit code here
                     pass
+                wait_duration = time.time() - start_time
+                if wait_duration > 1:
+                    logging.debug('Waited %f seconds for a message' % wait_duration)                
                     
                 # Unlock the thread, safe to shutdown
                 self.unlock()
@@ -194,7 +204,7 @@ class consumerThread( threading.Thread ):
             # If we're throttling
             if self.throttle is True:
                 # Get the duration from when we starting this interval to now
-                duration = time.clock() - interval_start
+                duration = time.time() - interval_start
                 interval_count += 1
                 
                 # If the duration is less than 1 second and we've processed up to (or over) our max
@@ -235,11 +245,19 @@ class mcp:
         self.bindings = []
         self.config = config
         self.shutdown_pending = False
+        self.thread_stats = {}
 
     def poll(self):
         """ Check the Alice daemon for queue depths for each binding """
+        global mcp_poll_delay
         
         logging.debug('MCP Polling')
+        
+        # Cache the monitor queue depth checks
+        cache_lookup = {}
+        
+        # default total count
+        total_processed = 0
         
         # If we're shutting down, no need to do this, can make it take longer
         if self.shutdown_pending is True:
@@ -253,9 +271,30 @@ class mcp:
                 
                 # Get our thread data such as the connection and queue it's using
                 info = thread.get_information()
+              
+                # Check our stats info
+                if thread_name in self.thread_stats:
+                    # Calculate our processed amount                    
+                    processed = info['processed'] - self.thread_stats[thread_name]['processed']  
+                    total_processed += processed
+                    mps = float(processed) / float(mcp_poll_delay)      
+                    logging.debug( '%s processed %i messages in %i seconds (%f mps) %i total' % 
+                        ( thread_name, processed,  mcp_poll_delay, mps, info['processed'] ) )
+                else:
+                    # Initialize our thread stats dictionary
+                    self.thread_stats[thread_name] = {}
+
+                # Set our thread processed # count for next time
+                self.thread_stats[thread_name]['processed'] = info['processed']   
                 
                 # Check the queue depth for the connection and queue
-                data = self.alice.get_queue_depth(info['connection'], info['queue'])
+                cache_name = '%s-%s' % ( info['connection'], info['queue'] )
+                if cache_name in cache_lookup:
+                    data = cache_lookup[cache_name]
+                else:
+                    # Get the value from Alice
+                    data = self.alice.get_queue_depth(info['connection'], info['queue'])
+                    cache_lookup[cache_name] = data
                 
                 # Easier to work with variables
                 queue_depth = int(data['depth'])
@@ -321,7 +360,11 @@ class mcp:
                         
                         # We only want to remove one thread per poll
                         break;
-
+            
+            mps = float(total_processed) / float(mcp_poll_delay)
+            logging.debug('MCP counts %i total messages processed in %i seconds (%f mps)' %
+                           ( total_processed, mcp_poll_delay, mps ) )
+        
     def shutdown(self):
         """ Graceful shutdown of the MCP means shutting down threads too """
         

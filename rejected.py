@@ -5,7 +5,10 @@ Rejected AMQP Consumer Framework
 A multi-threaded consumer application and how!
 
 Created by Gavin M. Roy on 2009-09-10.
-Copyright (c) 2009 Insider Guides, Inc.. All rights reserved.
+@author Gavin M. Roy
+@copyright 2009 Insider Guides, Inc.. All rights reserved.
+@license BSD License
+@since 2009-09-10
 """
 
 import amqplib.client_0_8 as amqp
@@ -18,14 +21,14 @@ import threading
 import time
 import yaml
 
-from monitors import alice
+from monitors import Alice
 
 # Number of seconds to sleep between polls
 mcp_poll_delay = 10
 
 version = '0.1'
 
-class consumerThread( threading.Thread ):
+class ConsumerThread( threading.Thread ):
     """ Consumer Class, Handles the actual AMQP work """
     
     def __init__( self, configuration, thread_name, binding_name, connect_name ):
@@ -170,24 +173,24 @@ class consumerThread( threading.Thread ):
             # Wait on messages
             self.channel.wait()
    
-        logging.debug( 'Exiting consumerThread.run() for %s' % self.thread_name )
+        logging.debug( 'Exiting ConsumerThread.run() for %s' % self.thread_name )
    
     def process(self, message):
         """ Process a message from Rabbit"""
         
         # If we're throttling
-        if self.throttle is True and self.interval_start is None:
+        if self.throttle and self.interval_start is None:
             self.interval_start = time.time()
     
         # Lock while we're processing
         self.lock()
         
         # If we're not auto-acking at the broker level, do so here, but why?
-        if self.auto_ack is False:
+        if not self.auto_ack:
             self.channel.basic_ack( message.delivery_tag )
         
         # Process the message, if it returns True, we're all good
-        if self.processor.process(message) is True:
+        if self.processor.process(message):
             self.messages_processed += 1
         
         # It's returned False, so we should check our our check
@@ -197,7 +200,7 @@ class consumerThread( threading.Thread ):
             self.unlock()
             
             # Do we need to requeue?  If so, lets send it
-            if self.requeue_on_error is True:
+            if self.requeue_on_error:
                 msg = amqp.Message(message.body)
                 msg.properties['delivery_mode'] = 2
                 self.channel.basic_publish( msg,
@@ -217,7 +220,7 @@ class consumerThread( threading.Thread ):
         self.unlock()
     
         # If we're throttling
-        if self.throttle is True:
+        if self.throttle:
         
             # Get the duration from when we starting this interval to now
             self.throttle_duration += time.time() - self.interval_start
@@ -252,7 +255,7 @@ class consumerThread( threading.Thread ):
     def shutdown(self):
         """ Gracefully close the connection """
 
-        if self.running is True:
+        if self.running:
             logging.debug( 'Shutting down consumer "%s"' % self.thread_name )
             self.running = False
             
@@ -264,14 +267,14 @@ class consumerThread( threading.Thread ):
         """ Unlock the thread so MCP can shut us down """
         self.locked = False
     
-class mcp:
-    """ Master Control Process keeps track of threads and threading needs """
+class MasterControlProgram:
+    """ Master Control Program keeps track of threads and threading needs """
 
     def __init__(self, config, options):
         
-        logging.debug( 'Master Control Process Created' )
+        logging.debug( 'Master Control Program Created' )
         
-        self.alice = alice()
+        self.alice = Alice()
         self.bindings = []
         self.config = config
         self.last_poll = None
@@ -298,7 +301,7 @@ class mcp:
             duration_since_last_poll = mcp_poll_delay
         
         # If we're shutting down, no need to do this, can make it take longer
-        if self.shutdown_pending is True:
+        if self.shutdown_pending:
             return
         
         # Loop through each binding
@@ -321,9 +324,12 @@ class mcp:
                     total_processed += processed
                     total_throttled += throttled
                     
-                    mps = float(processed) / duration_since_last_poll      
                     logging.debug( '%s processed %i messages in %f seconds (%f mps) - Throttled %i times' % 
-                        ( thread_name, processed,  duration_since_last_poll, mps, throttled ) )
+                        ( thread_name, 
+                          processed,  
+                          duration_since_last_poll, 
+                          ( float(processed) / duration_since_last_poll ), 
+                          throttled ) )
                 else:
                     # Initialize our thread stats dictionary
                     self.thread_stats[thread_name] = {}
@@ -369,7 +375,7 @@ class mcp:
                                                  len(binding['threads']))
 
                     # Create the new thread making it use self.consume
-                    new_thread = consumerThread( self.config,
+                    new_thread = ConsumerThread( self.config,
                                                  new_thread_name, 
                                                  info['binding'], 
                                                  info['connection'] );
@@ -410,9 +416,12 @@ class mcp:
                         # We only want to remove one thread per poll
                         break;
             
-            mps = float(total_processed) / duration_since_last_poll
             logging.info('MCP Poll Results: %i total messages processed in %f seconds (%f mps). %i threads throttled themselves %i times.' %
-                           ( total_processed, duration_since_last_poll, mps, len(binding['threads']), total_throttled ) )
+                           ( total_processed, 
+                             duration_since_last_poll, 
+                             ( float(total_processed) / duration_since_last_poll ),
+                             len(binding['threads']), 
+                             total_throttled ) )
             
             # Get our last poll time
             self.last_poll = time.time()
@@ -420,7 +429,7 @@ class mcp:
     def shutdown(self):
         """ Graceful shutdown of the MCP means shutting down threads too """
         
-        logging.debug( 'Master Control Process Shutting Down' )
+        logging.debug( 'Master Control Program Shutting Down' )
         
         # Get the thread count
         threads = self.threadCount()
@@ -441,7 +450,7 @@ class mcp:
                     thread.shutdown()
 
                     # If the thread is not locked, shut down the thread
-                    if thread.is_locked() is False:
+                    if not thread.is_locked():
                         del binding['threads'][thread_name]
 
             # Get our updated thread count and only sleep then loop if it's > 0, 
@@ -454,7 +463,7 @@ class mcp:
                     
     def start(self):
         """ Initialize all of the consumer threads when the MCP comes to life """
-        logging.debug( 'Master Control Process Starting Up' )
+        logging.debug( 'Master Control Program Starting Up' )
 
         # Loop through all of the bindings
         for binding_name in self.config['Bindings']:
@@ -473,7 +482,7 @@ class mcp:
                     thread_name = '%s_%s_%i' % ( connect_name, binding_name, i )
 
                     # Create the new thread making it use self.consume
-                    thread = consumerThread( self.config,
+                    thread = ConsumerThread( self.config,
                                              thread_name, 
                                              binding_name, 
                                              connect_name );
@@ -578,13 +587,11 @@ def main():
     
     # Get the logging value from the dictionary
     logging_level = config['Logging']['level']
-    config['Logging']['level'] = logging_levels.get( 
-                                                    config['Logging']['level'], 
-                                                    logging.NOTSET 
-                                                   )
+    config['Logging']['level'] = logging_levels.get( config['Logging']['level'], 
+                                                     logging.NOTSET )
 
     # If the user says verbose overwrite the settings.
-    if options.verbose is True:
+    if options.verbose:
     
         # Set the debugging level to verbose
         config['Logging']['level'] = logging.DEBUG
@@ -613,7 +620,7 @@ def main():
             sys.exit(1)
 
     # Fork our process to detach if not told to stay in foreground
-    if options.foreground is False:
+    if not options.foreground:
         try:
             pid = os.fork()
             if pid > 0:
@@ -658,7 +665,7 @@ def main():
     signal.signal(signal.SIGTERM, shutdown)
 
     # Start the Master Control Program ;-)
-    mcp = mcp(config, options)
+    mcp = MasterControlProgram(config, options)
     
     # Kick off our core connections
     mcp.start()

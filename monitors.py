@@ -17,7 +17,7 @@ import os
 import time
 import urllib
 
-class alice:
+class Alice:
     
     def __init__(self):
         logging.debug('Alice Monitor created')

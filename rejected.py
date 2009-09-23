@@ -104,7 +104,7 @@ class consumerThread( threading.Thread ):
         processor_class = getattr(class_module, class_name)
         logging.info('Creating message processor: %s.%s in %s' % 
                      ( import_name, class_name, self.thread_name ) )
-        processor = processor_class()
+        self.processor = processor_class()
             
         # Connect to the AMQP Broker
         self.connection = self.connect( self.config['Connections'][self.connect_name] )
@@ -142,11 +142,17 @@ class consumerThread( threading.Thread ):
         # Wait for messages
         logging.debug( 'Waiting on messages for "%s"' %  self.thread_name )
 
+
+        self.channel.basic_consume(queue=self.queue_name, no_ack=True,
+                                    callback=self.process, consumer_tag=self.thread_name)
+
         # Initialize our throttle variable if we need it
         interval_start = None
         
         # Loop as long as the thread is running
         while self.running == True:
+            self.channel.wait()
+        """
             try:
                 # Get a message
                 start_time = time.time()
@@ -172,6 +178,7 @@ class consumerThread( threading.Thread ):
             if self.throttle is True and interval_start is None:  
                 interval_start = time.time()
                 interval_count = 0
+            
             
             # If we got a valid message
             if message is not None:
@@ -219,6 +226,16 @@ class consumerThread( threading.Thread ):
                     # Sleep and setup for the next interval
                     time.sleep(sleep_time)
                     interval_start = None
+        """
+   
+    def process(self, message):
+        # Lock while we're processing
+        self.lock()
+        if self.processor.process(message) is True:
+            self.messages_processed += 1
+        # Unlock the thread, safe to shutdown
+        self.unlock()
+    
                     
     def shutdown(self):
         """ Gracefully close the connection """

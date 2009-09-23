@@ -43,7 +43,11 @@ class consumerThread( threading.Thread ):
         self.queue_name = None
         self.thread_name = thread_name
         self.messages_processed = 0
-        
+        self.interval_count = 0
+        self.interval_start = None
+        self.throttle_count = 0
+        self.max_errors = self.config['Bindings'][self.binding_name]['max_errors']
+        self.errors = 0
         
         # If we have throttle config use it
         self.throttle = False
@@ -79,7 +83,8 @@ class consumerThread( threading.Thread ):
                  'connection': self.connect_name, 
                  'binding': self.binding_name,
                  'queue': self.queue_name,
-                 'processed': self.messages_processed
+                 'processed': self.messages_processed,
+                 'throttle_count': self.throttle_count
                }
 
     def is_locked( self ):
@@ -152,90 +157,58 @@ class consumerThread( threading.Thread ):
         # Loop as long as the thread is running
         while self.running == True:
             self.channel.wait()
-        """
-            try:
-                # Get a message
-                start_time = time.time()
-                message =  self.channel.basic_get(self.queue_name)
-                wait_duration = time.time() - start_time
-                if wait_duration > 1:
-                    logging.debug('Waited %f seconds for a message' % wait_duration)
-            except AttributeError:
-                # Disconnect and start over
-                logging.info('Attribut Error in %s' % self.thread_name)
-                self.disconnect()
-                self.run()
-                break
-            except IOError:
-                # Disconnect and start over
-                logging.info('IO Error in %s' % self.thread_name)
-                self.disconnect()
-                self.run()
-                break
-            
-            # If throttling is turned on and we're ready to start this interval of processing
-            # Set the start and count 
-            if self.throttle is True and interval_start is None:  
-                interval_start = time.time()
-                interval_count = 0
-            
-            
-            # If we got a valid message
-            if message is not None:
-                
-                # Lock the thread until we finish
-                self.lock()
-                
-                # Ack the message back to the broker
-                self.channel.basic_ack(message.delivery_tag)
-                
-                # Process the message
-                start_time = time.time()
-                if processor.process(message) is True:
-                    self.messages_processed += 1
-                else:
-                    # An error occurred
-                    # @todo add error counting and exit code here
-                    pass
-                wait_duration = time.time() - start_time
-                if wait_duration > 1:
-                    logging.debug('Waited %f seconds for a message' % wait_duration)                
-                    
-                # Unlock the thread, safe to shutdown
-                self.unlock()
-            else:
-                # Disconnect and start over
-                logging.debug('Received a None message, waiting 1 second')
-                time.sleep(1)
-
-            # If we're throttling
-            if self.throttle is True:
-                # Get the duration from when we starting this interval to now
-                duration = time.time() - interval_start
-                interval_count += 1
-                
-                # If the duration is less than 1 second and we've processed up to (or over) our max
-                if duration <= 1 and interval_count >= self.limit:
-                    
-                    # Figure out how much time to sleep
-                    sleep_time = 1 - duration
-                    
-                    logging.debug('Throttling to %i message(s) per second on %s, waiting %f seconds.' % 
-                                    ( self.limit, self.thread_name, sleep_time ) )
-                    
-                    # Sleep and setup for the next interval
-                    time.sleep(sleep_time)
-                    interval_start = None
-        """
    
     def process(self, message):
+        """ Process a message from Rabbit"""
+        
+        # If we're throttling
+        if self.throttle is True and self.interval_start is None:
+            self.interval_start = time.time()
+    
         # Lock while we're processing
         self.lock()
         if self.processor.process(message) is True:
             self.messages_processed += 1
+        else:
+            self.errors += 1
+            if self.errors >= self.max_errors:
+                logging.error( 'Received %i errors, shutting down thread "%s"' % self.thread_name )
+                self.shutdown()
+                return
+            
         # Unlock the thread, safe to shutdown
         self.unlock()
     
+        # If we're throttling
+        if self.throttle is True:
+        
+            # Get the duration from when we starting this interval to now
+            duration = time.time() - self.interval_start
+            self.interval_count += 1
+            #logging.debug('Duration: %f Interval: %i' % ( duration, self.interval_count ) )
+            # If the duration is less than 1 second and we've processed up to (or over) our max
+            if duration <= 1 and self.interval_count >= self.limit:
+            
+                # Increment our throttle count
+                self.throttle_count += 1
+                
+                # Figure out how much time to sleep
+                sleep_time = 1 - duration
+                
+                #logging.debug('Throttling to %i message(s) per second on %s, waiting %f seconds.' % 
+                #                ( self.limit, self.thread_name, sleep_time ) )
+                
+                # Sleep and setup for the next interval
+                #logging.debug(time.time())
+                time.sleep(sleep_time)
+                #logging.debug(time.time())
+                self.interval_start = None
+                self.interval_count = 0
+                
+            # Else if our duration is more than a second restart our counters
+            elif duration >= 1:
+                self.interval_start = None
+                self.interval_count = 0          
                     
     def shutdown(self):
         """ Gracefully close the connection """
@@ -245,7 +218,8 @@ class consumerThread( threading.Thread ):
             self.running = False
             
         # This is hanging for me at times, non-predictably
-        #self.connection.close()
+        self.channel.close()
+        self.connection.close()
 
     def unlock( self ):
         """ Unlock the thread so MCP can shut us down """
@@ -273,8 +247,9 @@ class mcp:
         # Cache the monitor queue depth checks
         cache_lookup = {}
         
-        # default total count
+        # default total counts
         total_processed = 0
+        total_throttled = 0
         
         # If we're shutting down, no need to do this, can make it take longer
         if self.shutdown_pending is True:
@@ -291,18 +266,25 @@ class mcp:
               
                 # Check our stats info
                 if thread_name in self.thread_stats:
-                    # Calculate our processed amount                    
+                
+                    # Calculate our processed & throttled amount                    
                     processed = info['processed'] - self.thread_stats[thread_name]['processed']  
+                    throttled = info['throttle_count'] - self.thread_stats[thread_name]['throttled']  
+          
+                    # Totals for MCP Stats
                     total_processed += processed
+                    total_throttled += throttled
+                    
                     mps = float(processed) / float(mcp_poll_delay)      
-                    logging.debug( '%s processed %i messages in %i seconds (%f mps) %i total' % 
-                        ( thread_name, processed,  mcp_poll_delay, mps, info['processed'] ) )
+                    logging.debug( '%s processed %i messages in %i seconds (%f mps) - Throttled %i times' % 
+                        ( thread_name, processed,  mcp_poll_delay, mps, throttled ) )
                 else:
                     # Initialize our thread stats dictionary
                     self.thread_stats[thread_name] = {}
 
                 # Set our thread processed # count for next time
                 self.thread_stats[thread_name]['processed'] = info['processed']   
+                self.thread_stats[thread_name]['throttled'] = info['throttle_count']   
                 
                 # Check the queue depth for the connection and queue
                 cache_name = '%s-%s' % ( info['connection'], info['queue'] )
@@ -379,8 +361,8 @@ class mcp:
                         break;
             
             mps = float(total_processed) / float(mcp_poll_delay)
-            logging.debug('MCP counts %i total messages processed in %i seconds (%f mps)' %
-                           ( total_processed, mcp_poll_delay, mps ) )
+            logging.debug('MCP counts %i total messages processed in %i seconds (%f mps) - Throttled %i times' %
+                           ( total_processed, mcp_poll_delay, mps, total_throttled ) )
         
     def shutdown(self):
         """ Graceful shutdown of the MCP means shutting down threads too """

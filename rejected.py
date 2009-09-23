@@ -185,7 +185,7 @@ class consumerThread( threading.Thread ):
             # Get the duration from when we starting this interval to now
             duration = time.time() - self.interval_start
             self.interval_count += 1
-            #logging.debug('Duration: %f Interval: %i' % ( duration, self.interval_count ) )
+
             # If the duration is less than 1 second and we've processed up to (or over) our max
             if duration <= 1 and self.interval_count >= self.limit:
             
@@ -199,9 +199,7 @@ class consumerThread( threading.Thread ):
                 #                ( self.limit, self.thread_name, sleep_time ) )
                 
                 # Sleep and setup for the next interval
-                #logging.debug(time.time())
                 time.sleep(sleep_time)
-                #logging.debug(time.time())
                 self.interval_start = None
                 self.interval_count = 0
                 
@@ -361,8 +359,8 @@ class mcp:
                         break;
             
             mps = float(total_processed) / float(mcp_poll_delay)
-            logging.debug('MCP counts %i total messages processed in %i seconds (%f mps) - Throttled %i times' %
-                           ( total_processed, mcp_poll_delay, mps, total_throttled ) )
+            logging.debug('MCP Poll Results: %i total messages processed in %i seconds (%f mps). %i threads throttled themselves %i times.' %
+                           ( total_processed, mcp_poll_delay, mps, len(binding['threads']), total_throttled ) )
         
     def shutdown(self):
         """ Graceful shutdown of the MCP means shutting down threads too """

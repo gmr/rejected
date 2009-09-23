@@ -21,7 +21,7 @@ import yaml
 from monitors import alice
 
 # Number of seconds to sleep between polls
-mcp_poll_delay = 5
+mcp_poll_delay = 10
 
 version = '0.1'
 

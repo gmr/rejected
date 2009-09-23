@@ -18,7 +18,10 @@ import time
 import urllib
 
 class Alice:
-    
+    """ 
+    Alice is an interface to the awesome Alice service for RabbitMQ 
+    http://github.com/auser/alice/
+    """
     def __init__(self):
         logging.debug('Alice Monitor created')
         self.cache = {}

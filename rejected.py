@@ -672,16 +672,16 @@ def main():
     
     # Loop until someone wants us to stop
     while 1:
+        # Sleep is so much more CPU friendly than pass
+        time.sleep(mcp_poll_delay)
+        
+        # Have the Master Control Process poll
         try:
-            
-            # Sleep is so much more CPU friendly than pass
-            time.sleep(mcp_poll_delay)
-            
             # Check to see if we need to adjust our threads
             if options.single_thread is not True:
                 mcp.poll()
-            
         except (KeyboardInterrupt, SystemExit):
+            # The user has sent a kill or ctrl-c
             shutdown()
         
 # Only execute the code if invoked as an application

@@ -7,7 +7,10 @@ Created by Gavin M. Roy on 2009-09-23.
 Copyright (c) 2009 Insider Guides, Inc. All rights reserved.
 """
 #import rrd
-import tornado
+
+import tornado.httpserver
+import tornado.ioloop
+import tornado.web
 
 class StatStorage:
     

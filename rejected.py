@@ -58,15 +58,14 @@ class ConsumerThread( threading.Thread ):
         
         # If we have throttle config use it
         self.throttle = False
+        self.throttle_count = 0
+        self.throttle_duration = 0
         if binding['consumers'].has_key('throttle'):
             logging.debug( 'Setting message throttle to %i message(s) per second' % 
                             binding['consumers']['throttle'] )
             self.throttle = True
             self.throttle_threshold = binding['consumers']['throttle']
 
-            # Initialize throttling variables
-            self.throttle_count = 0
-            self.throttle_duration = 0
             
         # Init the Thread Object itself
         threading.Thread.__init__(self)  
@@ -260,7 +259,7 @@ class ConsumerThread( threading.Thread ):
             self.running = False
             
         # This is hanging for me at times, non-predictably
-        self.channel.close()
+        #self.channel.close()
         self.connection.close()
 
     def unlock( self ):
@@ -281,6 +280,10 @@ class MasterControlProgram:
         self.shutdown_pending = False
         self.thread_stats = {}
 
+    def get_information(self):
+        """ Return the stats data collected from Poll """
+        pass
+        
     def poll(self):
         """ Check the Alice daemon for queue depths for each binding """
         global mcp_poll_delay
@@ -397,7 +400,7 @@ class MasterControlProgram:
 
                 # Remove a thread
                 for thread_name, thread in binding['threads'].items():
-                    if thread.isLocked() == False:
+                    if not thread.is_locked():
                         logging.info( 'Removed worker thread for connection "%s" binding "%s": %i messages pending, %i threshhold, %i min, %i max, %i consumers active.' % 
                                         ( info['connection'], 
                                           info['binding'], 
@@ -672,14 +675,16 @@ def main():
     
     # Loop until someone wants us to stop
     while 1:
-        # Sleep is so much more CPU friendly than pass
-        time.sleep(mcp_poll_delay)
         
         # Have the Master Control Process poll
         try:
             # Check to see if we need to adjust our threads
             if options.single_thread is not True:
                 mcp.poll()
+
+            # Sleep is so much more CPU friendly than pass
+            time.sleep(mcp_poll_delay)
+
         except (KeyboardInterrupt, SystemExit):
             # The user has sent a kill or ctrl-c
             shutdown()

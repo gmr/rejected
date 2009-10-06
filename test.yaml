@@ -44,7 +44,7 @@ Bindings:
             # Minimum number of consumers for this binding per connection
             min: 1
             # Maximum number of consumers for this binding per connection
-            max: 1
+            max: 10
             # Max number of errors before shutting down the consumer as a safety catch
             max_errors: 5
             # When encountering an error, put it back in the queue?
@@ -52,4 +52,4 @@ Bindings:
             # Number of pending messages before spawning 1 additional consumer up to max
             threshold: 100
             # Number of messages per second to throttle to *per consumer thread*
-            throttle: 2
+            #throttle: 2

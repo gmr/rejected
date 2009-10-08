@@ -10,6 +10,9 @@ Logging:
     # Valid values: debug, info, warning, error, critical
     level: debug
 
+Monitor:
+    enabled: False
+    
 Connections:
     mq07:
         host: mq07
@@ -42,7 +45,7 @@ Bindings:
             # Auto-Ack Messages?
             auto_ack: True
             # Minimum number of consumers for this binding per connection
-            min: 1
+            min: 3
             # Maximum number of consumers for this binding per connection
             max: 10
             # Max number of errors before shutting down the consumer as a safety catch

@@ -12,6 +12,7 @@ Created by Gavin M. Roy on 2009-09-10.
 """
 
 import amqplib.client_0_8 as amqp
+import exceptions
 import logging
 import sys
 import optparse
@@ -21,13 +22,16 @@ import threading
 import time
 import yaml
 
-from monitors import Alice
-
 # Number of seconds to sleep between polls
 mcp_poll_delay = 10
 
 version = '0.1'
+class ConnectionException( exceptions.Exception ):
+    
+    def __str__(self):
+        return "Connection Failed"
 
+    
 class ConsumerThread( threading.Thread ):
     """ Consumer Class, Handles the actual AMQP work """
     
@@ -45,6 +49,7 @@ class ConsumerThread( threading.Thread ):
         self.auto_ack = binding['consumers']['auto_ack']
         self.binding_name = binding_name
         self.connect_name = connect_name
+        self.connection = None
         self.errors = 0
         self.interval_count = 0
         self.interval_start = None
@@ -76,15 +81,19 @@ class ConsumerThread( threading.Thread ):
         logging.debug( 'Creating a new connection for "%s" in thread "%s"' % 
                         ( self.binding_name, self.thread_name ) )
 
-        return amqp.Connection( host ='%s:%s' % ( configuration['host'], configuration['port'] ),
+        try:
+            # Try and create our new AMQP connection
+            connection = amqp.Connection( host ='%s:%s' % ( configuration['host'], configuration['port'] ),
                                 userid = configuration['user'], 
                                 password = configuration['pass'], 
                                 ssl = configuration['ssl'],
                                 virtual_host = configuration['vhost'] )
+            return connection
 
-    def disconnect( self ):
-        """ Disconnect from the AMQP Broker """
-        self.connection.close()
+        # amqp lib is only raising a generic exception which is odd since it has a AMQPConnectionException class
+        except Exception as (errno, strerror):
+            logging.error( 'Connection error #%i: %s' % (errno, strerror) )
+            raise ConnectionException
 
     def get_information(self):
         """ Grab Information from the Thread """
@@ -107,6 +116,83 @@ class ConsumerThread( threading.Thread ):
 
         self.locked = True
 
+    def process(self, message):
+       """ Process a message from Rabbit"""
+       
+       # If we're throttling
+       if self.throttle and self.interval_start is None:
+           self.interval_start = time.time()
+   
+       # Lock while we're processing
+       self.lock()
+       
+       # Process the message, if it returns True, we're all good
+       if self.processor.process(message):
+           self.messages_processed += 1
+
+           # If we're not auto-acking at the broker level, do so here, but why?
+           if not self.auto_ack:
+               self.channel.basic_ack( message.delivery_tag )
+
+       # It's returned False, so we should check our our check
+       # We don't want to have out-of-control errors
+       else:
+           # Unlock
+           self.unlock()
+           
+           # Do we need to requeue?  If so, lets send it
+           if self.requeue_on_error:
+               msg = amqp.Message(message.body)
+               msg.properties['delivery_mode'] = 2
+               self.channel.basic_publish( msg,
+                                           exchange = self.exchange,
+                                           routing_key = self.binding_name )
+           
+           # Keep track of how many errors we've had
+           self.errors += 1
+           
+           # If we've had too many according to the configuration, shutdown
+           if self.errors >= self.max_errors:
+               logging.error( 'Received %i errors, shutting down thread "%s"' % self.thread_name )
+               self.shutdown()
+               return
+           
+       # Unlock the thread, safe to shutdown
+       self.unlock()
+   
+       # If we're throttling
+       if self.throttle:
+       
+           # Get the duration from when we starting this interval to now
+           self.throttle_duration += time.time() - self.interval_start
+           self.interval_count += 1
+
+           # If the duration is less than 1 second and we've processed up to (or over) our max
+           if self.throttle_duration <= 1 and self.interval_count >= self.throttle_threshold:
+           
+               # Increment our throttle count
+               self.throttle_count += 1
+               
+               # Figure out how much time to sleep
+               sleep_time = 1 - self.throttle_duration
+               
+               logging.debug( 'Throttling to %i message(s) per second on %s, waiting %f seconds.' % 
+                              ( self.throttle_threshold, self.thread_name, sleep_time ) )
+               
+               # Sleep and setup for the next interval
+               time.sleep(sleep_time)
+
+               # Reset our counters
+               self.interval_count = 0
+               self.interval_start = None
+               self.throttle_duration = 0
+               
+           # Else if our duration is more than a second restart our counters
+           elif self.throttle_duration >= 1:
+               self.interval_count = 0   
+               self.interval_start = None
+               self.throttle_duration = 0
+               
     def run( self ):
         """ Meat of the queue consumer code """
 
@@ -122,7 +208,11 @@ class ConsumerThread( threading.Thread ):
         self.processor = processor_class()
             
         # Connect to the AMQP Broker
-        self.connection = self.connect( self.config['Connections'][self.connect_name] )
+        try:
+            self.connection = self.connect( self.config['Connections'][self.connect_name] )
+        except ConnectionException:
+            self.running = False
+            return
         
         # Create the Channel
         self.channel = self.connection.channel()
@@ -167,89 +257,15 @@ class ConsumerThread( threading.Thread ):
         interval_start = None
         
         # Loop as long as the thread is running
-        while self.running == True:
+        while self.running:
             
             # Wait on messages
-            self.channel.wait()
-   
+            try:
+                self.channel.wait()
+            except AttributeError, IOError:
+                break
+                
         logging.debug( 'Exiting ConsumerThread.run() for %s' % self.thread_name )
-   
-    def process(self, message):
-        """ Process a message from Rabbit"""
-        
-        # If we're throttling
-        if self.throttle and self.interval_start is None:
-            self.interval_start = time.time()
-    
-        # Lock while we're processing
-        self.lock()
-        
-        # If we're not auto-acking at the broker level, do so here, but why?
-        if not self.auto_ack:
-            self.channel.basic_ack( message.delivery_tag )
-        
-        # Process the message, if it returns True, we're all good
-        if self.processor.process(message):
-            self.messages_processed += 1
-        
-        # It's returned False, so we should check our our check
-        # We don't want to have out-of-control errors
-        else:
-            # Unlock
-            self.unlock()
-            
-            # Do we need to requeue?  If so, lets send it
-            if self.requeue_on_error:
-                msg = amqp.Message(message.body)
-                msg.properties['delivery_mode'] = 2
-                self.channel.basic_publish( msg,
-                                            exchange = self.exchange,
-                                            routing_key = self.binding_name )
-            
-            # Keep track of how many errors we've had
-            self.errors += 1
-            
-            # If we've had too many according to the configuration, shutdown
-            if self.errors >= self.max_errors:
-                logging.error( 'Received %i errors, shutting down thread "%s"' % self.thread_name )
-                self.shutdown()
-                return
-            
-        # Unlock the thread, safe to shutdown
-        self.unlock()
-    
-        # If we're throttling
-        if self.throttle:
-        
-            # Get the duration from when we starting this interval to now
-            self.throttle_duration += time.time() - self.interval_start
-            self.interval_count += 1
-
-            # If the duration is less than 1 second and we've processed up to (or over) our max
-            if self.throttle_duration <= 1 and self.interval_count >= self.throttle_threshold:
-            
-                # Increment our throttle count
-                self.throttle_count += 1
-                
-                # Figure out how much time to sleep
-                sleep_time = 1 - self.throttle_duration
-                
-                logging.debug( 'Throttling to %i message(s) per second on %s, waiting %f seconds.' % 
-                               ( self.throttle_threshold, self.thread_name, sleep_time ) )
-                
-                # Sleep and setup for the next interval
-                time.sleep(sleep_time)
-
-                # Reset our counters
-                self.interval_count = 0
-                self.interval_start = None
-                self.throttle_duration = 0
-                
-            # Else if our duration is more than a second restart our counters
-            elif self.throttle_duration >= 1:
-                self.interval_count = 0   
-                self.interval_start = None
-                self.throttle_duration = 0       
                     
     def shutdown(self):
         """ Gracefully close the connection """
@@ -257,13 +273,26 @@ class ConsumerThread( threading.Thread ):
         if self.running:
             logging.debug( 'Shutting down consumer "%s"' % self.thread_name )
             self.running = False
-            
-        # This is hanging for me at times, non-predictably
+        
+        """ 
+        This is hanging for me at times, non-predictably, I wonder if this has to
+        with the bug in 1.6.0 that was fixed in 1.7.0
+        http://lists.rabbitmq.com/pipermail/rabbitmq-discuss/attachments/20091007/3aaed239/attachment.txt
+         - remove channel closing timeout since it can cause a protocol
+          violation
+        Ideally we'd add this back at some point
+        """
         #self.channel.close()
-        self.connection.close()
+        if self.connection:
+            try:
+                self.connection.close()
+            except IOError:
+                # We're already closed
+                pass
 
     def unlock( self ):
         """ Unlock the thread so MCP can shut us down """
+        
         self.locked = False
     
 class MasterControlProgram:
@@ -273,7 +302,13 @@ class MasterControlProgram:
         
         logging.debug( 'Master Control Program Created' )
         
-        self.alice = Alice()
+        # If we have monitoring enabled for elasic resizing
+        if config['Monitor']['enabled']:
+            from monitors import Alice
+            self.alice = Alice()
+        else:
+            self.alice = None
+            
         self.bindings = []
         self.config = config
         self.last_poll = None
@@ -282,6 +317,7 @@ class MasterControlProgram:
 
     def get_information(self):
         """ Return the stats data collected from Poll """
+        
         pass
         
     def poll(self):
@@ -298,7 +334,7 @@ class MasterControlProgram:
         total_throttled = 0
         
         # Get our delay since last poll
-        if self.last_poll is not None:
+        if self.last_poll:
             duration_since_last_poll = time.time() - self.last_poll
         else:
             duration_since_last_poll = mcp_poll_delay
@@ -306,102 +342,96 @@ class MasterControlProgram:
         # If we're shutting down, no need to do this, can make it take longer
         if self.shutdown_pending:
             return
-        
-        # Loop through each binding
+
+        # Loop through each binding to ensure all our threads are running
+        offset = 0
         for binding in self.bindings:
-            
+        
             # Go through the threads to check the queue depths for each server
             for thread_name, thread in binding['threads'].items():
+            
+                # Make sure the thread is still alive, otherwise remove it and move on
+                if not thread.is_alive():
+                    logging.error( 'Encountered a dead thread: %s, removing it from the stack' % thread_name )
+                    del binding['threads'][thread_name]
+                    continue
+
+
+            # If we don't have any consumer threads, remove the binding
+            if not len(binding['threads']):
+                logging.error( 'We have no working consumers, removing down this binding.' )
+                del self.bindings[offset]
                 
-                # Get our thread data such as the connection and queue it's using
-                info = thread.get_information()
-              
-                # Check our stats info
-                if thread_name in self.thread_stats:
-                
-                    # Calculate our processed & throttled amount                    
-                    processed = info['processed'] - self.thread_stats[thread_name]['processed']  
-                    throttled = info['throttle_count'] - self.thread_stats[thread_name]['throttle_count']  
-                
-                    # Totals for MCP Stats
-                    total_processed += processed
-                    total_throttled += throttled
-                    
-                    logging.debug( '%s processed %i messages in %f seconds (%f mps) - Throttled %i times' % 
-                        ( thread_name, 
-                          processed,  
-                          duration_since_last_poll, 
-                          ( float(processed) / duration_since_last_poll ), 
-                          throttled ) )
-                else:
-                    # Initialize our thread stats dictionary
-                    self.thread_stats[thread_name] = {}
-                    
-                    # Totals for MCP Stats
-                    total_processed += info['processed']
-                    total_throttled += info['throttle_count']
-
-                # Set our thread processed # count for next time
-                self.thread_stats[thread_name]['processed'] = info['processed']   
-                self.thread_stats[thread_name]['throttle_count'] = info['throttle_count']   
-                
-                # Check the queue depth for the connection and queue
-                cache_name = '%s-%s' % ( info['connection'], info['queue'] )
-                if cache_name in cache_lookup:
-                    data = cache_lookup[cache_name]
-                else:
-                    # Get the value from Alice
-                    data = self.alice.get_queue_depth(info['connection'], info['queue'])
-                    cache_lookup[cache_name] = data
-                
-                # Easier to work with variables
-                queue_depth = int(data['depth'])
-                min = self.config['Bindings'][info['binding']]['consumers']['min']
-                max = self.config['Bindings'][info['binding']]['consumers']['max']
-                threshold = self.config['Bindings'][info['binding']]['consumers']['threshold']
-
-                # If our queue depth exceeds the threshold and we haven't maxed out make a new worker
-                if queue_depth > threshold and len(binding['threads']) < max:
-                    
-                    logging.info( 'Spawning worker thread for connection "%s" binding "%s": %i messages pending, %i threshhold, %i min, %i max, %i consumers active.' % 
-                                    ( info['connection'], 
-                                      info['binding'], 
-                                      queue_depth, 
-                                      threshold,
-                                      min,
-                                      max,
-                                      len(binding['threads']) ) )
-
-                    # Create a unique thread name
-                    new_thread_name = '%s_%s_%i' % ( info['connection'], 
-                                                 info['binding'], 
-                                                 len(binding['threads']))
-
-                    # Create the new thread making it use self.consume
-                    new_thread = ConsumerThread( self.config,
-                                                 new_thread_name, 
-                                                 info['binding'], 
-                                                 info['connection'] );
- 
-                    # Add to our dictionary of active threads
-                    binding['threads'][new_thread_name] = new_thread
-
-                    # Set the name of the thread for future use
-                    new_thread.setName(new_thread_name)
-
-                    # Start the thread
-                    new_thread.start()
-                    
-                    # We only want 1 new thread per poll as to not overwhelm the consumer system
-                    break
-
-            # Check if our queue depth is below our threshold and we have more than the min amount
-            if queue_depth < threshold and len(binding['threads']) > min:
-
-                # Remove a thread
+            # Increment our list offset
+            offset += 1
+        
+        # If we have removed all of our bindings because they had no working threads, shutdown         
+        if not len(self.bindings):
+            logging.error( 'We have no working bindings, shutting down.' )
+            shutdown()
+            return
+            
+        # If we're monitoring, then run through here
+        if self.alice:
+            
+            # Loop through each binding
+            offset = 0
+            for binding in self.bindings:
+            
+                # Go through the threads to check the queue depths for each server
                 for thread_name, thread in binding['threads'].items():
-                    if not thread.is_locked():
-                        logging.info( 'Removed worker thread for connection "%s" binding "%s": %i messages pending, %i threshhold, %i min, %i max, %i consumers active.' % 
+                
+                    # Get our thread data such as the connection and queue it's using
+                    info = thread.get_information()
+      
+                    # Check our stats info
+                    if thread_name in self.thread_stats:
+        
+                        # Calculate our processed & throttled amount                    
+                        processed = info['processed'] - self.thread_stats[thread_name]['processed']  
+                        throttled = info['throttle_count'] - self.thread_stats[thread_name]['throttle_count']  
+        
+                        # Totals for MCP Stats
+                        total_processed += processed
+                        total_throttled += throttled
+            
+                        logging.debug( '%s processed %i messages in %f seconds (%f mps) - Throttled %i times' % 
+                            ( thread_name, 
+                              processed,  
+                              duration_since_last_poll, 
+                              ( float(processed) / duration_since_last_poll ), 
+                              throttled ) )
+                    else:
+                        # Initialize our thread stats dictionary
+                        self.thread_stats[thread_name] = {}
+                
+                        # Totals for MCP Stats
+                        total_processed += info['processed']
+                        total_throttled += info['throttle_count']
+
+                    # Set our thread processed # count for next time
+                    self.thread_stats[thread_name]['processed'] = info['processed']   
+                    self.thread_stats[thread_name]['throttle_count'] = info['throttle_count']   
+            
+                    # Check the queue depth for the connection and queue
+                    cache_name = '%s-%s' % ( info['connection'], info['queue'] )
+                    if cache_name in cache_lookup:
+                        data = cache_lookup[cache_name]
+                    else:
+                        # Get the value from Alice
+                        data = self.alice.get_queue_depth(info['connection'], info['queue'])
+                        cache_lookup[cache_name] = data
+
+                    # Easier to work with variables
+                    queue_depth = int(data['depth'])
+                    min = self.config['Bindings'][info['binding']]['consumers']['min']
+                    max = self.config['Bindings'][info['binding']]['consumers']['max']
+                    threshold = self.config['Bindings'][info['binding']]['consumers']['threshold']
+
+                    # If our queue depth exceeds the threshold and we haven't maxed out make a new worker
+                    if queue_depth > threshold and len(binding['threads']) < max:
+                
+                        logging.info( 'Spawning worker thread for connection "%s" binding "%s": %i messages pending, %i threshhold, %i min, %i max, %i consumers active.' % 
                                         ( info['connection'], 
                                           info['binding'], 
                                           queue_depth, 
@@ -409,22 +439,59 @@ class MasterControlProgram:
                                           min,
                                           max,
                                           len(binding['threads']) ) )
-                        
-                        # Shutdown the thread gracefully          
-                        thread.shutdown()
-                        
-                        # Remove it from the stack
-                        del binding['threads'][thread_name]
-                        
-                        # We only want to remove one thread per poll
-                        break;
-            
-            logging.info('MCP Poll Results: %i total messages processed in %f seconds (%f mps). %i threads throttled themselves %i times.' %
-                           ( total_processed, 
-                             duration_since_last_poll, 
-                             ( float(total_processed) / duration_since_last_poll ),
-                             len(binding['threads']), 
-                             total_throttled ) )
+
+                        # Create a unique thread name
+                        new_thread_name = '%s_%s_%i' % ( info['connection'], 
+                                                     info['binding'], 
+                                                     len(binding['threads']))
+
+                        # Create the new thread making it use self.consume
+                        new_thread = ConsumerThread( self.config,
+                                                     new_thread_name, 
+                                                     info['binding'], 
+                                                     info['connection'] )
+
+                        # Add to our dictionary of active threads
+                        binding['threads'][new_thread_name] = new_thread
+
+                        # Start the thread
+                        new_thread.start()
+                
+                        # We only want 1 new thread per poll as to not overwhelm the consumer system
+                        break
+
+                # Check if our queue depth is below our threshold and we have more than the min amount
+                if queue_depth < threshold and len(binding['threads']) > min:
+
+                    # Remove a thread
+                    for thread_name, thread in binding['threads'].items():
+                        if not thread.is_locked():
+                            logging.info( 'Removed worker thread for connection "%s" binding "%s": %i messages pending, %i threshhold, %i min, %i max, %i consumers active.' % 
+                                            ( info['connection'], 
+                                              info['binding'], 
+                                              queue_depth, 
+                                              threshold,
+                                              min,
+                                              max,
+                                              len(binding['threads']) ) )
+                    
+                            # Shutdown the thread gracefully          
+                            thread.shutdown()
+                    
+                            # Remove it from the start
+                            del binding['threads'][thread_name]
+                    
+                            # We only want to remove one thread per poll
+                            break;
+        
+                logging.info('MCP Poll Results for binding #%i: %i total messages processed in %f seconds (%f mps). %i threads throttled themselves %i times.' %
+                               ( offset, 
+                                 total_processed, 
+                                 duration_since_last_poll, 
+                                 ( float(total_processed) / duration_since_last_poll ),
+                                 len(binding['threads']), 
+                                 total_throttled ) )
+                offset += 1
             
             # Get our last poll time
             self.last_poll = time.time()
@@ -441,7 +508,7 @@ class MasterControlProgram:
         self.shutdown_pending = True
         
         # Loop as long as we have running threads
-        while  threads > 0:
+        while threads:
             
             # Loop through all of the bindings and try and shutdown their threads
             for binding in self.bindings:
@@ -460,7 +527,7 @@ class MasterControlProgram:
             threads = self.threadCount()
             
             # If we have any threads left, sleep for a second before trying again
-            if threads > 0:
+            if threads:
                 logging.debug( 'Waiting on %i threads to cleanly shutdown.' % threads )
                 time.sleep(1)
                     
@@ -478,7 +545,7 @@ class MasterControlProgram:
 
             # For each connection, kick off the min consumers and start consuming
             for connect_name in self.config['Bindings'][binding_name]['connections']:
-                for i in range( 0, self.config['Bindings'][binding_name]['consumers']['min'] ):
+                for i in xrange( 0, self.config['Bindings'][binding_name]['consumers']['min'] ):
                     logging.debug( 'Creating worker thread #%i for connection "%s" binding "%s"' % ( i, connect_name, binding_name ) )
 
                     # Create a unique thread name
@@ -490,14 +557,14 @@ class MasterControlProgram:
                                              binding_name, 
                                              connect_name );
 
-                    # Add to our dictionary of active threads
-                    binding['threads'][thread_name] = thread
-
-                    # Set the name of the thread for future use
-                    thread.setName(thread_name)
-
                     # Start the thread
                     thread.start()
+
+                    # Check to see if the thread is alive before adding it to our stack
+                    if thread.is_alive():
+
+                        # Add to our dictionary of active threads
+                        binding['threads'][thread_name] = thread
 
             # Append this binding to our binding stack
             self.bindings.append(binding)
@@ -555,6 +622,11 @@ def main():
                         action="store_true", dest="foreground", default=False,
                         help="Do not fork and stay in foreground")                                                                                                                                 
 
+    parser.add_option("-m", "--monitor",
+                        action="store_true", dest="monitor", 
+                        default=False,
+                        help="Poll Alice for scaling consumer threads.")
+                        
     parser.add_option("-s", "--single",
                         action="store_true", dest="single_thread", 
                         default=False,
@@ -574,9 +646,10 @@ def main():
     try:
             stream = file(options.config, 'r')
             config = yaml.load(stream)
-    except:
+            stream.close()
+            
+    except IOError:
             print "\nError: Invalid or missing configuration file \"%s\"\n" % options.config
-            raise
             sys.exit(1)
     
     # Set logging levels dictionary
@@ -600,12 +673,12 @@ def main():
         config['Logging']['level'] = logging.DEBUG
         
         # If we have specified a file, remove it so logging info goes to stdout
-        if config['Logging'].has_key('filename') == True:
+        if config['Logging'].has_key('filename'):
             del config['Logging']['filename']
 
     else:
         # Build a specific path to our log file
-        if config['Logging'].has_key('filename') == True:
+        if config['Logging'].has_key('filename'):
             config['Logging']['filename'] = "%s/%s/%s" % ( 
                 config['Location']['base'], 
                 config['Location']['logs'], 
@@ -621,6 +694,10 @@ def main():
             print "\nError: Specify the connection and binding when using single threaded.\n"
             parser.print_help()
             sys.exit(1)
+
+    # If our config has monitoring disabled but we enable via cli, enable it
+    if options.monitor and not config['Monitor']['enabled']:
+        config['Monitor']['enabled'] = True
 
     # Fork our process to detach if not told to stay in foreground
     if not options.foreground:

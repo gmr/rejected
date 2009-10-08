@@ -1,4 +1,4 @@
-rejected.py is a multi-threaded AMQP 0.8 consumer framework. It has been developed for and tested against RabbitMQ 1.6.0. For more information, check out the wiki on the main GitHub page: http://github.com/gmr/rejected.py
+rejected.py is a multi-threaded AMQP 0-8 consumer framework. It has been developed for and tested against RabbitMQ 1.6.0. For more information, check out the wiki on the main GitHub page: http://github.com/gmr/rejected.py
 
 Features Include:
 
@@ -11,4 +11,4 @@ Requirements:
 
  * amqplib
  * pyyaml
- * alice
+ * alice (optional)

@@ -26,7 +26,7 @@ class Alice:
         logging.debug('Alice Monitor created')
         self.cache = {}
         
-    def get_queue_depth(self, host = 'localhost', queue_name = 'test' ):
+    def get_queue_depth(self, host = 'localhost', port = '9999', queue_name = 'test' ):
 
         # Check our cache
         cache_name = '%s-%s' % ( host, queue_name )
@@ -39,7 +39,7 @@ class Alice:
                 return self.cache[cache_name]
         
         # Get the queue data by passing in various flags
-        url = 'http://%s:8161/queues/root/name/consumers/messages/messages_ready' % host
+        url = 'http://%s:%s/queues/root/name/consumers/messages/messages_ready' % ( host, port )
         logging.debug('Querying %s' % url)
         response = urllib.urlopen(url)
         data = json.loads(response.read())

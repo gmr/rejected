@@ -421,7 +421,7 @@ class MasterControlProgram:
                         data = cache_lookup[cache_name]
                     else:
                         # Get the value from Alice
-                        data = self.alice.get_queue_depth(info['connection'], info['queue'])
+                        data = self.alice.get_queue_depth(info['connection'], info['port'], info['queue'])
                         cache_lookup[cache_name] = data
 
                     # Easier to work with variables

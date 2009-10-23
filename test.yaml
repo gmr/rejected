@@ -14,13 +14,14 @@ Monitor:
     enabled: False
     
 Connections:
-    mq07:
-        host: mq07
+    localhost:
+        host: localhost
         port: 5672
         user: guest
         pass: guest
         ssl: False
         vhost: /
+        monitor_port: 9999
 
 Exchanges:
     Email:
@@ -38,7 +39,7 @@ Bindings:
     Email.Hotmail:
         import: processors.test_processor
         processor: test_processor 
-        connections: [mq07]
+        connections: [localhost]
         exchange: Email
         queue: Hotmail
         consumers:

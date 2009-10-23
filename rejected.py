@@ -4,11 +4,11 @@ Rejected AMQP Consumer Framework
 
 A multi-threaded consumer application and how!
 
-Created by Gavin M. Roy on 2009-09-10.
+Created by Gavin M. Roy on 2009-09-10
+
 @author Gavin M. Roy
 @copyright 2009 Insider Guides, Inc.. All rights reserved.
-@license BSD License
-@since 2009-09-10
+@license BSD
 """
 
 import amqplib.client_0_8 as amqp
@@ -201,7 +201,21 @@ class ConsumerThread( threading.Thread ):
         # Import our processor class
         import_name = self.config['Bindings'][self.binding_name]['import']
         class_name = self.config['Bindings'][self.binding_name]['processor']
-        class_module = getattr(__import__(import_name), class_name)
+        
+        # Try and import the module
+        try:
+            class_module = getattr(__import__(import_name), class_name)
+        
+        except ImportError:
+            logging.error( 'Could not import the "%s" module.' % import_name )
+            self.running = False
+            return
+
+        except AttributeError:
+            logging.error( 'Did not find the class "%s" in the module "%s".' % ( class_name, import_name ) )
+            self.running = False
+            return
+                
         processor_class = getattr(class_module, class_name)
         logging.info( 'Creating message processor: %s.%s in %s' % 
                       ( import_name, class_name, self.thread_name ) )
@@ -421,7 +435,7 @@ class MasterControlProgram:
                         data = cache_lookup[cache_name]
                     else:
                         # Get the value from Alice
-                        data = self.alice.get_queue_depth(info['connection'], info['port'], info['queue'])
+                        data = self.alice.get_queue_depth(info['connection'], info['monitor_port'], info['queue'])
                         cache_lookup[cache_name] = data
 
                     # Easier to work with variables

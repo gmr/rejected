@@ -11,7 +11,7 @@ Logging:
     level: debug
 
 Monitor:
-    enabled: False
+    enabled: True
     
 Connections:
     localhost:
@@ -24,24 +24,24 @@ Connections:
         monitor_port: 9999
 
 Exchanges:
-    Email:
+    Test:
         auto_delete: False
         durable: True
         type: direct
 
 Queues:
-    Hotmail:
+    TestQueue:
         auto_delete: False
         durable: True
         exclusive: False
 
 Bindings:
-    Email.Hotmail:
+    Test.TestQueue:
         import: processors.test_processor
         processor: test_processor 
         connections: [localhost]
-        exchange: Email
-        queue: Hotmail
+        exchange: Test
+        queue: TestQueue
         consumers:
             # Auto-Ack Messages?
             auto_ack: True

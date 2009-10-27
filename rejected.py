@@ -320,7 +320,7 @@ class MasterControlProgram:
         
         # If we have monitoring enabled for elasic resizing
         if config['Monitor']['enabled']:
-            from monitors import Alice
+            from rejected.monitors import Alice
             self.alice = Alice()
         else:
             self.alice = None

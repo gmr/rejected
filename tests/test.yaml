@@ -14,33 +14,34 @@ Monitor:
     enabled: True
     
 Connections:
-    mq07:
-        host: mq07
+    localhost:
+        host: localhost
         port: 5672
         user: guest
         pass: guest
         ssl: False
         vhost: /
+        monitor_port: 9999
 
 Exchanges:
-    Email:
+    Test:
         auto_delete: False
         durable: True
         type: direct
 
 Queues:
-    Hotmail:
+    TestQueue:
         auto_delete: False
         durable: True
         exclusive: False
 
 Bindings:
-    Email.Hotmail:
+    Test.TestQueue:
         import: processors.test_processor
         processor: test_processor 
-        connections: [mq07]
-        exchange: Email
-        queue: Hotmail
+        connections: [localhost]
+        exchange: Test
+        queue: TestQueue
         consumers:
             # Auto-Ack Messages?
             auto_ack: True
@@ -56,3 +57,4 @@ Bindings:
             threshold: 2 
             # Number of messages per second to throttle to *per consumer thread*
             throttle: 10
+            #throttle: 2

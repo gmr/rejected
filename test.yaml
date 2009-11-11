@@ -1,7 +1,7 @@
 %YAML 1.2
 ---
 Location: 
-    base: /Users/gmr/Source/rejected
+    base: /Users/jonesy/Source/rejected
     logs: logs
     
 Logging:
@@ -11,7 +11,7 @@ Logging:
     level: debug
 
 Monitor:
-    enabled: False
+    enabled: True
     
 Connections:
     mq07:
@@ -53,6 +53,6 @@ Bindings:
             # When encountering an error, put it back in the queue?
             requeue_on_error: False
             # Number of pending messages before spawning 1 additional consumer up to max
-            threshold: 100
+            threshold: 2 
             # Number of messages per second to throttle to *per consumer thread*
-            #throttle: 2
+            throttle: 10

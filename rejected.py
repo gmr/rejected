@@ -153,7 +153,7 @@ class ConsumerThread( threading.Thread ):
            
            # If we've had too many according to the configuration, shutdown
            if self.errors >= self.max_errors:
-               logging.error( 'Received %i errors, shutting down thread "%s"' % self.thread_name )
+               logging.error( 'Received %i errors, shutting down thread "%s"' % (self.errors,self.thread_name) )
                self.shutdown()
                return
            

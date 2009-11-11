@@ -1,7 +1,7 @@
 %YAML 1.2
 ---
 Location: 
-    base: /Users/jonesy/Source/rejected
+    base: /Users/gmr/Source/rejected
     logs: logs
     
 Logging:

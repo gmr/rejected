@@ -23,16 +23,20 @@ class Alice:
     http://github.com/auser/alice/
     """
     def __init__(self):
-        logging.debug('Alice Monitor created')
+        logging.debug('Alice: Monitor created')
         self.cache = {}
         
     def get_queue_depth(self, host = 'localhost', port = '9999', queue_name = 'test' ):
+
+        # If port is coming in as None, use the default
+        if port is None:
+            port = '9999'
 
         # Check our cache
         cache_name = '%s-%s' % ( host, queue_name )
         if cache_name in self.cache:
             if time.time() - self.cache[cache_name]['timestamp'] < 10:
-                logging.debug( 'Returning cached values for "%s": consumers: %i, depth: %i' %
+                logging.debug( 'Alice: Returning cached values for "%s": consumers: %i, depth: %i' %
                                ( cache_name, 
                                  self.cache[cache_name]['consumers'], 
                                  self.cache[cache_name]['depth'] ) ) 
@@ -40,7 +44,7 @@ class Alice:
         
         # Get the queue data by passing in various flags
         url = 'http://%s:%s/queues/root/name/consumers/messages/messages_ready' % ( host, port )
-        logging.debug('Querying %s' % url)
+        logging.debug('Alice: Querying %s' % url)
         response = urllib.urlopen(url)
         data = json.loads(response.read())
         
@@ -48,7 +52,7 @@ class Alice:
         for queue in data['queues']:
             if queue['name'] == queue_name:
                 self.cache[cache_name] = {'timestamp': time.time(), 'consumers': int(queue['consumers']), 'depth': int(queue['messages']) }
-                logging.debug('Caching and returning values for "%s": consumers: %i, depth: %i' % 
+                logging.debug('Alice: Caching and returning values for "%s": consumers: %i, depth: %i' % 
                                ( cache_name, 
                                  self.cache[cache_name]['consumers'], 
                                  self.cache[cache_name]['depth'] ) )

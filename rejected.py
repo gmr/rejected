@@ -4,12 +4,21 @@ Rejected AMQP Consumer Framework
 
 A multi-threaded consumer application and how!
 
-Created by Gavin M. Roy on 2009-09-10
-
-@author Gavin M. Roy
-@copyright 2009 Insider Guides, Inc.. All rights reserved.
-@license BSD
+Copyright (c)2009,  Insider Guides, Inc.
+All rights reserved.
+ 
+Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
+ 
+Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.
+Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution.
+Neither the name of the Insider Guides, Inc. nor the names of its contributors may be used to endorse or promote products derived from this software without specific prior written permission.
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 """
+
+__author__  = "Gavin M. Roy"
+__email__   = "gmr@myyearbook.com"
+__date__    = "2009-09-10"
+__version__ = 0.2
 
 import amqplib.client_0_8 as amqp
 import exceptions
@@ -25,13 +34,11 @@ import yaml
 # Number of seconds to sleep between polls
 mcp_poll_delay = 10
 
-version = '0.1'
 class ConnectionException( exceptions.Exception ):
     
     def __str__(self):
         return "Connection Failed"
 
-    
 class ConsumerThread( threading.Thread ):
     """ Consumer Class, Handles the actual AMQP work """
     
@@ -496,7 +503,7 @@ class MasterControlProgram:
                 # Check if our queue depth is below our threshold and we have more than the min amount
                 if queue_depth < threshold and len(binding['threads']) > min_threads:
 
-                    logging.info( 'MCP: Removing worker thread for connection "%s" binding "%s": %i messages pending, %i threshhold, %i min, %i max, %i threads active.' % 
+                    logging.info( 'MCP: Removing worker thread for connection "%s" binding "%s": %i messages pending, %i threshold, %i min, %i max, %i threads active.' % 
                                     ( info['connection'], 
                                       info['binding'], 
                                       queue_depth, 
@@ -628,7 +635,7 @@ def main():
     global mcp, mcp_poll_delay
     
     usage = "usage: %prog [options]"
-    version_string = "%%prog %s" % version
+    version_string = "%%prog %s" % __version__
     description = "rejected.py consumer daemon"
     
     # Create our parser and setup our command line options

@@ -715,14 +715,29 @@ def main():
     else:
         # Build a specific path to our log file
         if config['Logging'].has_key('filename'):
-            config['Logging']['filename'] = "%s/%s/%s" % ( 
-                config['Location']['base'], 
-                config['Location']['logs'], 
-                config['Logging']['filename'] )
+            config['Logging']['filename'] = os.path.join( os.path.dirname(__file__), 
+                                                          config['Logging']['directory'], 
+                                                          config['Logging']['filename'] )
         
     # Pass in our logging config 
     logging.basicConfig(**config['Logging'])
     logging.info('Log level set to %s' % logging_level)
+
+    # If we have supported handler
+    if config['Logging'].has_key('handler'):
+        
+        # If we want to syslog
+        if config['Logging']['handler'] == 'syslog':
+
+            from logging.handlers import SysLogHandler
+
+            # Create the syslog handler            
+            logging_handler = SysLogHandler( address='/dev/log', facility = SysLogHandler.LOG_LOCAL6 )
+            
+            # Add the handler
+            logger = logging.getLogger()
+            logger.addHandler(logging_handler)
+            logger.debug('Sending message')
 
     # Make sure if we specified single thread that we specified connection and binding
     if options.single_thread == True:
@@ -762,7 +777,7 @@ def main():
         logging.debug( 'rejected.py has forked into the background.' )
         
         # Detach from parent environment
-        os.chdir(config['Location']['base']) 
+        os.chdir( os.path.dirname(__file__) ) 
         os.setsid()
         os.umask(0) 
 
@@ -770,12 +785,10 @@ def main():
         sys.stdin.close()
         
         # Redirect stdout, stderr
-        sys.stdout = open('%s/%s/stdout.log' % ( config['Location']['base'], 
-                                                 config['Location']['logs']), 
-                                                 'w')
-        sys.stderr = open('%s/%s/stderr.log' % ( config['Location']['base'], 
-                                                 config['Location']['logs']), 
-                                                 'w')
+        sys.stdout = open(os.path.join(os.path.dirname(__file__), 
+                          config['Logging']['directory'], "stdout.log"), 'w')
+        sys.stderr = open(os.path.join(os.path.dirname(__file__), 
+                          config['Logging']['directory'], "stderr.log"), 'w')
                                                  
     # Set our signal handler so we can gracefully shutdown
     signal.signal(signal.SIGTERM, shutdown)

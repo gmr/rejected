@@ -4,7 +4,7 @@ Rejected AMQP Consumer Framework
 
 A multi-threaded consumer application and how!
 
-Copyright (c)2009,  Insider Guides, Inc.
+Copyright (c) 2009,  Insider Guides, Inc.
 All rights reserved.
  
 Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
@@ -33,6 +33,9 @@ import yaml
 
 # Number of seconds to sleep between polls
 mcp_poll_delay = 10
+
+# Process name will be overriden by the config file
+process = 'Unknown'
 
 class ConnectionException( exceptions.Exception ):
     
@@ -401,7 +404,7 @@ class MasterControlProgram:
 
             # If we don't have any consumer threads, remove the binding
             if not len(binding['threads']):
-                logging.error( 'We have no working consumers, removing down this binding.' )
+                logging.error( 'MCP: We have no working consumers, removing down this binding.' )
                 del self.bindings[offset]
                 
             # Increment our list offset
@@ -623,16 +626,16 @@ class MasterControlProgram:
 
 def shutdown(signum = 0, frame = None):
     """ Application Wide Graceful Shutdown """
-    global mcp
+    global mcp, process
     
-    logging.info( 'Graceful shutdown initiated.' )
+    logging.info( 'Graceful shutdown of rejected.py running "%s" initiated.' % process )
     mcp.shutdown()
-    logging.debug( 'Graceful shutdown complete' )
+    logging.debug( 'Graceful shutdown of rejected.py running "%s" complete' % process )
     os._exit(signum)
 
 def main():
     """ Main Application Handler """
-    global mcp, mcp_poll_delay
+    global mcp, mcp_poll_delay, process
     
     usage = "usage: %prog [options]"
     version_string = "%%prog %s" % __version__
@@ -685,7 +688,13 @@ def main():
     
     # Parse our options and arguments                                                                        
     options, args = parser.parse_args()
-     
+    
+    # Get the config file only for logging options
+    parts = options.config.split('/')
+    process = parts[len(parts) - 1]
+    parts = process.split('.')
+    process = parts[0]
+    
     # Load the Configuration file
     try:
             stream = file(options.config, 'r')
@@ -814,7 +823,7 @@ def main():
     if do_poll:
         if config['Monitor'].has_key('interval'):
             mcp_poll_delay = config['Monitor']['interval']
-            logging.debug('Set mcp_poll_delay to %i seconds.' % mcp_poll_delay)
+            logging.debug('rejected.py: Set mcp_poll_delay to %i seconds.' % mcp_poll_delay)
 
     while 1:
         
@@ -823,7 +832,7 @@ def main():
             # Check to see if we need to adjust our threads
             if do_poll:
                 mcp.poll()
-                logging.debug('Thread Count: %i' % threading.active_count())
+                logging.debug('rejected.py:Thread Count: %i' % threading.active_count())
 
             # Sleep is so much more CPU friendly than pass
             time.sleep(mcp_poll_delay)

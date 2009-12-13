@@ -215,11 +215,12 @@ class ConsumerThread( threading.Thread ):
         processor_class = getattr(processor_module.__dict__[file_parts[len(file_parts)-1]], class_name)
         logging.info( '%s: Creating message processor: %s.%s' % 
                       ( self.getName(), import_name, class_name ) )
-        self.processor = processor_class()
-
-        # If there is a config section for the binding, then try and pass it in
-#        if self.config['Bindings'][self.binding_name].has_key(config):
-#            if 
+                      
+        # If we have a config, pass it in to the constructor                      
+        if self.config['Bindings'][self.binding_name].has_key('config'):
+            self.processor = processor_class(self.config['Bindings'][self.binding_name]['config'])
+        else:
+            self.processor = processor_class()
             
         # Assign the port to monitor the queues on
         self.monitor_port = self.config['Connections'][self.connect_name]['monitor_port']

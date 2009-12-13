@@ -384,12 +384,12 @@ class MasterControlProgram:
             
                 # Make sure the thread is still alive, otherwise remove it and move on
                 if not binding['threads'][x].isAlive():
-                    logging.error( 'MCP: Encountered a dead thread "%s"' % thread.getName() )
+                    logging.error( 'MCP: Encountered a dead thread, removing.' )
                     dead_threads.append(x)
             
             # Remove dead threads
             for list_offset in dead_threads:
-                logging.error( 'MCP: Removing the dead thread %s from the stack' % thread.getName() )
+                logging.error( 'MCP: Removing the dead thread from the stack' )
                 binding['threads'].pop(list_offset)
 
             # If we don't have any consumer threads, remove the binding

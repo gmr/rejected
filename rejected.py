@@ -30,6 +30,7 @@ import signal
 import threading
 import time
 import yaml
+import zlib
 
 # Number of seconds to sleep between polls
 mcp_poll_delay = 10
@@ -58,6 +59,10 @@ class ConsumerThread( threading.Thread ):
         # Initialize object wide variables
         self.auto_ack = binding['consumers']['auto_ack']
         self.binding_name = binding_name
+        if binding.has_key('compressed'):
+            self.compressed = binding['compressed']
+        else:
+            self.compressed = False
         self.connect_name = connect_name
         self.connection = None
         self.errors = 0
@@ -128,26 +133,30 @@ class ConsumerThread( threading.Thread ):
         self.locked = True
 
     def process(self, message):
-       """ Process a message from Rabbit"""
-       
-       # If we're throttling
-       if self.throttle and self.interval_start is None:
+        """ Process a message from Rabbit"""
+        
+        # If we're throttling
+        if self.throttle and self.interval_start is None:
            self.interval_start = time.time()
-   
-       # Lock while we're processing
-       self.lock()
-       
-       # Process the message, if it returns True, we're all good
-       if self.processor.process(message):
+        
+        # Lock while we're processing
+        self.lock()
+        
+        # If we're compressed in message body, decompress it
+        if self.compressed:
+            message.body = zlib.decompress(message.body)
+        
+        # Process the message, if it returns True, we're all good
+        if self.processor.process(message):
            self.messages_processed += 1
-
+        
            # If we're not auto-acking at the broker level, do so here, but why?
            if not self.auto_ack:
                self.channel.basic_ack( message.delivery_tag )
-
-       # It's returned False, so we should check our our check
-       # We don't want to have out-of-control errors
-       else:
+        
+        # It's returned False, so we should check our our check
+        # We don't want to have out-of-control errors
+        else:
            # Unlock
            self.unlock()
            
@@ -168,16 +177,16 @@ class ConsumerThread( threading.Thread ):
                self.shutdown()
                return
            
-       # Unlock the thread, safe to shutdown
-       self.unlock()
-   
-       # If we're throttling
-       if self.throttle:
-       
+        # Unlock the thread, safe to shutdown
+        self.unlock()
+        
+        # If we're throttling
+        if self.throttle:
+        
            # Get the duration from when we starting this interval to now
            self.throttle_duration += time.time() - self.interval_start
            self.interval_count += 1
-
+        
            # If the duration is less than 1 second and we've processed up to (or over) our max
            if self.throttle_duration <= 1 and self.interval_count >= self.throttle_threshold:
            
@@ -192,7 +201,7 @@ class ConsumerThread( threading.Thread ):
                
                # Sleep and setup for the next interval
                time.sleep(sleep_time)
-
+        
                # Reset our counters
                self.interval_count = 0
                self.interval_start = None

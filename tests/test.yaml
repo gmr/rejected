@@ -9,7 +9,7 @@ Logging:
     #handler: syslog
     
 Monitor:
-    enabled: True
+    enabled: False
     # Number of seconds to poll at
     interval: 30
     
@@ -42,13 +42,14 @@ Bindings:
         connections: [localhost]
         exchange: Test
         queue: TestQueue
+        compressed: True
         consumers:
             # Auto-Ack Messages?
             auto_ack: True
             # Minimum number of consumers for this binding per connection
-            min: 3
+            min: 1
             # Maximum number of consumers for this binding per connection
-            max: 10
+            max: 1
             # Max number of errors before shutting down the consumer as a safety catch
             max_errors: 5
             # When encountering an error, put it back in the queue?

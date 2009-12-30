@@ -299,10 +299,13 @@ class ConsumerThread( threading.Thread ):
             # Wait on messages
             try:
                 self.channel.wait()
-            except AttributeError, IOError:
+            except IOError:
+                logging.error('%s: IOError received' % self.getName() )
+            except AttributeError:
+                logging.error('%s: AttributeError received' % self.getName() )
                 break
                 
-        logging.debug( '%s: Exiting ConsumerThread.run()' % self.getName() )
+        logging.info( '%s: Exiting ConsumerThread.run()' % self.getName() )
                     
     def shutdown(self):
         """ Gracefully close the connection """

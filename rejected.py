@@ -144,7 +144,10 @@ class ConsumerThread( threading.Thread ):
         
         # If we're compressed in message body, decompress it
         if self.compressed:
-            message.body = zlib.decompress(message.body)
+            try:
+            	message.body = zlib.decompress(message.body)
+	    except:
+		logging.error('Invalid zlib compressed message.body')
         
         # Process the message, if it returns True, we're all good
         if self.processor.process(message):

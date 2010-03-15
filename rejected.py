@@ -144,38 +144,62 @@ class ConsumerThread( threading.Thread ):
         
         # If we're compressed in message body, decompress it
         if self.compressed:
-            message.body = zlib.decompress(message.body)
+            try:
+            	message.body = zlib.decompress(message.body)
+            except:
+                logging.warning('Invalid zlib compressed message.body')
         
         # Process the message, if it returns True, we're all good
-        if self.processor.process(message):
-           self.messages_processed += 1
+        try:
+            if self.processor.process(message):
+                self.messages_processed += 1
         
-           # If we're not auto-acking at the broker level, do so here, but why?
-           if not self.auto_ack:
-               self.channel.basic_ack( message.delivery_tag )
+                # If we're not auto-acking at the broker level, do so here, but why?
+                if not self.auto_ack:
+                    self.channel.basic_ack( message.delivery_tag )
         
-        # It's returned False, so we should check our our check
-        # We don't want to have out-of-control errors
-        else:
-           # Unlock
-           self.unlock()
-           
-           # Do we need to requeue?  If so, lets send it
-           if self.requeue_on_error:
+            # It's returned False, so we should check our our check
+            # We don't want to have out-of-control errors
+            else:
+            
+               # Unlock
+               self.unlock()
+               
+               # Do we need to requeue?  If so, lets send it
+               if self.requeue_on_error:
+                   msg = amqp.Message(message.body)
+                   msg.properties['delivery_mode'] = 2
+                   self.channel.basic_publish( msg,
+                                               exchange = self.exchange,
+                                               routing_key = self.binding_name )
+               
+               # Keep track of how many errors we've had
+               self.errors += 1
+               
+        except Exception as e:
+            logging.critical('ConsumerThread: Processor threw an uncaught exception')
+            logging.critical('ConsumerThread: %s' % str(e))
+             
+            # Unlock
+            self.unlock()
+            
+            # Do we need to requeue?  If so, lets send it
+            if self.requeue_on_error:
                msg = amqp.Message(message.body)
                msg.properties['delivery_mode'] = 2
                self.channel.basic_publish( msg,
                                            exchange = self.exchange,
                                            routing_key = self.binding_name )
            
-           # Keep track of how many errors we've had
-           self.errors += 1
-           
-           # If we've had too many according to the configuration, shutdown
-           if self.errors >= self.max_errors:
-               logging.error( 'Received %i errors, shutting down thread "%s"' % ( self.errors, self.getName() ) )
-               self.shutdown()
-               return
+            # Keep track of how many errors we've had
+            self.errors += 1
+        
+            # If we've had too many according to the configuration, shutdown
+            if self.errors >= self.max_errors:
+                logging.error( 'Received %i errors, shutting down thread "%s"' % ( self.errors, self.getName() ) )
+                self.shutdown()
+                return
+        
            
         # Unlock the thread, safe to shutdown
         self.unlock()
@@ -299,10 +323,13 @@ class ConsumerThread( threading.Thread ):
             # Wait on messages
             try:
                 self.channel.wait()
-            except AttributeError, IOError:
+            except IOError:
+                logging.error('%s: IOError received' % self.getName() )
+            except AttributeError:
+                logging.error('%s: AttributeError received' % self.getName() )
                 break
                 
-        logging.debug( '%s: Exiting ConsumerThread.run()' % self.getName() )
+        logging.info( '%s: Exiting ConsumerThread.run()' % self.getName() )
                     
     def shutdown(self):
         """ Gracefully close the connection """

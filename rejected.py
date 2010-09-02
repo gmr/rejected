@@ -29,6 +29,7 @@ import os
 import signal
 import threading
 import time
+import traceback
 import yaml
 import zlib
 
@@ -177,9 +178,13 @@ class ConsumerThread( threading.Thread ):
                self.errors += 1
                
         except Exception as e:
+            exc_type, exc_value, exc_traceback = sys.exc_info()
+            formatted_lines = traceback.format_exc().splitlines()      
             logging.critical('ConsumerThread: Processor threw an uncaught exception')
             logging.critical('ConsumerThread: %s' % str(e))
-             
+            logging.critical('ConsumerThread: %s' % formatted_lines[3].strip())
+            logging.critical('ConsumerThread: %s' % formatted_lines[4].strip())
+                    
             # Unlock
             self.unlock()
             

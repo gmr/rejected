@@ -79,23 +79,26 @@ class Rabbit(object):
         else:
             return None
 
-    def get_queue_depth(self, host = 'localhost', port = '55672', vhost = '%2f', queue_name = 'test'):
+    def get_queue_depth(self, host = 'localhost', port = '55672', queue_name = 'test', vhost = '%2f'):
         cache_name = '%s-%s' % (host, queue_name)
         cache_val = self.check_cache(cache_name)
         if cache_val is not None:
             return  cache_val
 
-        url = 'http://%s:%s/api/queues/%s/%s' % (host, port, vhost, queue_name)
+        url = 'http://guest:guest@%s:%s/api/queues/%s/%s' % (host, port, vhost, queue_name)
         logging.debug('Rabbit: Querying %s' % url)
         try:
             response = urllib.urlopen(url)
             data = json.loads(response.read())
+            logging.debug("DATA: %s" % data)
         except Exception as out:
             logging.debug("Error or no data from API")
             return { 'consumers': 0, 'depth': 0 }
 
-        self.cache[cache_name] = {'timestamp': time.time(), 'consumers': int(data['consumers']),
-                                    'depth': int(data['messages_ready'])}
+        self.cache[cache_name] = {'timestamp': time.time(), 
+                                  'consumers': int(data['consumers']),
+                                  'depth': int(data['messages_ready'])
+                                 }
         logging.debug('Rabbit: Caching and returning values for "%s": consumers: %i, depth: %i' %
                       ( cache_name,
                         self.cache[cache_name]['consumers'],

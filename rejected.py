@@ -386,8 +386,14 @@ class MasterControlProgram:
         
         # If we have monitoring enabled for elasic resizing
         if config['Monitor']['enabled']:
-            from rejected.monitors import Alice
-            self.alice = Alice()
+            #TODO: Make this more generic. Just import whatever the user puts here dynamically.
+            #TODO: Replace 'alice' with 'monitor' or something throughout. 
+            if config['Monitor']['module'] == 'Rabbit':
+                from rejected.monitors import Rabbit
+                self.alice = Rabbit()
+            else:
+                from rejected.monitors import Alice
+                self.alice = Alice()
         else:
             self.alice = None
             

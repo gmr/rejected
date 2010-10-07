@@ -35,6 +35,7 @@ import zlib
 
 # Number of seconds to sleep between polls
 mcp_poll_delay = 10
+is_quitting = False
 
 # Process name will be overriden by the config file
 process = 'Unknown'
@@ -326,6 +327,9 @@ class ConsumerThread( threading.Thread ):
         while self.running:
             
             # Wait on messages
+            if is_quitting:
+                logging.info('Not wait()ing because is_quitting is set!')
+                break
             try:
                 self.channel.wait()
             except IOError:
@@ -333,6 +337,8 @@ class ConsumerThread( threading.Thread ):
             except AttributeError:
                 logging.error('%s: AttributeError received' % self.getName() )
                 break
+            except TypeError:
+                logging.error('%s: TypeError received' % self.getName() )
                 
         logging.info( '%s: Exiting ConsumerThread.run()' % self.getName() )
                     
@@ -362,6 +368,9 @@ class ConsumerThread( threading.Thread ):
                 logging.debug('%s: AMQP connection closed' % self.getName())
             except IOError, e:
                 # We're already closed
+                logging.debug('%s: Error closing the AMQP connection.' % self.getName())
+            except TypeError, e:
+                # Bug
                 logging.debug('%s: Error closing the AMQP connection.' % self.getName())
 
         logging.debug('%s: Shutting down processor' % self.getName())
@@ -674,7 +683,8 @@ class MasterControlProgram:
 def shutdown(signum = 0, frame = None):
     """ Application Wide Graceful Shutdown """
     global mcp, process
-    
+    is_quitting = True
+
     logging.info( 'Graceful shutdown of rejected.py running "%s" initiated.' % process )
     mcp.shutdown()
     logging.debug( 'Graceful shutdown of rejected.py running "%s" complete' % process )

@@ -311,6 +311,13 @@ class ConsumerThread( threading.Thread ):
                                  exchange = self.exchange,
                                  routing_key = self.binding_name )
 
+        # Allow the processor to use additional binding keys
+        if "BindingKeys" in self.config['Bindings'][self.binding_name]:
+            for key in self.config['Bindings'][self.binding_name]['BindingKeys']:
+                self.channel.queue_bind( queue = self.queue_name, 
+                                         exchange = self.exchange,
+                                         routing_key = key )
+
         # Wait for messages
         logging.debug( '%s: Waiting on messages' %  self.getName() )
 

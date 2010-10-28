@@ -88,6 +88,7 @@ class ConsumerThread( threading.Thread ):
             self.throttle = True
             self.throttle_threshold = binding['consumers']['throttle']
 
+        self.total_wait = 0.0
             
         # Init the Thread Object itself
         threading.Thread.__init__(self)  
@@ -329,7 +330,7 @@ class ConsumerThread( threading.Thread ):
 
         # Initialize our throttle variable if we need it
         interval_start = None
-        
+
         # Loop as long as the thread is running
         while self.running:
             
@@ -338,7 +339,11 @@ class ConsumerThread( threading.Thread ):
                 logging.info('Not wait()ing because is_quitting is set!')
                 break
             try:
+                start = time.time()
                 self.channel.wait()
+                dur = (time.time() - start) * 1000.0
+                self.total_wait += dur
+                # logging.debug('%s: %.3fms in wait()', self.getName(), dur)
             except IOError:
                 logging.error('%s: IOError received' % self.getName() )
             except AttributeError:
@@ -348,7 +353,7 @@ class ConsumerThread( threading.Thread ):
                 logging.error('%s: TypeError received' % self.getName() )
                 
         logging.info( '%s: Exiting ConsumerThread.run()' % self.getName() )
-                    
+
     def shutdown(self):
         """ Gracefully close the connection """
 
@@ -485,6 +490,7 @@ class MasterControlProgram:
                 # default total counts
                 total_processed = 0
                 total_throttled = 0
+                total_wait = 0.0
 
                 # Go through the threads to check the queue depths for each server
                 for thread in binding['threads']:
@@ -494,6 +500,9 @@ class MasterControlProgram:
                 
                     # Stats are keyed on thread name
                     thread_name = thread.getName()
+                    # To calculate average time waiting
+                    total_wait += thread.total_wait
+                    thread.total_wait = 0.0
 
                     # Check our stats info
                     if thread_name in self.thread_stats:
@@ -506,12 +515,14 @@ class MasterControlProgram:
                         total_processed += processed
                         total_throttled += throttled
             
-                        logging.debug( '%s processed %i messages and throttled %i messages in %.2f seconds at a rate of %.2f mps.' % 
+                        logging.debug( '%s processed %i messages and throttled %i messages in %.2f seconds at a rate of %.2f mps; total wait time: %.2fms' % 
                             ( thread_name, 
                               processed,  
                               throttled,
                               duration_since_last_poll, 
-                              ( float(processed) / duration_since_last_poll ) ) )
+                              ( float(processed) / duration_since_last_poll ),
+                              total_wait
+                            ))
                     else:
                         # Initialize our thread stats dictionary
                         self.thread_stats[thread_name] = {}
@@ -591,11 +602,13 @@ class MasterControlProgram:
                     # We only want to remove one thread per poll
                     break;
         
-                logging.info('MCP: Binding #%i processed %i total messages in %.2f seconds at a rate of %.2f mps.' %
+                logging.info('MCP: Binding #%i processed %i total messages in %.2f seconds at a rate of %.2f mps.  Average wait = %.2fms' %
                                ( offset, 
                                  total_processed, 
                                  duration_since_last_poll, 
-                                 ( float(total_processed) / duration_since_last_poll ) ) )
+                                 ( float(total_processed) / duration_since_last_poll ),
+                                 (-1.0 if total_processed == 0 else (total_wait / total_processed))
+                               ))
                                  
                 if len(binding['threads']) > 1:
                     logging.info('MCP: Binding #%i has %i threads which throttled themselves %i times.' % 
@@ -686,6 +699,25 @@ class MasterControlProgram:
         for binding in self.bindings:
             count += len(binding['threads'])
         return count
+
+def sighandler(signum, frame):
+    global mcp, process
+
+    if signum == signal.SIGUSR1:
+        level = logging.INFO
+    elif signum == signal.SIGUSR2:
+        level = logging.DEBUG
+    else:
+        level = logging.WARNING
+
+    logger = logging.getLogger()
+
+    logger.setLevel(logging.INFO)
+    logging.info('rejected: *** Got signal %s. Setting level to %s.',
+                 signum, level)
+
+    logger.setLevel(level)
+    return True
 
 def shutdown(signum = 0, frame = None):
     """ Application Wide Graceful Shutdown """
@@ -873,6 +905,9 @@ def main():
                                                  
     # Set our signal handler so we can gracefully shutdown
     signal.signal(signal.SIGTERM, shutdown)
+    signal.signal(signal.SIGHUP, sighandler)
+    signal.signal(signal.SIGUSR1, sighandler)
+    signal.signal(signal.SIGUSR2, sighandler)
 
     # Start the Master Control Program ;-)
     mcp = MasterControlProgram(config, options)

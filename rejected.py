@@ -433,10 +433,6 @@ class MasterControlProgram:
         # Cache the monitor queue depth checks
         cache_lookup = {}
         
-        # default total counts
-        total_processed = 0
-        total_throttled = 0
-        
         # Get our delay since last poll
         if self.last_poll:
             duration_since_last_poll = time.time() - self.last_poll
@@ -485,7 +481,11 @@ class MasterControlProgram:
             # Loop through each binding
             offset = 0
             for binding in self.bindings:
-            
+
+                # default total counts
+                total_processed = 0
+                total_throttled = 0
+
                 # Go through the threads to check the queue depths for each server
                 for thread in binding['threads']:
                 

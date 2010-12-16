@@ -700,8 +700,28 @@ class MasterControlProgram:
             count += len(binding['threads'])
         return count
 
+def show_frames(logger):
+    for threadId, stack in sys._current_frames().items():
+        logger.info("# ThreadID: %s", threadId)
+        for filename, lineno, name, line in traceback.extract_stack(stack):
+            logger.info('  File: "%s", line %d, in %s', filename, lineno, name)
+            if line:
+                logger.info("    %s", line.strip())
+
 def sighandler(signum, frame):
     global mcp, process
+
+    if signum == signal.SIGQUIT:
+        logger = logging.getLogger("framedump")
+        logger.setLevel(logging.INFO)
+        logger.info('Caught SIGQUIT, received at:')
+        for filename, lineno, name, line in traceback.extract_stack(frame):
+            logger.info('File: "%s", line %d, in %s', filename, lineno, name)
+            if line:
+                logger.info("  %s", line.strip())
+        logger.info("Dumping threads...")
+        show_frames(logger)
+        return True
 
     if signum == signal.SIGUSR1:
         level = logging.INFO
@@ -908,6 +928,7 @@ def main():
     signal.signal(signal.SIGHUP, sighandler)
     signal.signal(signal.SIGUSR1, sighandler)
     signal.signal(signal.SIGUSR2, sighandler)
+    signal.signal(signal.SIGQUIT, sighandler)
 
     # Start the Master Control Program ;-)
     mcp = MasterControlProgram(config, options)

@@ -376,6 +376,7 @@ class ConsumerThread( threading.Thread ):
         if self.connection:
             try:
                 logging.debug('%s: Closing the AMQP connection' % self.getName())
+                self.channel.basic_cancel()
                 self.connection.close()
                 logging.debug('%s: AMQP connection closed' % self.getName())
             except IOError, e:

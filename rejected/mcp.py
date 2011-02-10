@@ -36,6 +36,8 @@ class MCP(patterns.rejected_object):
             # Shortcut the config to make coding easier
             config = self.config['Consumers'][key]
 
+            # We'll probably kick off processes and threads here
+
             # Make sure there is an exchange in the config
             if 'exchange' not in config:
                 message = 'Missing exchange for Consumer: %s' % key
@@ -44,16 +46,21 @@ class MCP(patterns.rejected_object):
             # Add the exchange
             consumer['exchange'] = client.Exchange(config['exchange'])
 
-            # Make sure we have queue or queues in our config
-            if not set(['queue', 'queues']) & set(config.keys()):
-                message = 'Missing Queue for Consumer: %s' % key
-                raise exception.InvalidConfiguration(message)
-
             # Add the queue or list of queues
             consumer['queues'] = list()
 
-            if 'queue' in config:
-                queue = client.Queue(config['queue'])
+            # If we have an explicit definition or we didn't define queues
+            if 'queue' in config or 'queues' not in config:
+
+                # We have explicit configuration
+                if 'queue' in config:
+                    queue = client.Queue(config['queue'])
+
+                # We don't care about the queue name and want defaults
+                else:
+                    queue = client.Queue()
+
+                # Append to the list
                 consumer['queues'].append(queue)
 
             if 'queues' in config:

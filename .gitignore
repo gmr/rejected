@@ -1,0 +1,6 @@
+*.pyc
+.idea/
+cli
+build
+dist
+rejected.egg-info

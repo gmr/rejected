@@ -1,0 +1,5 @@
+rejected
+========
+
+rejected is a consumer daemon and development framework for RabbitMQ designed
+to let you focus on what to do with your messages.

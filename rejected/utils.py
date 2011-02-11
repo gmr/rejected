@@ -6,7 +6,14 @@ import pwd
 import signal
 import socket
 import sys
+import time
 import yaml
+
+# For log formatting
+try:
+    import curses
+except ImportError:
+    curses = None
 
 children = []  # Global list of children to shutdown on shutdown
 pidfiles = []  # Global list of pidfiles
@@ -49,7 +56,6 @@ def daemonize(pidfile=None, user=None, group=None):
     if pid > 0:
         sys.exit(0)
 
-
     # Second fork to put into daemon mode
     pid = os.fork()
     if pid > 0:
@@ -64,7 +70,7 @@ def daemonize(pidfile=None, user=None, group=None):
 
         # Write a pidfile out
         with open(pidfile, 'w') as f:
-          f.write('%i\n' % pid)
+            f.write('%i\n' % pid)
 
         # Append the pidfile to our global pidfile list
         global pidfiles
@@ -127,18 +133,107 @@ def load_configuration_file(config_file):
     return config
 
 
+def shutdown():
+    """
+    Cleanly shutdown the application
+    """
+    # Tell all our children to terminate
+    for child in children:
+        child.terminate()
+
+    # Remove our pidfiles
+    for pidfile in pidfiles:
+        if os.path.isfile(pidfile):
+            os.unlink(pidfile)
+
+
+def setup_signals():
+    """
+    Setup the signals we want to be notified on
+    """
+    signal.signal(signal.SIGTERM, _shutdown_signal_handler)
+    signal.signal(signal.SIGHUP, _rehash_signal_handler)
+
+
+def _shutdown_signal_handler(signum, frame):
+    """
+    Called on SIGTERM to shutdown the application
+    """
+    logging.info("SIGTERM received, shutting down")
+    shutdown()
+
+
+def _rehash_signal_handler(signum, frame):
+    """
+    Would be cool to handle this and effect changes in the config
+    """
+    logging.info("SIGHUP received, rehashing config")
+
+
+def log(method):
+    """
+    Logging decorator to send the method and arguments to logging.DEBUG
+    """
+    def debug(*args):
+        logging.debug("%s(%r)", method.__name__, args)
+        return method(*args)
+
+    return debug
+
+
+class ColorFormatter(logging.Formatter):
+    """
+    Originally from Tornado options.LogFormatter_ under the Apache 2.0 License
+
+    https://github.com/facebook/tornado/blob/master/tornado/options.py#L333
+    """
+    def __init__(self, *args, **kwargs):
+        logging.Formatter.__init__(self, *args, **kwargs)
+        fg_color = curses.tigetstr("setaf") or curses.tigetstr("setf") or ""
+        self._colors = {
+            logging.DEBUG: curses.tparm(fg_color, 4),    # Blue
+            logging.INFO: curses.tparm(fg_color, 2),     # Green
+            logging.WARNING: curses.tparm(fg_color, 3),  # Yellow
+            logging.ERROR: curses.tparm(fg_color, 1),    # Red
+        }
+        self._normal = curses.tigetstr("sgr0")
+        self._pid = os.getpid()
+        elements = ['%(levelname)1.1s', '%(asctime)s', '#%(process)s',
+                    '%(threadName)s', '%(module)s0:%(lineno)d']
+        self._prefix = '[%s]' % ' '.join(elements)
+
+    def format(self, record):
+        record.message = record.getMessage()
+
+        record.asctime = time.strftime("%y%m%d %H:%M:%S",
+                                       self.converter(record.created))
+
+        formatted = "%s%s%s %s" % (self._colors.get(record.levelno,
+                                                     self._normal),
+                                    self._prefix % record.__dict__,
+                                    self._normal,
+                                    record.message)
+
+        if record.exc_info:
+            if not record.exc_text:
+                record.exc_text = self.formatException(record.exc_info)
+        if record.exc_text:
+            formatted = formatted.rstrip() + "\n" + record.exc_text
+        return formatted.replace("\n", "\n    ")
+
+
 def setup_logging(config, debug=False):
     """
     Setup the logging module to respect our configuration values.
-    Expects a dictionary called config like:
+    Expects a dictionary called config with the following parameters
 
-    {'directory': '/log/path',       # Optional log file output directory
-     'filename': 'application.log',  # Optional filename, not needed for syslog
-     'format': "%(levelname) -10s %(asctime)s %(message)s", # Log format string
-     'level': 'error'  # string value as defined in the logging_levels below
-     'handler': 'syslog'  # Logging handler
-     'syslog': { 'address': '/dev/log',  # syslog address to connect to
-                 'facility': 'local6'} } # syslog facility to use
+    * directory:   Optional log file output directory
+    * filename:    Optional filename, not needed for syslog
+    * level:       One of debug, error, warning, info
+    * handler:     Optional handler
+    * syslog:      If handler == syslog, parameters for syslog
+      * address:   Syslog address
+      * facility:  Syslog facility
 
     Passing in debug=True will disable any log output to anything but stdout
     and will set the log level to debug regardless of the config.
@@ -171,8 +266,24 @@ def setup_logging(config, debug=False):
     logging.basicConfig(**config)
     logging.info('Log level set to %s' % logging_level)
 
+    # Get the default logger
+    default_logger = logging.getLogger('')
+
+    # Remove the default stream handler
+    stream_handler = None
+    for handler in default_logger.handlers:
+        if isinstance(handler, logging.StreamHandler):
+            stream_handler = handler
+            break
+
+    # Use colorized output
+    if curses and debug and stream_handler and sys.stderr.isatty():
+        curses.setupterm()
+        if curses.tigetnum("colors") > 0:
+            stream_handler.setFormatter(ColorFormatter())
+
     # If we have supported handler
-    if 'handler' in config and not debug:
+    elif 'handler' in config:
 
         # If we want to syslog
         if config['handler'] == 'syslog':
@@ -188,65 +299,12 @@ def setup_logging(config, debug=False):
                 facility = handlers.SysLogHandler.facility_names[facility]
                 syslog = handlers.SysLogHandler(address=address,
                                                 facility=facility)
-
-                # Get the default logger
-                default_logger = logging.getLogger('')
-
                 # Add the handler
                 default_logger.addHandler(syslog)
 
-                # Remove the default stream handler
-                for handler in default_logger.handlers:
-                    if isinstance(handler, logging.StreamHandler):
-                        default_logger.removeHandler(handler)
-
+                # Remove the StreamHandler
+                if stream_handler:
+                    default_logger.removeHandler(stream_handler)
             else:
                 logging.error('%s:Invalid facility, syslog logging aborted',
                               application_name())
-
-
-def shutdown():
-    """
-    Cleanly shutdown the application
-    """
-    # Tell all our children to terminate
-    for child in children:
-        child.terminate()
-
-    # Remove our pidfiles
-    for pidfile in pidfiles:
-        if os.path.isfile(pidfile):
-            os.unlink(pidfile)
-
-
-def setup_signals():
-    """
-    Setup the signals we want to be notified on
-    """
-    signal.signal(signal.SIGTERM, _shutdown_signal_handler)
-    signal.signal(signal.SIGHUP, _rehash_signal_handler)
-
-
-def _shutdown_signal_handler(signum, frame):
-    """
-    Called on SIGTERM to shutdown the application
-    """
-    logging.info("SIGTERM received, shutting down")
-    shutdown()
-
-def _rehash_signal_handler(signum, frame):
-    """
-    Would be cool to handle this and effect changes in the config
-    """
-    logging.info("SIGHUP received, rehashing config")
-
-
-def log(method):
-    """
-    Logging decorator to send the method and arguments to logging.DEBUG
-    """
-    def debug(*args):
-        logging.debug("%s(%r)", method.__name__, args)
-        return method(*args)
-
-    return debug

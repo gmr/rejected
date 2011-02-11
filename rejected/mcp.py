@@ -9,6 +9,7 @@ import multiprocessing
 import rejected.client as client
 import rejected.exceptions as exception
 import rejected.patterns as patterns
+import rejected.utils as utils
 
 class MCP(patterns.rejected_object):
 
@@ -16,11 +17,11 @@ class MCP(patterns.rejected_object):
         self.config = config
         pass
 
+    @utils.log
     def start(self):
         """
         Block and run here
         """
-
         # Our consumer list to iterate through
         consumers = list()
 

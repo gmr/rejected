@@ -10,6 +10,7 @@ import rejected.utils as utils
 
 class Exchange(patterns.rejected_object):
 
+    @utils.log
     def __init__(self, config=dict()):
         """
         Expects a dictionary with the following parameters:
@@ -48,6 +49,7 @@ class Exchange(patterns.rejected_object):
 
 class Queue(patterns.rejected_object):
 
+    @utils.log
     def __init__(self, config=dict()):
         """
         Expects a dictionary with the following optional parameters:
@@ -90,6 +92,7 @@ class Queue(patterns.rejected_object):
         else:
             self.exclusive = False
 
+    @utils.log
     def _auto_name(self):
         """
         Generate a queue name

@@ -239,3 +239,14 @@ def _rehash_signal_handler(signum, frame):
     Would be cool to handle this and effect changes in the config
     """
     logging.info("SIGHUP received, rehashing config")
+
+
+def log(method):
+    """
+    Logging decorator to send the method and arguments to logging.DEBUG
+    """
+    def debug(*args):
+        logging.debug("%s(%r)", method.__name__, args)
+        return method(*args)
+
+    return debug

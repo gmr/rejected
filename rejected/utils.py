@@ -175,7 +175,7 @@ def log(method):
     Logging decorator to send the method and arguments to logging.DEBUG
     """
     def debug(*args):
-        logging.debug("%s(%r)", method.__name__, args)
+        logging.debug("%s%r", method.__name__, args)
         return method(*args)
 
     return debug

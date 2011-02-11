@@ -3,7 +3,7 @@
 
 Brokers:
 
-  localhost:
+  localhost: &localhost
     host: localhost
     port: 5672
     vhost: /
@@ -13,31 +13,30 @@ Brokers:
 Consumers:
 
   test:
-    broker: localhost
+    broker: *localhost
     exchange:
       name: Foo
       type: direct
 
-    queue:
-      auto: True
+    #queue:
+    #  name: Test
 
-    min: 1
-    max: 3
+    processes:
+      min: 2
+      max: 5
+    threads:
+      start: 2
+      min: 3
+
     elastic: True
     threshold: 100
 
-
-
-
-
-
-
-
+    processor: foo
 
 
 Logging:
-    directory: logs/
-    filename: logs/rejected.log
+    directory: /tmp/
+    filename: rejected.log
     format: "%(levelname) -10s %(asctime)s %(message)s"
     # Valid values: debug, info, warning, error, critical
     level: debug

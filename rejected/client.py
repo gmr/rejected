@@ -2,11 +2,48 @@
 """
 RabbitMQ/Pika Client
 """
-
+import logging
+import pika
 import rejected.exceptions as exception
 import rejected.patterns as patterns
 import rejected.utils as utils
+import time
 
+
+class Connection(patterns.rejected_object):
+
+    @utils.log
+    def __init__(self, config, on_connected_callback):
+
+        parameters = pika.ConnectionParameters()
+        parameters.host = config.get('host', 'localhost')
+        parameters.port = config.get('port', 5672)
+        parameters.vhost = config.get('vhost', '/')
+        parameters.heartbeat = config.get('heartbeat', 0)
+
+        user = config.get('user', 'guest')
+        password = config.get('password', 'guest')
+        parameters.credentials = pika.PlainCredentials(user, password)
+
+        self.connection_type = config.get('type', 'SelectConnection')
+
+        if self.connection_type == 'SelectConnection':
+            from pika.adapters import SelectConnection
+            self.connection = SelectConnection(parameters,
+                                               on_connected_callback)
+
+        if self.connection_type == 'TornadoConnection':
+            from pika.adapters import TornadoConnection
+            self.connection = TornadoConnection(parameters,
+                                                on_connected_callback)
+
+    @property
+    def connected(self):
+        return self.connection.is_alive
+
+    @utils.log
+    def start(self):
+        self.connection.ioloop.start()
 
 class Exchange(patterns.rejected_object):
 
@@ -15,36 +52,24 @@ class Exchange(patterns.rejected_object):
         """
         Expects a dictionary with the following parameters:
 
-        name:        Queue name
+        name:        Exchange name
 
         type:        Queue type, one of direct, topic, fanout
                      Default: direct
 
-        auto_delete: Auto-delete queue when disconnected
-                     Default: True if auto named, otherwise False
-
-        durable:     Is a durable queue, will survive RabbitMQ restarts.
+        auto_delete: Auto-delete exchange when disconnected.
                      Default: False
+
+        durable:     Is a durable exchange, will survive RabbitMQ restarts.
+                     Default: True
         """
-        if 'name' in config:
-            self.name = config['name']
-        else:
+        if not 'name' in config:
             raise exception.InvalidConfiguration("Missing exchange name")
 
-        if 'type' in config:
-            self.excusive = config['type']
-        else:
-            self.exclusive = 'direct'
-
-        if 'auto_delete' in config:
-            self.auto_delete = config['auto_delete']
-        else:
-            self.auto_delete = True
-
-        if 'durable' in config:
-            self.durable = config['durable']
-        else:
-            self.durable = False
+        self.name = config['name']
+        self.type = config.get("type", 'direct')
+        self.auto_delete = config.get('auto_delete', False)
+        self.durable = config.get('durable', True)
 
 
 class Queue(patterns.rejected_object):
@@ -74,23 +99,10 @@ class Queue(patterns.rejected_object):
             self.name = self._auto_name()  # Auto name the queue
             # Overwrite possible entries for auto named behavior
             config['auto_delete'] = True
-            config['durable'] = False
-            config['exclusive'] = True
 
-        if 'auto_delete' in config:
-            self.auto_delete = config['auto_delete']
-        else:
-            self.auto_delete = True
-
-        if 'durable' in config:
-            self.durable = config['durable']
-        else:
-            self.durable = False
-
-        if 'exclusive' in config:
-            self.excusive = config['exclusive']
-        else:
-            self.exclusive = False
+        self.auto_delete = config.get('auto_delete', True)
+        self.durable = config.get('durable', False)
+        self.exclusive = config.get('exclusive', self.auto_delete)
 
     @utils.log
     def _auto_name(self):

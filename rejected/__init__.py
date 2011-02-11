@@ -57,10 +57,11 @@ def main(*args):
             sys.stderr.write('Could not daemonize: %d (%s)\n' % (e.errno, e.strerror))
             return e.errno
 
-
     m = mcp.MCP(config)
-    m.start()
-
+    try:
+        m.start()
+    except KeyboardInterrupt:
+        m.stop()
 
     # Initialize the
 

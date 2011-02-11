@@ -6,7 +6,6 @@ coordinating the actions it needs to take
 
 import optparse
 import sys
-import logging
 import rejected.mcp as mcp
 import rejected.utils as utils
 
@@ -45,7 +44,7 @@ def main(*args):
     config = utils.load_configuration_file(options.config)
 
     # Setup our logging
-    logging.basicConfig(level=logging.INFO)
+    utils.setup_logging(config['Logging'], options.foreground)
 
     # Setup our signal handlers
     utils.setup_signals()

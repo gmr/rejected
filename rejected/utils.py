@@ -191,14 +191,14 @@ class ColorFormatter(logging.Formatter):
         logging.Formatter.__init__(self, *args, **kwargs)
         fg_color = curses.tigetstr("setaf") or curses.tigetstr("setf") or ""
         self._colors = {
-            logging.DEBUG: curses.tparm(fg_color, 4),    # Blue
+            logging.DEBUG: curses.tparm(fg_color, 6),    # Blue
             logging.INFO: curses.tparm(fg_color, 2),     # Green
             logging.WARNING: curses.tparm(fg_color, 3),  # Yellow
             logging.ERROR: curses.tparm(fg_color, 1),    # Red
         }
         self._normal = curses.tigetstr("sgr0")
         self._pid = os.getpid()
-        elements = ['%(levelname)1.1s', '%(asctime)s', '#%(process)s',
+        elements = ['%(levelname)s', '%(asctime)s', '#%(process)s',
                     '%(threadName)s', '%(module)s0:%(lineno)d']
         self._prefix = '[%s]' % ' '.join(elements)
 

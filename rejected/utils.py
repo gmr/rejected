@@ -204,16 +204,13 @@ class ColorFormatter(logging.Formatter):
 
     def format(self, record):
         record.message = record.getMessage()
-
         record.asctime = time.strftime("%y%m%d %H:%M:%S",
                                        self.converter(record.created))
-
         formatted = "%s%s%s %s" % (self._colors.get(record.levelno,
-                                                     self._normal),
-                                    self._prefix % record.__dict__,
-                                    self._normal,
-                                    record.message)
-
+                                                    self._normal),
+                                   self._prefix % record.__dict__,
+                                   self._normal,
+                                   record.message)
         if record.exc_info:
             if not record.exc_text:
                 record.exc_text = self.formatException(record.exc_info)
@@ -229,6 +226,7 @@ def setup_logging(config, debug=False):
 
     * directory:   Optional log file output directory
     * filename:    Optional filename, not needed for syslog
+    * format:      Format for non-debug mode
     * level:       One of debug, error, warning, info
     * handler:     Optional handler
     * syslog:      If handler == syslog, parameters for syslog

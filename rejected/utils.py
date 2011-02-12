@@ -133,43 +133,6 @@ def load_configuration_file(config_file):
     return config
 
 
-def shutdown():
-    """
-    Cleanly shutdown the application
-    """
-    # Tell all our children to terminate
-    for child in children:
-        child.terminate()
-
-    # Remove our pidfiles
-    for pidfile in pidfiles:
-        if os.path.isfile(pidfile):
-            os.unlink(pidfile)
-
-
-def setup_signals():
-    """
-    Setup the signals we want to be notified on
-    """
-    signal.signal(signal.SIGTERM, _shutdown_signal_handler)
-    signal.signal(signal.SIGHUP, _rehash_signal_handler)
-
-
-def _shutdown_signal_handler(signum, frame):
-    """
-    Called on SIGTERM to shutdown the application
-    """
-    logging.info("SIGTERM received, shutting down")
-    shutdown()
-
-
-def _rehash_signal_handler(signum, frame):
-    """
-    Would be cool to handle this and effect changes in the config
-    """
-    logging.info("SIGHUP received, rehashing config")
-
-
 def log(method):
     """
     Logging decorator to send the method and arguments to logging.DEBUG
@@ -306,3 +269,44 @@ def setup_logging(config, debug=False):
             else:
                 logging.error('%s:Invalid facility, syslog logging aborted',
                               application_name())
+
+
+
+
+@log
+def shutdown():
+    """
+    Cleanly shutdown the application
+    """
+    # Tell all our children to stop
+    for child in children:
+        child.stop()
+
+    # Remove our pidfiles
+    for pidfile in pidfiles:
+        if os.path.isfile(pidfile):
+            os.unlink(pidfile)
+
+
+def setup_signals():
+    """
+    Setup the signals we want to be notified on
+    """
+    signal.signal(signal.SIGTERM, _shutdown_signal_handler)
+    signal.signal(signal.SIGHUP, _rehash_signal_handler)
+
+
+def _shutdown_signal_handler(signum, frame):
+    """
+    Called on SIGTERM to shutdown the application
+    """
+    logging.info("SIGTERM received, shutting down")
+    shutdown()
+
+
+def _rehash_signal_handler(signum, frame):
+    """
+    Would be cool to handle this and effect changes in the config
+    """
+    logging.info("SIGHUP received, rehashing config")
+

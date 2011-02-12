@@ -4,6 +4,7 @@ Master Control Process
 import logging
 import threading
 import multiprocessing
+import signal
 import time
 
 
@@ -17,6 +18,7 @@ class MCP(patterns.rejected_object):
     def __init__(self, config):
         self.config = config
         self.processes = dict()
+        self.stopped = True
 
     @utils.log
     def start(self):
@@ -26,6 +28,8 @@ class MCP(patterns.rejected_object):
         # Our consumer list to iterate through
         self.consumers = list()
         self.stop_list = list()
+
+        self.stopped = False
 
         if 'Consumers' not in self.config:
             raise exception.InvalidConfiguration('Missing Consumers')
@@ -48,17 +52,34 @@ class MCP(patterns.rejected_object):
                 self.consumers.append(process)
                 process.join(0.1)
 
+            # Block until we have no active consumers or we're stopped
+            children_connected = True
+            while not self.stopped or children_connected:
+                time.sleep(1)
+                for consumer in self.consumers:
+                    children_connected = consumer.is_alive()
+
     @utils.log
     def stop(self):
         for event in self.stop_list:
             logging.debug("Sending stop event %s" % event)
             event.set()
 
+        # Wait for everything to stop
+        stopped = False
+        while not stopped:
+            for consumer in self.consumers:
+                stopped = consumer.is_alive()
+
+        # Let our main blocking loop know we're stopped
+        self.stopped = True
+
 
 class Yori(multiprocessing.Process):
 
     @utils.log
     def run(self):
+        signal.signal(signal.SIGTERM, self._terminate)
 
         self.children = []
         config = self._kwargs['config']
@@ -82,6 +103,12 @@ class Yori(multiprocessing.Process):
         except KeyboardInterrupt:
             pass
 
+        # We've been signaled, kill off our children
+        self._terminate()
+
+    @utils.log
+    def _terminate(self, signum=0, frame=None):
+
         for child in self.children:
             logging.debug("Stopping: %s" % child)
             child.stop()
@@ -94,8 +121,10 @@ class Yori(multiprocessing.Process):
             time.sleep(1)
         logging.debug("Process stopping")
 
+
 class Sark(threading.Thread):
 
+    @utils.log
     def run(self):
         self.config = self._Thread__kwargs['config']
         self.connection = client.Connection(self.config['broker'],
@@ -103,6 +132,7 @@ class Sark(threading.Thread):
         # This blocks until we're no longer running the IOLoop in connection
         self.connection.start()
 
+    @utils.log
     def stop(self):
         self.connection.close()
 
@@ -112,6 +142,7 @@ class Sark(threading.Thread):
             return False
         return True
 
+    @utils.log
     def _on_connected(self, connection):
         self.connection = connection
 
@@ -150,5 +181,6 @@ class Sark(threading.Thread):
 
     @utils.log
     def _on_closed(self, frame):
-        self.connection.ioloop.stop()
-        del(self.connection)
+        if hasattr(self, 'connection'):
+            self.connection.ioloop.stop()
+            del(self.connection)

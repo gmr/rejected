@@ -58,10 +58,14 @@ def main(*args):
             return e.errno
 
     m = mcp.MCP(config)
+    utils.children.append(m)
     try:
         m.start()
     except KeyboardInterrupt:
         m.stop()
+
+    print 'OUT'
+    sys.exit(0)
 
     # Initialize the
 

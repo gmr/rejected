@@ -20,7 +20,7 @@ class MCP(patterns.rejected_object):
         self.processes = dict()
         self.stopped = True
 
-    @utils.log
+    @utils.log_method_call
     def start(self):
         """
         Block and run here
@@ -45,12 +45,12 @@ class MCP(patterns.rejected_object):
             for x in xrange(0, processes):
                 stop_event = multiprocessing.Event()
                 self.stop_list.append(stop_event)
-                process = '%s-%i' % (key, x)
-                process = Yori(name=process,
+                name = '%s-%i' % (key, x)
+                process = Yori(name=name,
                                kwargs={'config': config, 'stop': stop_event})
                 process.start()
                 self.consumers.append(process)
-                process.join(0.1)
+                process.join(0)
 
             # Block until we have no active consumers or we're stopped
             children_connected = True
@@ -58,8 +58,10 @@ class MCP(patterns.rejected_object):
                 time.sleep(1)
                 for consumer in self.consumers:
                     children_connected = consumer.is_alive()
+                    if children_connected:
+                        continue
 
-    @utils.log
+    @utils.log_method_call
     def stop(self):
         for event in self.stop_list:
             logging.debug("Sending stop event %s" % event)
@@ -77,7 +79,7 @@ class MCP(patterns.rejected_object):
 
 class Yori(multiprocessing.Process):
 
-    @utils.log
+    @utils.log_method_call
     def run(self):
         signal.signal(signal.SIGTERM, self._terminate)
 
@@ -85,17 +87,20 @@ class Yori(multiprocessing.Process):
         config = self._kwargs['config']
         stop = self._kwargs['stop']
 
+        # We can just not have a threads section in the config
         if 'threads' in config:
+            # But if we have it use the min or 1 if we don't have that
             threads = config['threads'].get('min', 1)
         else:
+            # Default of 1
             threads = 1
 
         for x in xrange(0, threads):
-            thread = 'Thread-%i' % x
-            thread = Sark(name=thread, kwargs={'config': config})
+            name = 'Thread-%i' % x
+            thread = Sark(name=name, kwargs={'config': config})
             thread.start()
             self.children.append(thread)
-            thread.join(0.1)
+            thread.join(0)
 
         # Wait for our parent to tell us we're done
         try:
@@ -106,7 +111,7 @@ class Yori(multiprocessing.Process):
         # We've been signaled, kill off our children
         self._terminate()
 
-    @utils.log
+    @utils.log_method_call
     def _terminate(self, signum=0, frame=None):
 
         for child in self.children:
@@ -124,27 +129,34 @@ class Yori(multiprocessing.Process):
 
 class Sark(threading.Thread):
 
-    @utils.log
+    @utils.log_method_call
     def run(self):
         self.config = self._Thread__kwargs['config']
         self.connection = client.Connection(self.config['broker'],
                                             self._on_connected)
+
         # This blocks until we're no longer running the IOLoop in connection
         self.connection.start()
 
-    @utils.log
+    @utils.log_method_call
     def stop(self):
-        self.connection.close()
+        if hasattr(self, 'connection') and \
+           hasattr(self.connection, 'close'):
+            self.connection.close()
 
     @property
     def connected(self):
-        if not hasattr(self, 'connection') or not self.connection.is_open:
+        if not hasattr(self, 'connection')or \
+           hasattr(self.connection, 'is_open') and \
+           not self.connection.is_open:
             return False
         return True
 
-    @utils.log
-    def _on_connected(self, connection):
+    @utils.log_method_call
+    def _on_connected(self, connection, channel):
+
         self.connection = connection
+        self.channel = channel
 
         # Add a callback so we can stop the ioloop
         self.connection.add_on_close_callback(self._on_closed)
@@ -155,7 +167,8 @@ class Sark(threading.Thread):
             raise exception.InvalidConfiguration(message)
 
         # Add the exchange
-        self.exchange = client.Exchange(self.config['exchange'])
+        self.exchange = client.Exchange(self.channel,
+                                        self.config['exchange'])
 
         # Add the queue or list of queues
         self.queues = list()
@@ -165,21 +178,23 @@ class Sark(threading.Thread):
 
             # We have explicit configuration
             if 'queue' in self.config:
-                queue = client.Queue(self.config['queue'])
+                queue = client.Queue(self.channel,
+                                     self.config['queue'])
 
             # We don't care about the queue name and want defaults
             else:
-                queue = client.Queue()
+                queue = client.Queue(self.channel)
 
             # Append to the list
             self.queues.append(queue)
 
         if 'queues' in self.config:
             for queue_ in self.config['queues']:
-                queue = client.Queue(self.config['queues'][queue_])
+                queue = client.Queue(self.channel,
+                                     self.config['queues'][queue_])
                 self.queues.append(queue)
 
-    @utils.log
+    @utils.log_method_call
     def _on_closed(self, frame):
         if hasattr(self, 'connection'):
             self.connection.ioloop.stop()

@@ -8,6 +8,7 @@ import socket
 import sys
 import time
 import yaml
+from functools import wraps
 
 # For log formatting
 try:
@@ -17,6 +18,9 @@ except ImportError:
 
 children = []  # Global list of children to shutdown on shutdown
 pidfiles = []  # Global list of pidfiles
+
+logger = logging.getLogger('rejected')
+logger.setLevel(logging.WARN)
 
 
 def application_name():
@@ -133,53 +137,92 @@ def load_configuration_file(config_file):
     return config
 
 
-def log(method):
+def log_method_call(method):
     """
-    Logging decorator to send the method and arguments to logging.DEBUG
+    Logging decorator to send the method and arguments to logger.debug
     """
-    def debug(*args):
-        logging.debug("%s%r", method.__name__, args)
-        return method(*args)
+    @wraps(method)
+    def debug_log(*args, **kwargs):
 
-    return debug
+        if logger.getEffectiveLevel() == logging.DEBUG:
+
+            # Get the class name of what was passed to us
+            try:
+                class_name = args[0].__class__.__name__
+            except AttributeError:
+                class_name = 'Unknown'
+            except IndexError:
+                class_name = 'Unknown'
+
+            # Build a list of arguments to send to the logger
+            log_args = list()
+            for x in xrange(1, len(args)):
+                log_args.append(args[x])
+            if len(kwargs) > 1:
+                log_args.append(kwargs)
+
+            # If we have arguments, log them as well, otherwise just the method
+            if log_args:
+                logger.debug("%s.%s(%r) Called", class_name, method.__name__,
+                             log_args)
+            else:
+                logger.debug("%s.%s() Called", class_name, method.__name__)
+
+        # Actually execute the method
+        return method(*args, **kwargs)
+
+    # Return the debug_log function to the python stack for execution
+    return debug_log
 
 
-class ColorFormatter(logging.Formatter):
+class FormatOutput(logging.Formatter):
     """
-    Originally from Tornado options.LogFormatter_ under the Apache 2.0 License
-
-    https://github.com/facebook/tornado/blob/master/tornado/options.py#L333
+    Creates a colorized output format for logging that helps provide easier
+    context in debugging
     """
     def __init__(self, *args, **kwargs):
         logging.Formatter.__init__(self, *args, **kwargs)
-        fg_color = curses.tigetstr("setaf") or curses.tigetstr("setf") or ""
-        self._colors = {
-            logging.DEBUG: curses.tparm(fg_color, 6),    # Blue
-            logging.INFO: curses.tparm(fg_color, 2),     # Green
-            logging.WARNING: curses.tparm(fg_color, 3),  # Yellow
-            logging.ERROR: curses.tparm(fg_color, 1),    # Red
-        }
-        self._normal = curses.tigetstr("sgr0")
-        self._pid = os.getpid()
-        elements = ['%(levelname)s', '%(asctime)s', '#%(process)s',
-                    '%(threadName)s', '%(module)s0:%(lineno)d']
+        color = curses.tigetstr("setaf") or curses.tigetstr("setf") or ""
+        self._level = {logging.DEBUG: curses.tparm(color, 6),
+                       logging.ERROR: curses.tparm(color, 1),
+                       logging.INFO: curses.tparm(color, 2),
+                       logging.WARNING: curses.tparm(color, 3)}
+        self._reset = curses.tigetstr("sgr0")
+        self._class = curses.tparm(color, 4)
+        self._args = curses.tparm(color, 2)
+        elements = ['%(levelname)-8s', '%(asctime)-24s', '#%(process)s']
         self._prefix = '[%s]' % ' '.join(elements)
 
     def format(self, record):
-        record.message = record.getMessage()
-        record.asctime = time.strftime("%y%m%d %H:%M:%S",
-                                       self.converter(record.created))
-        formatted = "%s%s%s %s" % (self._colors.get(record.levelno,
-                                                    self._normal),
-                                   self._prefix % record.__dict__,
-                                   self._normal,
-                                   record.message)
-        if record.exc_info:
-            if not record.exc_text:
+        #timestamp = datetime.datetime.fromtimestamp(record.created)
+        #record.timestamp = timestamp.isoformat(' ')
+
+        message = record.getMessage()
+        record.asctime = self.formatTime(record)
+        if message[-6:] == 'Called':
+            parts = message.split(' ')
+            call = parts[0].split('.')
+            end_method = call[1].find('(')
+            start_content = message.find('(') + 1
+            message = '%s%s.%s%s(%s%s%s)' % (self._class,
+                                             call[0],
+                                             call[1][:end_method],
+                                             self._reset,
+                                             self._args,
+                                             message[start_content:-8],
+                                             self._reset)
+
+        output = "%s%s%s %s" % (self._level.get(record.levelno,
+                                                self._reset),
+                                self._prefix % record.__dict__,
+                                self._reset,
+                                message)
+        if record.exc_info and not record.exc_text:
                 record.exc_text = self.formatException(record.exc_info)
+
         if record.exc_text:
-            formatted = formatted.rstrip() + "\n" + record.exc_text
-        return formatted.replace("\n", "\n    ")
+            output = output.rstrip() + "\n    " + record.exc_text
+        return output
 
 
 def setup_logging(config, debug=False):
@@ -225,6 +268,10 @@ def setup_logging(config, debug=False):
 
     # Pass in our logging config
     logging.basicConfig(**config)
+    logging.getLogger('rejected').setLevel(config['level'])
+
+    logging.getLogger('pika').setLevel(config['level'])
+
     logging.info('Log level set to %s' % logging_level)
 
     # Get the default logger
@@ -241,7 +288,7 @@ def setup_logging(config, debug=False):
     if curses and debug and stream_handler and sys.stderr.isatty():
         curses.setupterm()
         if curses.tigetnum("colors") > 0:
-            stream_handler.setFormatter(ColorFormatter())
+            stream_handler.setFormatter(FormatOutput())
 
     # If we have supported handler
     elif 'handler' in config:
@@ -273,7 +320,7 @@ def setup_logging(config, debug=False):
 
 
 
-@log
+@log_method_call
 def shutdown():
     """
     Cleanly shutdown the application

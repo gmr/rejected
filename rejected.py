@@ -40,6 +40,27 @@ is_quitting = False
 # Process name will be overriden by the config file
 process = 'Unknown'
 
+
+def import_namespaced_class(path):
+    """
+    Pass in a string in the format of foo.Bar, foo.bar.Baz, foo.bar.baz.Qux
+    and it will return a handle to the class
+    """
+    # Split up our string containing the import and class
+    parts = path.split('.')
+
+    # Build our strings for the import name and the class name
+    import_name = '.'.join(parts[0:-1])
+    class_name = parts[-1]
+
+    # get the handle to the class for the given import
+    class_handle = getattr(__import__(import_name, fromlist=class_name),
+                           class_name)
+
+    # Return the class handle
+    return class_handle
+    
+    
 class ConnectionException( exceptions.Exception ):
     
     def __str__(self):
@@ -109,8 +130,9 @@ class ConsumerThread( threading.Thread ):
             return connection
 
         # amqp lib is only raising a generic exception which is odd since it has a AMQPConnectionException class
-        except IOError, e:
-            logging.error( 'Connection error #%i: %s' % (e.errno, e.message) )
+        except IOError as e:
+            print e
+            logging.error( 'Connection error #%i: %s' ,e.errno, str(e))
             raise ConnectionException
 
     def get_information(self):
@@ -254,15 +276,7 @@ class ConsumerThread( threading.Thread ):
         class_name = self.config['Bindings'][self.binding_name]['processor']
         
         # Try and import the module
-        try:
-            processor_module = __import__(import_name)
-        except ImportError:
-            logging.error( '%s: Could not import the "%s" module.' % ( self.getName(), import_name ) )
-            self.running = False
-            return
-
-        file_parts = import_name.split('.')
-        processor_class = getattr(processor_module.__dict__[file_parts[len(file_parts)-1]], class_name)
+        processor_class = import_namespaced_class("%s.%s" % (import_name, class_name))
         logging.info( '%s: Creating message processor: %s.%s' % 
                       ( self.getName(), import_name, class_name ) )
                       

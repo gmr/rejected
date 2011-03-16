@@ -205,7 +205,7 @@ class ConsumerThread( threading.Thread ):
             exc_type, exc_value, exc_traceback = sys.exc_info()
             formatted_lines = traceback.format_exc().splitlines()      
             logging.critical('ConsumerThread: Processor threw an uncaught exception')
-            logging.critical('ConsumerThread: %s' % str(e))
+            logging.critical('ConsumerThread: %s:%s' % (type(e), str(e)))
             logging.critical('ConsumerThread: %s' % formatted_lines[3].strip())
             logging.critical('ConsumerThread: %s' % formatted_lines[4].strip())
                     

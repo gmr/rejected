@@ -1,6 +1,7 @@
 #!/bin/bash
 for f in /opt/rejected/bin/restart-*sh
 do
-  exec $f
+  echo $f
+  $f
 done
-/opt/rejected/bin/setaffinity.sh
+sudo /opt/rejected/bin/setaffinity.sh 1> /dev/null

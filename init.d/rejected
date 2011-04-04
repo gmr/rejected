@@ -1,0 +1,67 @@
+#!/bin/bash
+# chkconfig: 2345 99 60
+# description: rejected consumers
+# processname: rejected
+
+# Source function library.
+. /etc/init.d/functions
+
+# Installation dir
+rejected_DIR="/opt/rejected"
+
+prog="rejected"
+
+start() {
+  if [ ${EUID} -ne 0 ]; then
+    echo -n $"you must be root"
+    failure $"you must be root"
+    echo
+    return 1
+  fi
+
+  echo -n $"Starting ${prog}: "
+
+  /opt/rejected/bin/start.sh
+  return 1
+}
+
+stop() {
+  if [ ${EUID} -ne 0 ]; then
+    echo -n $"you must be root"
+    failure $"you must be root"
+    echo
+    return 1
+  fi
+
+  echo -n $"Stopping ${prog}: "
+
+  /opt/rejected/bin/stop.sh
+  RETVAL=$?
+  [ $RETVAL -eq 0 ] && rm -f ${rejected_PID_FILE}
+  echo
+  return $RETVAL
+}
+
+restart() {
+  stop
+  start
+}
+
+case "$1" in
+  start)
+    start
+    ;;
+  stop)
+    stop
+    ;;
+  restart)
+    restart
+    ;;
+  *)
+    echo $"Usage: $0 {start|stop|restart}"
+    RETVAL=2
+    ;;
+esac
+
+exit $RETVAL
+

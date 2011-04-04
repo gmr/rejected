@@ -1,4 +1,6 @@
 .DS_Store
+.bash_history
+.ssh
 logs/*.txt
 *.pyc
 */*.pyc

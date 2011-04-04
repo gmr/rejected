@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python2.6
 """
 Rejected AMQP Consumer Framework
 
@@ -20,10 +20,12 @@ __email__   = "gmr@myyearbook.com"
 __date__    = "2009-09-10"
 __version__ = 0.2
 
+import sys
+sys.path.insert(0, '/opt/rejected')
+
 import amqplib.client_0_8 as amqp
 import exceptions
 import logging
-import sys
 import optparse
 import os
 import signal
@@ -32,6 +34,7 @@ import time
 import traceback
 import yaml
 import zlib
+
 
 # Number of seconds to sleep between polls
 mcp_poll_delay = 10

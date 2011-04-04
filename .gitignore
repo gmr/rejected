@@ -1,6 +1,12 @@
-.DS_Store
-.bash_history
-.ssh
-logs/*.txt
+.*
 *.pyc
-*/*.pyc
+bin
+# Processors
+cart/
+efferent/
+email_composer/
+email_spooler/
+feedbackloop_unsubscribe/
+irsupload/
+sendgrid
+tap/

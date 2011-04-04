@@ -10,3 +10,6 @@ feedbackloop_unsubscribe/
 irsupload/
 sendgrid
 tap/
+memoryhole/
+mrmackey/
+remote_call_email/

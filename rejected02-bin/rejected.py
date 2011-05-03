@@ -271,6 +271,7 @@ class ConsumerThread( threading.Thread ):
                
     def run( self ):
         """ Meat of the queue consumer code """
+        global options
 
         logging.debug( '%s: Running thread' % self.getName() )
 
@@ -304,14 +305,15 @@ class ConsumerThread( threading.Thread ):
 
         # Create / Connect to the Queue
         self.queue_name = self.config['Bindings'][self.binding_name]['queue']
-        queue_auto_delete = self.config['Queues'][self.queue_name ]['auto_delete']
-        queue_durable = self.config['Queues'][self.queue_name ]['durable']
-        queue_exclusive = self.config['Queues'][self.queue_name ]['exclusive']
+        if options.declare:
+            queue_auto_delete = self.config['Queues'][self.queue_name ]['auto_delete']
+            queue_durable = self.config['Queues'][self.queue_name ]['durable']
+            queue_exclusive = self.config['Queues'][self.queue_name ]['exclusive']
 
-        self.channel.queue_declare( queue = self.queue_name , 
-                                    durable = queue_durable,
-                                    exclusive = queue_exclusive, 
-                                    auto_delete = queue_auto_delete )
+            self.channel.queue_declare(queue = self.queue_name, 
+                                       durable = queue_durable,
+                                       exclusive = queue_exclusive, 
+                                       auto_delete = queue_auto_delete)
 
         # Create / Connect to the Exchange
         self.exchange = self.config['Bindings'][self.binding_name]['exchange']
@@ -319,18 +321,20 @@ class ConsumerThread( threading.Thread ):
         exchange_durable = self.config['Exchanges'][self.exchange]['durable']
         exchange_type = self.config['Exchanges'][self.exchange]['type']
         
-        self.channel.exchange_declare( exchange = self.exchange, 
-                                       type = exchange_type, 
-                                       durable = exchange_durable,
-                                       auto_delete = exchange_auto_delete)
+        if options.declare:
+            self.channel.exchange_declare(exchange = self.exchange, 
+                                          type = exchange_type, 
+                                          durable = exchange_durable,
+                                          auto_delete = exchange_auto_delete)
 
         # Bind to the Queue / Exchange
-        self.channel.queue_bind( queue = self.queue_name, 
-                                 exchange = self.exchange,
-                                 routing_key = self.binding_name )
+        if options.declare:
+            self.channel.queue_bind(queue = self.queue_name, 
+                                    exchange = self.exchange,
+                                    routing_key = self.binding_name)
 
         # Allow the processor to use additional binding keys
-        if "BindingKeys" in self.config['Bindings'][self.binding_name]:
+        if options.declare and "BindingKeys" in self.config['Bindings'][self.binding_name]:
             for key in self.config['Bindings'][self.binding_name]['BindingKeys']:
                 self.channel.queue_bind( queue = self.queue_name, 
                                          exchange = self.exchange,
@@ -769,7 +773,7 @@ def shutdown(signum = 0, frame = None):
 
 def main():
     """ Main Application Handler """
-    global mcp, mcp_poll_delay, process
+    global mcp, mcp_poll_delay, options, process
     
     usage = "usage: %prog [options]"
     version_string = "%%prog %s" % __version__
@@ -802,11 +806,15 @@ def main():
     parser.add_option("-d", "--detached",
                         action="store_true", dest="detached", default=False,
                         help="Run in daemon mode")                                                                                                                                 
-
     parser.add_option("-m", "--monitor",
                         action="store_true", dest="monitor", 
                         default=False,
                         help="Poll Alice for scaling consumer threads.")
+                        
+    parser.add_option("-D", "--declare",
+                        action="store_true", dest="declare", 
+                        default=False,
+                        help="Declare exchanges, queues and bind them")
                         
     parser.add_option("-s", "--single",
                         action="store_true", dest="single_thread", 

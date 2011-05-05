@@ -13,3 +13,14 @@ Requirements:
  * amqplib
  * pyyaml
  * alice (optional)
+
+Example Processor:
+
+import logging
+
+class Test:
+
+    def process(self, message):
+
+        logging.debug('In Test.test: %s' % message.body)
+        return True

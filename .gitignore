@@ -1,16 +1,3 @@
 .*
 *.pyc
-bin
-# Processors
-cart/
-efferent/
-email_composer/
-email_spooler/
-facebook_live_invite/
-feedbackloop_unsubscribe/
-irsupload/
-sendgrid
-tap/
-memoryhole/
-mrmackey/
-remote_call_email/
+config

@@ -5,6 +5,7 @@ function stop_consumers
   CONSUMER=$(basename ${1} .yaml)
   echo "Sending TERM signal to $CONSUMER consumer(s)"
   sudo pkill -f $1
+  /opt/rejected/bin/opslog.py 'Stopped $CONSUMER rejected consumers'
 }
 
 if [ -z "$1" ]; then

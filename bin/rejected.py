@@ -995,7 +995,7 @@ def main():
 if __name__ == '__main__':
     
     # Get our sub-path going for processor imports
-    sys.path.insert(0, 'processors')
+    sys.path.insert(0, '/opt/processors')
     
     # Run the main function
     main()

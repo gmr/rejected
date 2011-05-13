@@ -18,12 +18,21 @@ function get_count
 function start_consumers
 {
   CONSUMER=$(basename ${1} .yaml)
-  CONSUMERS=$(get_count $1)
+
+  if [ "${FGBG}" == "-v" ]; then
+    CONSUMERS=1
+  else
+    CONSUMERS=$(get_count $1)
+  fi
+
   echo "Starting $CONSUMERS $CONSUMER consumer(s)"
   for x in $(seq 1 $CONSUMERS); do
     sudo su rejected -c "/opt/rejected/bin/rejected.py -c $1 ${FGBG}"
   done
-  /opt/rejected/bin/opslog.py "Started $CONSUMERS $CONSUMER rejected consumer(s)"
+
+  if [ "${FGBG}" != "-v" ]; then
+    /opt/rejected/bin/opslog.py "Started $CONSUMERS $CONSUMER rejected consumer(s)"
+  fi
 }
 
 if [ -z "$1" ]; then

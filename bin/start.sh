@@ -23,7 +23,7 @@ function start_consumers
   for x in $(seq 1 $CONSUMERS); do
     sudo su rejected -c "/opt/rejected/bin/rejected.py -c $1 ${FGBG}"
   done
-  /opt/rejected/bin/opslog.py 'Started $CONSUMERS $CONSUMER rejected consumer(s)'
+  /opt/rejected/bin/opslog.py "Started $CONSUMERS $CONSUMER rejected consumer(s)"
 }
 
 if [ -z "$1" ]; then

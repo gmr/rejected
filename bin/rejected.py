@@ -303,6 +303,9 @@ class ConsumerThread( threading.Thread ):
         # Create the Channel
         self.channel = self.connection.channel()
 
+        # Set the qos prefetch
+        self.channel.basic_qos(0, 1, 0)
+
         # Create / Connect to the Queue
         self.queue_name = self.config['Bindings'][self.binding_name]['queue']
         if options.declare:

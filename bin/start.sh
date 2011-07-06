@@ -1,8 +1,8 @@
 #!/bin/bash
 #
-# Usage: start.sh [ <consumer_name> [-v] ]
+# Usage: start.sh [ <consumer_name> [-f] ]
 #
-# If starting a single consumer, you can pass -v as the 2nd argument
+# If starting a single consumer, you can pass -f as the 2nd argument
 # to run in the foreground
 
 # By default, run in the background (-d = detached)
@@ -19,7 +19,7 @@ function start_consumers
 {
   CONSUMER=$(basename ${1} .yaml)
 
-  if [ "${FGBG}" == "-v" ]; then
+  if [ "${FGBG}" == "-f" ]; then
     CONSUMERS=1
   else
     CONSUMERS=$(get_count $1)
@@ -30,7 +30,7 @@ function start_consumers
     sudo su rejected -c "/opt/rejected/bin/rejected.py -c $1 ${FGBG}"
   done
 
-  if [ "${FGBG}" != "-v" ]; then
+  if [ "${FGBG}" != "-f" ]; then
     /opt/rejected/bin/opslog.py "Started $CONSUMERS $CONSUMER rejected consumer(s)"
   fi
 }

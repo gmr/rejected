@@ -855,14 +855,13 @@ def main():
         os.setsid()
         os.umask(0)
 
-        # Close stdin
-        sys.stdin.close()
-
-        # Redirect stdout, stderr
-        sys.stdout = open(os.path.join(os.path.dirname(__file__),
-                          config['Logging']['directory'], "stdout.log"), 'w')
-        sys.stderr = open(os.path.join(os.path.dirname(__file__),
-                          config['Logging']['directory'], "stderr.log"), 'w')
+        # Redirect stdout, stderr, stdin
+        si = file('/dev/null', 'r')
+        so = file('/dev/null', 'a+')
+        se = file('/dev/null', 'a+', 0)
+        os.dup2(si.fileno(), sys.stdin.fileno())
+        os.dup2(so.fileno(), sys.stdout.fileno())
+        os.dup2(se.fileno(), sys.stderr.fileno())
 
     # Set our signal handler so we can gracefully shutdown
     signal.signal(signal.SIGTERM, shutdown)

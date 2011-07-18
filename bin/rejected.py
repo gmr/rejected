@@ -801,7 +801,7 @@ def main():
             pid = os.fork()
             if pid > 0:
                 # exit from second parent, print eventual PID before
-                sys.stdout.write('rejected.py daemon has started - PID # %d.\n' % pid)
+                #sys.stdout.write('rejected.py daemon has started - PID # %d.\n' % pid)
                 _logger.info('Child forked as PID # %d' % pid)
                 sys.exit(0)
         except OSError, e:

@@ -6,9 +6,9 @@ A multi-threaded consumer application and how!
 
 Copyright (c) 2009,  Insider Guides, Inc.
 All rights reserved.
- 
+
 Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
- 
+
 Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.
 Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution.
 Neither the name of the Insider Guides, Inc. nor the names of its contributors may be used to endorse or promote products derived from this software without specific prior written permission.
@@ -63,24 +63,24 @@ def import_namespaced_class(path):
 
     # Return the class handle
     return class_handle
-    
-    
+
+
 class ConnectionException( exceptions.Exception ):
-    
+
     def __str__(self):
         return "Connection Failed"
 
 
 class ConsumerThread( threading.Thread ):
     """ Consumer Class, Handles the actual AMQP work """
-    
+
     def __init__( self, configuration, routing_key, connect_name ):
 
         _logger.debug( 'Initializing a Consumer Thread' )
 
         # Rejected full Configuration
         self.config = configuration
-        
+
         # Binding to make code more readable
         binding = self.config['Bindings'][routing_key]
 
@@ -109,15 +109,15 @@ class ConsumerThread( threading.Thread ):
         self.throttle_count = 0
         self.throttle_duration = 0
         if binding['consumers'].has_key('throttle'):
-            _logger.debug( 'Setting message throttle to %i message(s) per second' % 
+            _logger.debug( 'Setting message throttle to %i message(s) per second' %
                             binding['consumers']['throttle'] )
             self.throttle = True
             self.throttle_threshold = binding['consumers']['throttle']
 
         self.total_wait = 0.0
-            
+
         # Init the Thread Object itself
-        threading.Thread.__init__(self)  
+        threading.Thread.__init__(self)
 
     def connect(self, configuration):
         """Connect to an AMQP Broker
@@ -156,7 +156,7 @@ class ConsumerThread( threading.Thread ):
     def locked(self):
         """ What is the lock status for the MCP? """
         return self._locked
-        
+
     def lock(self):
         """ Lock the thread so the MCP does not destroy it until we're done processing a message """
         self._locked = True
@@ -175,37 +175,37 @@ class ConsumerThread( threading.Thread ):
 
     def process(self, message):
         """ Process a message from Rabbit"""
-        
+
         # If we're throttling
         if self.throttle and self.interval_start is None:
            self.interval_start = time.time()
-        
+
         # Lock while we're processing
         self.lock()
-        
+
         # If we're compressed in message body, decompress it
         if self.compressed:
             try:
                 message.body = zlib.decompress(message.body)
             except zlib.error:
                 _logger.warn('Invalid zlib compressed message.body')
-        
+
         # Process the message, if it returns True, we're all good
         try:
             if self.processor.process(message):
                 self.messages_processed += 1
-        
+
                 # If we're not auto-acking at the broker level, do so here, but why?
                 if not self.auto_ack:
                     self.channel.basic_ack( message.delivery_tag )
-        
+
             # It's returned False, so we should check our our check
             # We don't want to have out-of-control errors
             else:
-            
+
                # Unlock
                self.unlock()
-               
+
                # Do we need to requeue?  If so, lets send it
                if self.requeue_on_error:
                    msg = amqp.Message(message.body)
@@ -213,67 +213,67 @@ class ConsumerThread( threading.Thread ):
                    self.channel.basic_publish( msg,
                                                exchange = self.exchange,
                                                routing_key = self.routing_key )
-               
+
                # Keep track of how many errors we've had
                self.errors += 1
-               
+
         except Exception as e:
             exc_type, exc_value, exc_traceback = sys.exc_info()
-            formatted_lines = traceback.format_exc().splitlines()      
+            formatted_lines = traceback.format_exc().splitlines()
             _logger.critical('ConsumerThread: Processor threw an uncaught exception')
             _logger.critical('ConsumerThread: %s:%s' % (type(e), str(e)))
             _logger.critical('ConsumerThread: %s' % formatted_lines[3].strip())
             _logger.critical('ConsumerThread: %s' % formatted_lines[4].strip())
-                    
+
             # Do we need to requeue?  If so, lets send it
             if self.requeue_on_error:
                 self._publish(message)
 
             # Keep track of how many errors we've had
             self.errors += 1
-        
+
             # If we've had too many according to the configuration, shutdown
             if self.errors >= self.max_errors:
                 _logger.error( 'Received %i errors, shutting down thread "%s"' % ( self.errors, self.getName() ) )
                 self.shutdown()
                 return
-        
+
         # Unlock the thread, safe to shutdown
         self.unlock()
-        
+
         # If we're throttling
         if self.throttle:
-        
+
            # Get the duration from when we starting this interval to now
            self.throttle_duration += time.time() - self.interval_start
            self.interval_count += 1
-        
+
            # If the duration is less than 1 second and we've processed up to (or over) our max
            if self.throttle_duration <= 1 and self.interval_count >= self.throttle_threshold:
-           
+
                # Increment our throttle count
                self.throttle_count += 1
-               
+
                # Figure out how much time to sleep
                sleep_time = 1 - self.throttle_duration
-               
-               _logger.debug( '%s: Throttling to %i message(s) per second, waiting %.2f seconds.' % 
+
+               _logger.debug( '%s: Throttling to %i message(s) per second, waiting %.2f seconds.' %
                               ( self.getName(), self.throttle_threshold, sleep_time ) )
-               
+
                # Sleep and setup for the next interval
                time.sleep(sleep_time)
-        
+
                # Reset our counters
                self.interval_count = 0
                self.interval_start = None
                self.throttle_duration = 0
-               
+
            # Else if our duration is more than a second restart our counters
            elif self.throttle_duration >= 1:
-               self.interval_count = 0   
+               self.interval_count = 0
                self.interval_start = None
                self.throttle_duration = 0
-               
+
     def run( self ):
         """ Meat of the queue consumer code """
         global options
@@ -283,18 +283,18 @@ class ConsumerThread( threading.Thread ):
         # Import our processor class
         import_name = self.config['Bindings'][self.routing_key]['import']
         class_name = self.config['Bindings'][self.routing_key]['processor']
-        
+
         # Try and import the module
         processor_class = import_namespaced_class("%s.%s" % (import_name, class_name))
-        _logger.info( '%s: Creating message processor: %s.%s' % 
+        _logger.info( '%s: Creating message processor: %s.%s' %
                       ( self.getName(), import_name, class_name ) )
-                      
-        # If we have a config, pass it in to the constructor                      
+
+        # If we have a config, pass it in to the constructor
         if self.config['Bindings'][self.routing_key].has_key('config'):
             self.processor = processor_class(self.config['Bindings'][self.routing_key]['config'])
         else:
             self.processor = processor_class()
-            
+
         # Assign the port to monitor the queues on
         self.monitor_port = self.config['Connections'][self.connect_name]['monitor_port']
 
@@ -304,7 +304,7 @@ class ConsumerThread( threading.Thread ):
         except ConnectionException:
             self.running = False
             return
-        
+
         # Create the Channel
         self.channel = self.connection.channel()
 
@@ -317,7 +317,7 @@ class ConsumerThread( threading.Thread ):
         self.queue_options = (self.config['Queues'][self.queue_name ]['durable'],
                               self.config['Queues'][self.queue_name ]['exclusive'],
                               self.config['Queues'][self.queue_name ]['auto_delete'])
-    
+
         # Create / Connect to the Exchange
         self.exchange = self.config['Bindings'][self.routing_key]['exchange']
         exchange_auto_delete = self.config['Exchanges'][self.exchange]['auto_delete']
@@ -335,7 +335,7 @@ class ConsumerThread( threading.Thread ):
 
         # Loop as long as the thread is running
         while self.running:
-            
+
             # Wait on messages
             if _IS_QUITTING:
                 _logger.info('Not wait()ing because _IS_QUITTING is set!')
@@ -353,7 +353,7 @@ class ConsumerThread( threading.Thread ):
                 break
             except TypeError:
                 _logger.error('%s: TypeError received' % self.getName() )
-                
+
         _logger.info( '%s: Exiting ConsumerThread.run()' % self.getName() )
 
     def shutdown(self):
@@ -363,14 +363,14 @@ class ConsumerThread( threading.Thread ):
             _logger.debug( 'Already shutting down %s' % self.getName() )
             self.running = False
             return False
-        
-        """ 
+
+        """
         This hangs because channel.wait in the thread is blocking on socket.recv.
         channel.close sends the close message, then enters ultimately into
         socket.recv to get the close_ok response.  Depending on the timing,
         the channel.wait has picked up the close_ok after channel.close (on main
         thread) entered socket.recv.
-        
+
         I was looking at a nonblocking method to deal with this properly:
         http://www.lshift.net/blog/2009/02/18/evserver-part2-rabbit-and-comet
         """
@@ -397,7 +397,7 @@ class ConsumerThread( threading.Thread ):
             _logger.debug('%s: Processor does not have a shutdown method' % self.getName())
 
         return True
-    
+
 class MasterControlProgram:
     """ Master Control Program keeps track of threads and threading needs """
 
@@ -423,16 +423,16 @@ class MasterControlProgram:
         # Loop through each binding to ensure all our threads are running
         offset = 0
         for binding in self.bindings:
-        
+
             # Go through the threads to check the queue depths for each server
             dead_threads = []
             for x in xrange(0, len(binding['threads'])):
-            
+
                 # Make sure the thread is still alive, otherwise remove it and move on
                 if not binding['threads'][x].isAlive():
                     _logger.error( 'MCP: Encountered a dead thread, removing.' )
                     dead_threads.append(x)
-            
+
             # Remove dead threads
             for list_offset in dead_threads:
                 _logger.error( 'MCP: Removing the dead thread from the stack' )
@@ -442,11 +442,11 @@ class MasterControlProgram:
             if not len(binding['threads']):
                 _logger.error( 'MCP: We have no working consumers, removing down this binding.' )
                 del self.bindings[offset]
-                
+
             # Increment our list offset
             offset += 1
-        
-        # If we have removed all of our bindings because they had no working threads, shutdown         
+
+        # If we have removed all of our bindings because they had no working threads, shutdown
         if not self.bindings:
             _logger.error( 'MCP: We have no working bindings, shutting down.' )
             shutdown()
@@ -590,21 +590,21 @@ class MasterControlProgram:
 
     def shutdown(self):
         """ Graceful shutdown of the MCP means shutting down threads too """
-        
+
         _logger.debug( 'MCP: Master Control Program Shutting Down' )
-        
+
         # Get the thread count
         threads = self.threadCount()
-        
+
         # Keep track of the fact we're shutting down
         self.shutdown_pending = True
-        
+
         # Loop as long as we have running threads
         while threads:
-            
+
             # Loop through all of the bindings and try and shutdown their threads
             for binding in self.bindings:
-                
+
                 # Loop through all the threads in this binding
                 for x in xrange(0, len(binding['threads'])):
 
@@ -614,21 +614,21 @@ class MasterControlProgram:
                         _logger.debug('MCP: Waiting on %s to shutdown properly' % thread.getName())
                         time.sleep(1)
 
-            # Get our updated thread count and only sleep then loop if it's > 0, 
+            # Get our updated thread count and only sleep then loop if it's > 0,
             threads = self.threadCount()
-            
+
             # If we have any threads left, sleep for a second before trying again
             if threads:
                 _logger.debug( 'MCP: Waiting on %i threads to cleanly shutdown.' % threads )
                 time.sleep(1)
-                    
+
     def start(self):
         """ Initialize all of the consumer threads when the MCP comes to life """
         _logger.debug( 'MCP: Master Control Program Starting Up' )
 
         # Loop through all of the bindings
         for routing_key in self.config['Bindings']:
-            
+
             # Create the dictionary values for this binding
             binding = {'name': routing_key,
                        'queue': self.config['Bindings'][routing_key]['queue'],
@@ -654,10 +654,10 @@ class MasterControlProgram:
 
             # Append this binding to our binding stack
             self.bindings.append(binding)
-        
+
     def threadCount(self):
         """ Return the total number of working threads managed by the MCP """
-        
+
         count = 0
         for binding in self.bindings:
             count += len(binding['threads'])
@@ -715,21 +715,21 @@ def shutdown(signum = 0, frame = None):
 def main():
     """ Main Application Handler """
     global mcp, _MCP_POLL_DELAY, options, process
-    
+
     usage = "usage: %prog [options]"
     version_string = "%%prog %s" % __version__
     description = "rejected.py consumer daemon"
-    
+
     # Create our parser and setup our command line options
     parser = optparse.OptionParser(usage=usage,
                          version=version_string,
                          description=description)
 
-    parser.add_option("-c", "--config", 
-                        action="store", type="string", default="rejected.yaml", 
+    parser.add_option("-c", "--config",
+                        action="store", type="string", default="rejected.yaml",
                         help="Specify the configuration file to load.")
 
-    parser.add_option("-b", "--binding", 
+    parser.add_option("-b", "--binding",
                         action="store", dest="binding",
                         help="Binding name to use to when used in conjunction \
                         with the broker and single settings. All other \
@@ -748,8 +748,8 @@ def main():
     parser.add_option("-p", "--processor_base_path", dest="processor_base_path",
                       action="store", type="string", default=_PROCESSOR_BASE,
                       help="Specify the base path for processor packages.")
-    
-    # Parse our options and arguments                                                                        
+
+    # Parse our options and arguments
     options, args = parser.parse_args()
 
     # Get our base path going for processor imports
@@ -760,7 +760,7 @@ def main():
     process = parts[len(parts) - 1]
     parts = process.split('.')
     process = parts[0]
-    
+
     # Load the Configuration file
     try:
         stream = file(options.config, 'r')
@@ -769,14 +769,14 @@ def main():
     except IOError:
         sys.stderr.write("\nError: Invalid or missing configuration file \"%s\"\n" % options.config)
         sys.exit(-1)
-    
+
     # Set logging levels dictionary
     logging_levels = {'debug':    logging.DEBUG,
                       'info':     logging.INFO,
                       'warning':  logging.WARN,
                       'error':    logging.ERROR,
                       'critical': logging.CRITICAL}
-    
+
     # Get the logging value from the dictionary
     logging_level = config['Logging']['level']
     config['Logging']['level'] = logging_levels.get(config['Logging']['level'], logging.NOTSET )
@@ -787,20 +787,20 @@ def main():
 
     # If the user says verbose overwrite the settings.
     if options.single_thread:
-    
+
         # Set the debugging level to verbose
         config['Logging']['level'] = logging.DEBUG
-        
+
         # If we have specified a file, remove it so logging info goes to stdout
         if config['Logging'].has_key('filename'):
             del config['Logging']['filename']
 
     else:
         # Build a specific path to our log file
-        if config['Logging'].has_key('filename'):
-            config['Logging']['filename'] = os.path.join( os.path.dirname(__file__), 
-                                                          config['Logging']['directory'], 
-                                                          config['Logging']['filename'] )
+        if config['Logging'].get('filename'):
+            config['Logging']['filename'] = \
+                os.path.join(config['Logging'].get('directory'),
+                             config['Logging'].get('filename'))
 
     # Pass in our logging config
     logging.basicConfig(**config['Logging'])
@@ -809,15 +809,16 @@ def main():
 
     # If we have supported handler
     if config['Logging'].has_key('handler'):
-        
+
         # If we want to syslog
         if config['Logging']['handler'] == 'syslog':
 
             from logging.handlers import SysLogHandler
 
-            # Create the syslog handler            
-            logging_handler = SysLogHandler( address='/dev/log', facility = SysLogHandler.LOG_LOCAL6 )
-            
+            # Create the syslog handler
+            logging_handler = SysLogHandler(address='/dev/log',
+                                            facility=SysLogHandler.LOG_LOCAL6)
+
             # Add the handler
             logger = logging.getLogger()
             logger.addHandler(logging_handler)
@@ -829,40 +830,40 @@ def main():
             pid = os.fork()
             if pid > 0:
                 _logger.info('Parent process ending.')
-                sys.exit(0)                        
+                sys.exit(0)
         except OSError, e:
             sys.stderr.write("Could not fork: %d (%s)\n" % (e.errno, e.strerror))
             sys.exit(1)
-        
+
         # Second fork to put into daemon mode
-        try: 
-            pid = os.fork() 
+        try:
+            pid = os.fork()
             if pid > 0:
                 # exit from second parent, print eventual PID before
                 sys.stdout.write('rejected.py daemon has started - PID # %d.\n' % pid)
                 _logger.info('Child forked as PID # %d' % pid)
-                sys.exit(0) 
-        except OSError, e: 
+                sys.exit(0)
+        except OSError, e:
             sys.stderr.write("Could not fork: %d (%s)\n" % (e.errno, e.strerror))
             sys.exit(1)
-        
+
         # Let the debugging person know we've forked
         _logger.debug( 'rejected.py has forked into the background.' )
-        
-        # Detach from parent environment
-        os.chdir( os.path.dirname(__file__) ) 
-        os.setsid()
-        os.umask(0) 
 
-        # Close stdin            
+        # Detach from parent environment
+        os.chdir( os.path.dirname(__file__) )
+        os.setsid()
+        os.umask(0)
+
+        # Close stdin
         sys.stdin.close()
-        
+
         # Redirect stdout, stderr
-        sys.stdout = open(os.path.join(os.path.dirname(__file__), 
+        sys.stdout = open(os.path.join(os.path.dirname(__file__),
                           config['Logging']['directory'], "stdout.log"), 'w')
-        sys.stderr = open(os.path.join(os.path.dirname(__file__), 
+        sys.stderr = open(os.path.join(os.path.dirname(__file__),
                           config['Logging']['directory'], "stderr.log"), 'w')
-                                                 
+
     # Set our signal handler so we can gracefully shutdown
     signal.signal(signal.SIGTERM, shutdown)
     for signum in [signal.SIGQUIT, signal.SIGUSR1, signal.SIGUSR2, signal.SIGHUP]:
@@ -870,10 +871,10 @@ def main():
 
     # Start the Master Control Program ;-)
     mcp = MasterControlProgram(config)
-    
+
     # Kick off our core connections
     mcp.start()
-    
+
     # If our config has monitoring disabled but we enable via cli, enable it
     if 'Monitor' not in config:
         config['Monitor'] = dict()
@@ -885,7 +886,7 @@ def main():
     _logger.debug('%s: MCP_POLL_DELAY set to %i seconds.', __file__, _MCP_POLL_DELAY)
 
     while True:
-        
+
         # Have the Master Control Process poll
         try:
 
@@ -900,9 +901,9 @@ def main():
         except (KeyboardInterrupt, SystemExit):
             # The user has sent a kill or ctrl-c
             shutdown()
-        
+
 # Only execute the code if invoked as an application
 if __name__ == '__main__':
-    
+
     # Run the main function
     main()

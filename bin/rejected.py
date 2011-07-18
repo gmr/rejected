@@ -785,45 +785,6 @@ def main():
     if 'processor_base' in config:
         sys.path.insert(0, config['processor_base'])
 
-    # If the user says verbose overwrite the settings.
-    if options.single_thread:
-
-        # Set the debugging level to verbose
-        config['Logging']['level'] = logging.DEBUG
-
-        # If we have specified a file, remove it so logging info goes to stdout
-        if config['Logging'].has_key('filename'):
-            del config['Logging']['filename']
-
-    else:
-        # Build a specific path to our log file
-        if config['Logging'].get('filename'):
-            config['Logging']['filename'] = \
-                os.path.join(config['Logging'].get('directory'),
-                             config['Logging'].get('filename'))
-
-    # Pass in our logging config
-    logging.basicConfig(**config['Logging'])
-    _logger.setLevel(config['Logging']['level'])
-    _logger.info('Log level set to %s' % logging_level)
-
-    # If we have supported handler
-    if config['Logging'].has_key('handler'):
-
-        # If we want to syslog
-        if config['Logging']['handler'] == 'syslog':
-
-            from logging.handlers import SysLogHandler
-
-            # Create the syslog handler
-            logging_handler = SysLogHandler(address='/dev/log',
-                                            facility=SysLogHandler.LOG_LOCAL6)
-
-            # Add the handler
-            logger = logging.getLogger()
-            logger.addHandler(logging_handler)
-            logger.debug('Sending message')
-
     # Fork our process to detach if not told to stay in foreground
     if options.detached:
         try:
@@ -862,6 +823,45 @@ def main():
         os.dup2(si.fileno(), sys.stdin.fileno())
         os.dup2(so.fileno(), sys.stdout.fileno())
         os.dup2(se.fileno(), sys.stderr.fileno())
+
+    # If the user says verbose overwrite the settings.
+    if options.single_thread:
+
+        # Set the debugging level to verbose
+        config['Logging']['level'] = logging.DEBUG
+
+        # If we have specified a file, remove it so logging info goes to stdout
+        if config['Logging'].has_key('filename'):
+            del config['Logging']['filename']
+
+    else:
+        # Build a specific path to our log file
+        if config['Logging'].get('filename'):
+            config['Logging']['filename'] = \
+                os.path.join(config['Logging'].get('directory'),
+                             config['Logging'].get('filename'))
+
+    # Pass in our logging config
+    logging.basicConfig(**config['Logging'])
+    _logger.setLevel(config['Logging']['level'])
+    _logger.info('Log level set to %s' % logging_level)
+
+    # If we have supported handler
+    if config['Logging'].has_key('handler'):
+
+        # If we want to syslog
+        if config['Logging']['handler'] == 'syslog':
+
+            from logging.handlers import SysLogHandler
+
+            # Create the syslog handler
+            logging_handler = SysLogHandler(address='/dev/log',
+                                            facility=SysLogHandler.LOG_LOCAL6)
+
+            # Add the handler
+            logger = logging.getLogger()
+            logger.addHandler(logging_handler)
+            logger.debug('Sending message')
 
     # Set our signal handler so we can gracefully shutdown
     signal.signal(signal.SIGTERM, shutdown)

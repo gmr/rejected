@@ -220,10 +220,11 @@ class ConsumerThread( threading.Thread ):
         except Exception as e:
             exc_type, exc_value, exc_traceback = sys.exc_info()
             formatted_lines = traceback.format_exc().splitlines()
+
             _logger.critical('ConsumerThread: Processor threw an uncaught exception')
             _logger.critical('ConsumerThread: %s:%s' % (type(e), str(e)))
-            _logger.critical('ConsumerThread: %s' % formatted_lines[3].strip())
-            _logger.critical('ConsumerThread: %s' % formatted_lines[4].strip())
+            for line in formatted_lines:
+                _logger.critical('ConsumerThread: %s' % line.strip())
 
             # Do we need to requeue?  If so, lets send it
             if self.requeue_on_error:

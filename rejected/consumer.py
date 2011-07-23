@@ -67,12 +67,12 @@ class Consumer(object):
         self._setup_counters()
 
         # Create our pika connection parameters attribute
-        credentials = pika.PlainCredentials(config['connection']['user'],
-                                            config['connection']['pass'])
+        credentials = pika.PlainCredentials(self._config['connection']['user'],
+                                            self._config['connection']['pass'])
         self._pika_parameters = \
-            pika.ConnectionParameters(config['connection']['host'],
-                                      config['connection']['port'],
-                                      config['connection']['vhost'],
+            pika.ConnectionParameters(self._config['connection']['host'],
+                                      self._config['connection']['port'],
+                                      self._config['connection']['vhost'],
                                       credentials)
 
         # Start the connection process to RabbitMQ

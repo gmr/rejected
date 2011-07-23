@@ -23,5 +23,5 @@ setup(name='rejected',
       license='BSD',
       packages=['rejected'],
       requires=['pika'],
-      entry_points=dict(console_scripts=['rejected=cli:main']),
+      entry_points=dict(console_scripts=['rejected=rejected.cli:main']),
       zip_safe=True)

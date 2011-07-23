@@ -6,5 +6,4 @@ __author__ = 'Gavin M. Roy <gmr@myyearbook.com>'
 __date__    = "2009-09-10"
 __version__ = "1.0.0"
 
-from mcp import MasterControlProgram
-from consumer import Consumer
+__all__ = ['cli', 'common', 'mcp', 'utils']

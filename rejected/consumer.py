@@ -336,9 +336,11 @@ class Consumer(threading.Thread):
         self._interval_start = None
         self._throttle_duration = 0
 
-    def process(self, method, header, body):
+    def process(self, channel, method, header, body):
         """Process a message from Rabbit
 
+        :param channel: The channel the message was sent on
+        :type channel: pika.channel.Channel
         :param method: The method frame
         :type method: pika.frames.MethodFrame
         :param header: The header frame
@@ -464,5 +466,6 @@ class LegacyMessage(object):
     def __init__(self, method, header, body):
 
         self.delivery_tag = method.delivery_tag
+        self.delivery_info = {'routing_key': method.routing_key}
         self.header = header
         self.body = body

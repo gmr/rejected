@@ -36,7 +36,7 @@ class Consumer(object):
 
         """
         self.name = '%s-%s-%i' % \
-                    (consumer_number, consumer_name, connection_name)
+                    (consumer_name, connection_name, consumer_number)
 
         # Create our logger
         self._logger = logging.getLogger('rejected.consumer')

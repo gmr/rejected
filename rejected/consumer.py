@@ -128,7 +128,7 @@ class Consumer(object):
                                 'description': self.state_desc}})
 
         # Perform the passive queue declare
-        self._logger.info( '%s: Performing a queue depth check', self.name)
+        self._logger.debug('%s: Performing a queue depth check', self.name)
         self._channel.queue_declare(callback=on_passive_queue_declare,
                                     queue=self._queue_name,
                                     passive=True)
@@ -174,17 +174,17 @@ class Consumer(object):
         # Set our QOS Prefetch Count
         self._set_qos_prefetch()
 
-        # Start the message consumer
-        self._consumer_tag = \
-            self._channel.basic_consume(consumer_callback = self.process,
-                                        queue=self._queue_name,
-                                        no_ack=self._no_ack)
-
         # Set our runtime state
         self._state = Consumer.CONSUMING
 
         # Ask for stuck messages
         self._channel.basic_recover(requeue=True)
+
+        # Start the message consumer
+        self._consumer_tag = \
+            self._channel.basic_consume(consumer_callback = self.process,
+                                        queue=self._queue_name,
+                                        no_ack=self._no_ack)
 
     def on_closed(self, reason_code, reason_text):
         """Callback invoked by Pika when our connection has been closed.

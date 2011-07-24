@@ -83,6 +83,8 @@ class Consumer(object):
 
         # Setup the processor
         self._processor = self._init_processor()
+        if not self._processor:
+            raise ImportError('Could not import and start processor')
 
         # Create our pika connection parameters attribute
         credentials = pika.PlainCredentials(self._config['connection']['user'],
@@ -463,10 +465,20 @@ class Consumer(object):
 
         # If we have a config, pass it in to the constructor
         if 'config' in self._config['consumer']:
-            return processor_class(self._config['consumer']['config'])
+            try:
+                return processor_class(self._config['consumer']['config'])
+            except Exception as error:
+                self._logger.critical('Could not load %s.%s: %s',
+                                      import_name, class_name, error)
+                return False
 
         # No config to pass
-        return processor_class()
+        try:
+            return processor_class()
+        except Exception as error:
+            self._logger.critical('Could not load %s.%s: %s',
+                                  import_name, class_name, error)
+            return False
 
     def _process(self, message):
         """Wrap the actual processor processing bits
@@ -498,7 +510,9 @@ class Consumer(object):
 
         """
         self._logger.debug('%s: Nacking %s', self.name, delivery_tag)
-        self._channel.basic_nack(delivery_tag=delivery_tag)
+
+        # Switch to nack when we use a version of pika that has it
+        self._channel.basic_reject(delivery_tag=delivery_tag)
 
     def _processing(self):
         """Set the state to Consumer.PROCESSING, checking first if there is a

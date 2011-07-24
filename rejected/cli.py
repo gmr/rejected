@@ -85,7 +85,7 @@ def main():
     mcp_ = mcp.MasterControlProgram(config)
 
     # Set the shutdown handler to mcp.MasterControlProgram.shutdown()
-    utils.SHUTDOWN_HANDLER = mcp_.shutdown
+    utils.shutdown_handler(mcp_.shutdown)
 
     # Have the Master Control Process poll
     try:

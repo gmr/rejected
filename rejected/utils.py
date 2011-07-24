@@ -263,7 +263,6 @@ def setup_logging(config, debug=False):
 
     # Pass in our logging config
     logging.basicConfig(**config)
-    logging.info('Log level set to %s' % logging_level)
 
     # Get the default logger
     default_logging = logging.getLogger()

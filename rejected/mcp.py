@@ -94,7 +94,9 @@ class MasterControlProgram(object):
         """
         count = 0
         for consumer_ in self._all_consumers:
-            if consumer_.state == consumer.Consumer.CONSUMING:
+            if consumer_.state in [consumer.Consumer.INITIALIZING,
+                                   consumer.Consumer.CONSUMING,
+                                   consumer.Consumer.PROCESSING]:
                 count += 1
         return count
 
@@ -142,7 +144,7 @@ class MasterControlProgram(object):
         self._ioloop.start()
 
         # Stop the poll timer
-        self._poll_timer = stop()
+        self._poll_timer.cancel()
 
     def _stop_consumers(self):
         """Iterate through all of the consumers shutting them down.
@@ -216,7 +218,6 @@ class MasterControlProgram(object):
             self._logger.warn('Poll interval failure for consumer(s): ',
                               ', '.join(self._poll_data['consumers']))
 
-
         # Keep track of running consumers
         non_active_consumers = list()
 
@@ -225,16 +226,14 @@ class MasterControlProgram(object):
                            'consumers': list()}
 
         # Iterate through all of the consumers
-        self._logger.info('Polling consumers')
         for consumer_ in self._all_consumers:
-            if consumer_.state in [consumer.Consumer.CONSUMING,
-                                   consumer.Consumer.PROCESSING]:
+            self._logger.debug('Polling %s', consumer_.name)
+            if consumer_.state == consumer.Consumer.STOPPED:
+                self._logger.warn('Found stopped consumer %s', consumer_.name)
+                non_active_consumers.append(consumer_.name)
+            else:
                 consumer_.get_processing_information(self._collect_results)
                 self._poll_data['consumers'].append(consumer_.name)
-            else:
-                self._logger.warn('Found consumer %s in state: %s',
-                                  consumer_.name, consumer_.state_desc)
-                non_active_consumers.append(consumer_.name)
 
         # Remove the objects if we have them
         self._prune_non_active_consumers(non_active_consumers)
@@ -327,7 +326,12 @@ class MasterControlProgram(object):
             self._calculate_stats(self._last_poll_results)
 
     def _calculate_stats(self, data):
-        """Calculate the stats data for our process level data."""
+        """Calculate the stats data for our process level data.
+
+        :param data: The collected stats data to report on
+        :type data: dict
+
+        """
         stats = {}
         timestamp = data['timestamp']
         del data['timestamp']

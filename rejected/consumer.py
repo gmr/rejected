@@ -1,5 +1,5 @@
 """
-consumer.py
+Class 
 
 """
 __author__ = 'Gavin M. Roy'
@@ -17,6 +17,7 @@ from . import common
 from . import utils
 from . import __version__
 
+_AMQP_APP_ID = 'rejected/%s' % __version__
 _QOS_PREFETCH_COUNT = 1
 
 
@@ -283,7 +284,7 @@ class Consumer(threading.Thread):
             _previous_message = self._compress(_previous_message)
 
         properties = _previous_message.header.properties
-        properties.app_id =  'rejected/%s' % __version__
+        properties.app_id =  _AMQP_APP_ID
         properties.user_id = self._config['connection']['user']
 
         self._channel.basic_publish(exchange=exchange,
@@ -402,7 +403,7 @@ class Consumer(threading.Thread):
         #self._set_qos_prefetch()
 
         # Tell the broker we're ready to receive messages
-        self._channel.basic_consume(consumer_callback = self.process,
+        self._channel.basic_consume(consumer_callback=self.process,
                                     queue=self._queue_name,
                                     no_ack=not self._do_ack,
                                     consumer_tag=self.name)

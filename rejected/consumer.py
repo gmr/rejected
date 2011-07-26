@@ -72,12 +72,9 @@ class Consumer(object):
         self._config = {'connection': config['Connections'][connection_name],
                         'connection_name': connection_name,
                         'consumer_name': consumer_name,
-                        'consumer_tag': '%s%i_tag%i' % (consumer_name,
-                                                        os.getpid(),
-                                                        consumer_number),
-                        'name': '%s-%s-%s' % (consumer_name,
-                                              connection_name,
-                                              consumer_number)}
+                        'name': '%s_%i_tag_%i' % (consumer_name,
+                                                  os.getpid(),
+                                                  consumer_number)}
 
         # Create our logger
         self._logger = logging.getLogger('rejected.consumer')
@@ -103,8 +100,8 @@ class Consumer(object):
 
         # Create our pika connection parameters attribute
         connection = self._config['connection']
-        credentials = pika.PlainCredentials(connection['connection']['user'],
-                                            connection['connection']['pass'])
+        credentials = pika.PlainCredentials(connection['user'],
+                                            connection['pass'])
         self._config['pika'] = pika.ConnectionParameters(connection['host'],
                                                          connection['port'],
                                                          connection['vhost'],
@@ -201,7 +198,7 @@ class Consumer(object):
         self._channel.basic_consume(consumer_callback = self.process,
                                     queue=self._config['queue_name'],
                                     no_ack=self._config['no_ack'],
-                                    consumer_tag=self._config['consumer_tag'])
+                                    consumer_tag=self.name)
 
     def on_closed(self, reason_code, reason_text):
         """Callback invoked by Pika when our connection has been closed.
@@ -337,7 +334,7 @@ class Consumer(object):
             return
 
         self._set_state(Consumer.SHUTTING_DOWN)
-        self._channel.basic_cancel(consumer_tag=self._config['consumer_tag'],
+        self._channel.basic_cancel(consumer_tag=self.name,
                                    callback=self.on_basic_cancel)
 
     ## Internal methods

@@ -587,9 +587,11 @@ class Consumer(object):
         :type state: int
 
         """
-        if self._state not in Consumer._STATES:
-            raise ValueError('%i is not a valid state for this object', state)
-
+        # Make sure it's a valid state
+        if state not in Consumer._STATES:
+            raise ValueError('%s is not a valid state for this object' % \
+                             Consumer._STATES[state])
+        # Set the state
         self._state = state
 
     ## Properties

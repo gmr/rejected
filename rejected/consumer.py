@@ -366,7 +366,7 @@ class Consumer(object):
         # Initialize object wide variables
         self._config['no_ack'] = \
             compat.get_compatible_config(self._config['consumer'],
-                                        'noack',
+                                        'no_ack',
                                         'auto_ack')
 
         # Are the messages compressed in and out with zlib?
@@ -660,7 +660,7 @@ class DataObject(object):
         for key, value in self.__dict__.iteritems():
             if getattr(self.__class__, key, None) != value:
                 items.append('%s=%s' % (key, value))
-        return "<%s(%s)>" % items
+        return "<%s(%s)>" % (self.__class__.__name__, items)
 
 
 class Message(DataObject):

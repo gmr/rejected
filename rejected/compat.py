@@ -29,8 +29,8 @@ def get_compatible_config(config, key, compatible_key=None, default_value=None):
     """
     if key not in config:
         if compatible_key and compatible_key in config:
-            _LOGGER.warn("Returning deprecated configuration key: %s",
-                        compatible_key)
+            _LOGGER.warn("Returning deprecated configuration key: %s,\
+ use %s instead", compatible_key, key)
             return config.get(compatible_key, default_value)
     return config.get(key, default_value)
 

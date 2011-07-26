@@ -24,14 +24,20 @@ from socket import gethostname
 LOGGER = logging.getLogger('rejected.utils')
 
 # Callback handlers
-SHUTDOWN_HANDLER = None
-REHASH_HANDLER = None
+_SHUTDOWN_HANDLER = None
 
 # Application state for shutdown
 RUNNING = False
 
 # Default group for files
 _DEFAULT_GID = 1
+
+# Set logging levels dictionary
+LEVELS = {'debug':    logging.DEBUG,
+          'info':     logging.INFO,
+          'warning':  logging.WARNING,
+          'error':    logging.ERROR,
+          'critical': logging.CRITICAL}
 
 
 def log_method_call(method):
@@ -185,6 +191,44 @@ def load_configuration_file(config_file):
     return config
 
 
+def setup_logger(name, level):
+    """Setup an individual logger at a specified level.
+
+    :param name: Logger name
+    :type name: str
+    :param level: Logging level
+    :type level: logging.LEVEL
+
+    """
+    logger = logging.getLogger(name)
+    logger.setLevel(level)
+
+
+def setup_loggers(loggers, level):
+    """Iterate through our loggers if specified and set their levels.
+
+    :param loggers: list of loggers
+    :type loggers: list
+    :param level: default logging level if not specified
+    :type level: logging.LEVEL
+
+    """
+    # It's possible/probable there was nothing there.
+    if not loggers:
+        return
+
+    # Apply the logging level to the loggers we have specifically set
+    for logger in loggers:
+        # If it's a list expect a logger_name, level string format
+        if isinstance(logger, list):
+            level_ = LEVELS.get(logger[1], logging.NOTSET)
+            setup_logger(logger[0], level_)
+
+        # Otherwise we just just want a specific logger at the default level
+        elif isinstance(logger, str):
+            setup_logger(logger, level)
+
+
 def setup_logging(config, debug=False):
     """
     Setup the logging module to respect our configuration values.
@@ -202,36 +246,29 @@ def setup_logging(config, debug=False):
     Passing in debug=True will disable any log output to anything but stdout
     and will set the log level to debug regardless of the config.
     """
-    # Set logging levels dictionary
-    logging_levels = {'debug':    logging.DEBUG,
-                      'info':     logging.INFO,
-                      'warning':  logging.WARNING,
-                      'error':    logging.ERROR,
-                      'critical': logging.CRITICAL}
-
-    # Get the logging value from the dictionary
-    logging_level = config['level']
-
     if debug:
 
         # Override the logging level to use debug mode
-        config['level'] = logging.DEBUG
+        config['level'] = 'debug'
 
         # If we have specified a file, remove it so logging info goes to stdout
         if 'filename' in config:
             del config['filename']
 
-    else:
+    # Get the logging value from the dictionary
+    logging_level = config['level']
 
-        # Use the configuration option for logging
-        config['level'] = logging_levels.get(config['level'], logging.NOTSET)
+    # Use the configuration option for logging
+    config['level'] = LEVELS.get(config['level'], logging.NOTSET)
 
     # Pass in our logging config
     logging.basicConfig(**config)
-    logging.info('Log level set to %s' % logging_level)
 
     # Get the default logger
     default_logging = logging.getLogger()
+
+    # Setup loggers
+    setup_loggers(config.get('loggers'), config['level'])
 
     # Remove the default stream handler
     stream_handler = None
@@ -261,36 +298,42 @@ def setup_logging(config, debug=False):
                 default_logging.addHandler(syslog)
 
                 # Remove the StreamHandler
-                if stream_handler:
+                if stream_handler and not debug:
                     default_logging.removeHandler(stream_handler)
             else:
                 logging.error('%s:Invalid facility, syslog logging aborted',
                               application_name())
 
 
-def shutdown():
+def shutdown(signum, frame):
+    """Cleanly shutdown the application
+
+    :param signum: Signal passed in
+    :type signum: int
+    :param frame: The frame
+    :type frame: frame or None
+
     """
-    Cleanly shutdown the application
-    """
-    global RUNNING
+    global _SHUTDOWN_HANDLER
+    LOGGER.info('SIGTERM received %i:%r', signum, frame)
 
     # Tell all our children to stop
-    if SHUTDOWN_HANDLER:
-        SHUTDOWN_HANDLER()
-
-    # Set the running state
-    RUNNING = False
-
+    if _SHUTDOWN_HANDLER:
+        LOGGER.debug('Calling shutdown handler: %r', _SHUTDOWN_HANDLER)
+        _SHUTDOWN_HANDLER()
+    else:
+        LOGGER.info('No signal handler defined')
 
 def setup_signals():
     """Setup the signals we want to be notified on"""
+    LOGGER.info('Setting up signals for PID %i', os.getpid())
 
     # Set our signal handler so we can gracefully shutdown
     signal.signal(signal.SIGTERM, shutdown)
 
     # Now set all the others
-    for num in [signal.SIGQUIT, signal.SIGUSR1, signal.SIGUSR2, signal.SIGHUP]:
-        signal.signal(num, _signal_handler)
+    #for num in [signal.SIGQUIT, signal.SIGUSR1, signal.SIGUSR2, signal.SIGHUP]:
+    #    signal.signal(num, _signal_handler)
 
 
 def _signal_handler(signum, frame):
@@ -327,7 +370,6 @@ def import_namespaced_class(path):
     # Return the class handle
     return class_handle
 
-
 def show_frames():
     for threadId, stack in sys._current_frames().items():
         LOGGER.info("# ThreadID: %s", threadId)
@@ -335,3 +377,8 @@ def show_frames():
             LOGGER.info('  File: "%s", line %d, in %s', filename, lineno, name)
             if line:
                 LOGGER.info("    %s", line.strip())
+
+def shutdown_handler(handler):
+    global _SHUTDOWN_HANDLER
+    _SHUTDOWN_HANDLER = handler
+    LOGGER.debug('Shutdown handler set to %r', handler)

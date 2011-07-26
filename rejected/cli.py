@@ -8,6 +8,7 @@ __since__ = '2011-07-22'
 
 import logging
 import optparse
+from os import path
 import sys
 
 from . import mcp
@@ -37,6 +38,11 @@ def parse_options():
                       action="store_true", dest="foreground", default=False,
                       help="Run in the foreground in debug mode.")
 
+    parser.add_option("-p", "--processor-path", default="/opt/processors",
+                      action="store", dest="processor_path",
+                      help="Set the non-package processor path. \
+                            Default: /opt/processors")
+
     options, arguments = parser.parse_args()
     return parser, options, arguments
 
@@ -54,6 +60,9 @@ def main():
         sys.stderr.write('\nERROR: Missing configuration file\n\n')
         parser.print_help()
         sys.exit(1)
+
+    # Insert the processor path
+    sys.path.insert(0, path.normpath(options.processor_path))
 
     # Load the YAML file
     config = utils.load_configuration_file(options.config)
@@ -76,7 +85,7 @@ def main():
     mcp_ = mcp.MasterControlProgram(config)
 
     # Set the shutdown handler to mcp.MasterControlProgram.shutdown()
-    utils.SHUTDOWN_HANDLER = mcp_.shutdown
+    utils.shutdown_handler(mcp_.shutdown)
 
     # Have the Master Control Process poll
     try:
@@ -84,4 +93,6 @@ def main():
     except KeyboardInterrupt:
         # Ctrl-C was caught
         logger.info('KeyboardInterrupt caught, stopping')
+
+        # Shutdown
         mcp_.shutdown()

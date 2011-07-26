@@ -8,7 +8,15 @@ __since__ = '2011-07-22'
 
 
 def get_consumer_config(config):
-    return config.get('Consumers') or config.get('Bindings')
+    config = config.get('Consumers') or config.get('Bindings')
+
+    # Squash the configs down
+    for name in config:
+        if 'consumers' in config[name]:
+            config[name].update(config[name]['consumers'])
+            del config[name]['consumers']
+    return config
+
 
 def get_poll_interval(config):
     monitoring = config.get('Monitoring', dict())

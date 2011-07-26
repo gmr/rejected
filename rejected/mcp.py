@@ -8,6 +8,7 @@ __since__ = '2011-07-22'
 
 from tornado import ioloop
 import logging
+import os
 import threading
 import time
 
@@ -77,8 +78,9 @@ class MasterControlProgram(object):
 
         """
         # Create a new consumer
-        self._logger.info('Creating a new consumer: %s-%s-%i',
-                          consumer_name, connection_name, consumer_number)
+        self._logger.info('Creating a new consumer for %s: %s_%i_tag_%i',
+                          connection_name, consumer_name,
+                          os.getpid(), consumer_number)
 
         # Create the new consumer
         return consumer.Consumer(self._config,
@@ -122,7 +124,7 @@ class MasterControlProgram(object):
             # Iterate through the connections to create new consumers
             for connection_name in consumers[name]['connections']:
 
-                self._logger.debug('Starting %i consumers for %s on %s',
+                self._logger.debug('Starting %i consumer(s) for %s on %s',
                                    self._consumers[name]['min'],
                                    name, connection_name)
 

@@ -11,7 +11,7 @@ import logging
 import threading
 import time
 
-from . import common
+from . import compat
 from . import consumer
 
 
@@ -42,10 +42,10 @@ class MasterControlProgram(object):
         self._stats = dict()
 
         # Carry for calculating messages per second
-        self._monitoring = common.monitoring_enabled(config)
+        self._monitoring = compat.is_monitoring_enabled(config)
 
         # Setup the queue depth polling
-        self._poll_interval = common.get_poll_interval(config) or \
+        self._poll_interval = compat.get_poll_interval(config) or \
                               MasterControlProgram._POLL_INTERVAL
 
         # Setup the poll timer
@@ -65,7 +65,7 @@ class MasterControlProgram(object):
                 consumers.append(consumer_)
         return consumers
 
-    def _new_consumer(self, consumer_number, consumer_name, connection_name):
+    def _create_consumer(self, consumer_number, consumer_name, connection_name):
         """Create a new consumer instances
 
         :param consumer_number: The identification number for the consumer
@@ -108,7 +108,7 @@ class MasterControlProgram(object):
         self._logger.debug('Master Control Program Starting Up' )
 
         # Get the consumer section from the config
-        consumers = common.get_consumer_config(self._config)
+        consumers = compat.get_consumer_config(self._config)
 
         # Loop through all of the consumers
         for name in consumers:
@@ -130,7 +130,7 @@ class MasterControlProgram(object):
                 for consumer_number in xrange(0, self._consumers[name]['min']):
 
                     # Create the new consumer
-                    consumer_ = self._new_consumer(consumer_number,
+                    consumer_ = self._create_consumer(consumer_number,
                                                    name,
                                                    connection_name)
 
@@ -148,6 +148,7 @@ class MasterControlProgram(object):
 
     def _stop_consumers(self):
         """Iterate through all of the consumers shutting them down.
+
         """
         # See if we need to just stop
         if time.time() - self._shutdown_start > \
@@ -165,8 +166,7 @@ class MasterControlProgram(object):
         # Loop through all of the bindings and try and shutdown consumers
         self._logger.info('Asking %i consumer(s) to stop', self._consumer_count)
         for consumer_ in self._all_consumers:
-            if consumer_.state not in [consumer.Consumer.SHUTTING_DOWN,
-                                       consumer.Consumer.STOPPED]:
+            if consumer_.is_running:
                 self._logger.debug('Asking %s to stop', consumer_.name)
                 consumer_.stop()
 

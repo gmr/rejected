@@ -1,5 +1,7 @@
 """
-Class
+Core consumer class that handles the communication with RabbitMQ and the
+delegation of messages to the Processor class for processing. Controls the life
+cycle of a message received from RabbitMQ.
 
 """
 __author__ = 'Gavin M. Roy'
@@ -7,13 +9,14 @@ __email__ = 'gmr@myyearbook.com'
 __since__ = '2011-07-22'
 
 import logging
+import os
 import pika
 from pika.adapters.tornado_connection import TornadoConnection
 import time
 import traceback
 import zlib
 
-from . import common
+from . import compat
 from . import utils
 from . import __version__
 
@@ -23,7 +26,8 @@ _QOS_PREFETCH_COUNT = 1
 
 class Consumer(object):
     """
-    Core consumer class for processing messages and dealing with AMQP
+    Core consumer class for processing messages and dealing with AMQP and
+    message processing.
 
     """
     # State constants
@@ -56,10 +60,24 @@ class Consumer(object):
 
         :param config: Consumer config section from YAML File
         :type config: dict
+        :param consumer_number: The identification number for the consumer
+        :type consumer_number: int
+        :param consumer_name: The name of the consumer
+        :type consumer_name: str
+        :param connection_name: The name of the connection
+        :type connection_name
+        :raises: ImportError
 
         """
-        self.name = '%s-%s-%i' % \
-                    (consumer_name, connection_name, consumer_number)
+        self._config = {'connection': config['Connections'][connection_name],
+                        'connection_name': connection_name,
+                        'consumer_name': consumer_name,
+                        'consumer_tag': '%s%i_tag%i' % (consumer_name,
+                                                        os.getpid(),
+                                                        consumer_number),
+                        'name': '%s-%s-%s' % (consumer_name,
+                                              connection_name,
+                                              consumer_number)}
 
         # Create our logger
         self._logger = logging.getLogger('rejected.consumer')
@@ -67,22 +85,16 @@ class Consumer(object):
                            self.name, consumer_name, connection_name)
 
         # Application State
-        self._state = Consumer.INITIALIZING
-
-        # Our connection name:
-        self._connection_name = connection_name
-        self._consumer_name = consumer_name
-        self._consumer_tag = None
+        self._state = None
+        self._set_state(Consumer.INITIALIZING)
 
         # Connection objects
         self._connection = None
         self._channel = None
 
         # Carry our config as a subset
-        self._config = {'connection': config['Connections'][connection_name]}
-
         # Setup the attributes
-        self._setup_attributes(config)
+        self._add_config_attributes(config)
 
         # Setup the processor
         self._processor = self._init_processor()
@@ -90,13 +102,13 @@ class Consumer(object):
             raise ImportError('Could not import and start processor')
 
         # Create our pika connection parameters attribute
-        credentials = pika.PlainCredentials(self._config['connection']['user'],
-                                            self._config['connection']['pass'])
-        self._pika_parameters = \
-            pika.ConnectionParameters(self._config['connection']['host'],
-                                      self._config['connection']['port'],
-                                      self._config['connection']['vhost'],
-                                      credentials)
+        connection = self._config['connection']
+        credentials = pika.PlainCredentials(connection['connection']['user'],
+                                            connection['connection']['pass'])
+        self._config['pika'] = pika.ConnectionParameters(connection['host'],
+                                                         connection['port'],
+                                                         connection['vhost'],
+                                                         credentials)
 
         # Start the connection process to RabbitMQ
         self._connect()
@@ -122,20 +134,20 @@ class Consumer(object):
             """Handle the callback from Pika with the queue depth information"""
             self._logger.debug('Calling %s with queue_state_data', callback)
             # Call the callback with the data
-            callback({'name': self.name,
-                      'connection': self._connection_name,
-                      'consumer_name': self._consumer_name,
+            callback({'name': self._config['name'],
+                      'connection': self._config['connection_name'],
+                      'consumer_name': self._config['consumer_name'],
                       'counts': self._counts,
-                      'queue': {'name': self._queue_name,
+                      'queue': {'name': self._config['queue_name'],
                                 'message_count': frame.method.message_count,
                                 'consumer_count': frame.method.consumer_count},
-                      'state': {'value': self._state,
+                      'state': {'value': self.state,
                                 'description': self.state_desc}})
 
         # Perform the passive queue declare
         self._logger.debug('%s: Performing a queue depth check', self.name)
         self._channel.queue_declare(callback=on_passive_queue_declare,
-                                    queue=self._queue_name,
+                                    queue=self._config['queue_name'],
                                     passive=True)
 
     def on_basic_cancel(self, channel):
@@ -148,7 +160,7 @@ class Consumer(object):
         """
         self._logger.debug('%s: Basic.Cancel on %r complete',
                            self.name, channel)
-        self._state = self.STOPPED
+        self._set_state(self.STOPPED)
 
     def on_channel_close(self, reason_code, reason_text):
         """Callback invoked by Pika when the channel has been closed by
@@ -162,7 +174,7 @@ class Consumer(object):
         """
         self._logger.critical('%s: The channel has closed: (%s) %s',
                               self.name, reason_code, reason_text)
-        self._state = self.STOPPED
+        self._set_state(self.STOPPED)
 
     def on_channel_open(self, channel):
         """The channel is open so now lets set our QOS prefetch and register
@@ -180,16 +192,16 @@ class Consumer(object):
         self._set_qos_prefetch()
 
         # Set our runtime state
-        self._state = Consumer.CONSUMING
+        self._set_state(Consumer.CONSUMING)
 
         # Ask for stuck messages
         self._channel.basic_recover(requeue=True)
 
         # Start the message consumer
-        self._consumer_tag = \
-            self._channel.basic_consume(consumer_callback = self.process,
-                                        queue=self._queue_name,
-                                        no_ack=self._no_ack)
+        self._channel.basic_consume(consumer_callback = self.process,
+                                    queue=self._config['queue_name'],
+                                    no_ack=self._config['no_ack'],
+                                    consumer_tag=self._config['consumer_tag'])
 
     def on_closed(self, reason_code, reason_text):
         """Callback invoked by Pika when our connection has been closed.
@@ -214,7 +226,7 @@ class Consumer(object):
                                self.name)
 
         # Set the runtime state
-        self._state = Consumer.STOPPED
+        self._set_state(Consumer.STOPPED)
 
     def on_connected(self, connection):
         """We have connected to RabbitMQ so setup our connection attribute and
@@ -256,7 +268,8 @@ class Consumer(object):
             return False
 
         # Build the message wrapper object for all the parts
-        message = Message(channel, method, header, body)
+        message = Message(channel, method, header, body,
+                          self._config['compressed_messages'])
         if method.redelivered:
             redelivered = ' - is a redelivered message'
             self._increment_stat(Consumer.REDELIVERED)
@@ -268,18 +281,14 @@ class Consumer(object):
         # Set our start time
         start_time = time.time()
 
-        # If we're compressed in message body, decompress it
-        if self._compressed_messages:
-            message = self._decompress(message)
-
         # Process the message, evaluating the success
         if self._process(message):
 
             # Message was processed
             self._increment_stat(Consumer.PROCESSED, start_time)
 
-            # If we're not auto-acking at the broker level, do so here
-            if not self._no_ack:
+            # If no_ack was not set when we setup consuming, do so here
+            if not self._config['no_ack']:
                 self._ack(method.delivery_tag)
 
             # Exit while setting our state to consuming
@@ -288,14 +297,14 @@ class Consumer(object):
         # Processing failed
         self._increment_stat(Consumer.ERROR, start_time)
 
-        # If we're not auto-acking at the broker level, do so here
-        if not self._no_ack:
-            self._nack(method.delivery_tag)
+        # If we do not have no_ack set, then reject the message
+        if not self._config['no_ack']:
+            self._reject(method.delivery_tag)
 
-        # No-Ack is on so do we want to republish?
-        elif self._republish_on_error:
-            self._republish(self._republish_exchange,
-                            self._republish_key,
+        # No-Ack is on, do we want to republish?
+        elif self._config['republish_on_error']:
+            self._republish(self._config['republish_exchange'],
+                            self._config['republish_key'],
                             message)
 
         # Check our error count
@@ -314,7 +323,7 @@ class Consumer(object):
         # If we're processing set our state to let our processor know to call
         # us when we're done
         if self._state == Consumer.PROCESSING:
-            self._state = Consumer.STOP_REQUESTED
+            self._set_state(Consumer.STOP_REQUESTED)
             return
 
         # If we're already shutting down, note it for debugging purposes
@@ -327,8 +336,8 @@ class Consumer(object):
             self._logger.debug('%s: Already stopped', self.name)
             return
 
-        self._state = Consumer.SHUTTING_DOWN
-        self._channel.basic_cancel(consumer_tag=self._consumer_tag,
+        self._set_state(Consumer.SHUTTING_DOWN)
+        self._channel.basic_cancel(consumer_tag=self._config['consumer_tag'],
                                    callback=self.on_basic_cancel)
 
     ## Internal methods
@@ -342,6 +351,53 @@ class Consumer(object):
         """
         self._logger.debug('%s: Acking %s', self.name, delivery_tag)
         self._channel.basic_ack(delivery_tag=delivery_tag)
+
+    def _add_config_attributes(self, config):
+        """Append values to the _config dictionary of attributes
+
+        :param config: The configuration as specified in the YAML file
+        :type config: dict
+
+        """
+        # Get the full config section for consumers or bindings (legacy)
+        consumers = compat.get_consumer_config(config)
+        self._config['consumer'] = consumers[self._config['consumer_name']]
+
+        # Set the queue name to config
+        self._config['queue_name'] = self._config['consumer']['queue']
+
+        # Initialize object wide variables
+        self._config['no_ack'] = \
+            compat.get_compatible_config(self._config['consumer'],
+                                        'noack',
+                                        'auto_ack')
+
+        # Are the messages compressed in and out with zlib?
+        self._config['compressed_messages'] = self._config.get('compressed',
+                                                               False)
+
+
+        # Republish on error?
+        self._config['republish_on_error'] = \
+            compat.get_compatible_config(self._config['consumer'],
+                                        'republish_on_error',
+                                        'requeue_on_error')
+
+        # The requeue key can be specified or default to consumer name
+        self._config['republish_key'] = \
+            self._config['consumer'].get('republish_key',
+                                         self._config['consumer_name'])
+
+
+        # Get the republish exchange or legacy exchange value
+        self._config['republish_exchange'] = \
+            compat.get_compatible_config(self._config['consumer'],
+                                        'republish_exchange',
+                                        'exchange')
+
+        # The maximum number of errors to tolerate
+        self._config['max_error_count'] = \
+            self._config['consumer'].get('max_errors', 5)
 
     def _can_change_state(self):
         """Check the current state, calling stop if required and returning False
@@ -358,28 +414,13 @@ class Consumer(object):
             return False
 
         # Make sure we're not in a blocking state
-        if self._state in [Consumer.SHUTTING_DOWN, Consumer.STOPPED]:
+        if self.is_stopped:
             self._logger.debug('%s: No state change while stopping or stopped',
                                self.name)
             return False
 
         # Let our calling party know it's ok
         return True
-
-    def _compress(self, message):
-        """Compress a zlib compressed body part
-
-        :param message: The AMQP message with the body part to compress
-        :type message: Message
-        :returns: Message
-
-        """
-        try:
-            message.body = zlib.compress(message.body)
-        except zlib.error as error:
-            self._logger.warn('%s: Could not compress message.body: %s',
-                              self.name, error)
-        return message
 
     def _connect(self):
         """Connect to RabbitMQ
@@ -389,10 +430,10 @@ class Consumer(object):
         """
         # Get the configuration for convenience
         try:
-            TornadoConnection(self._pika_parameters, self.on_connected)
+            TornadoConnection(self._config['pika'], self.on_connected)
         except pika.exceptions.AMQPConnectionError as error:
             self._logger.critical('%s: Could not connect: %s', self.name, error)
-            self._state = Consumer.STOPPED
+            self._set_state(Consumer.STOPPED)
 
     def _consuming(self):
         """Set the state to Consumer.CONSUMING, checking if we need to shutdown
@@ -401,7 +442,7 @@ class Consumer(object):
         """
         # Set our state to consuming if we can
         if self._can_change_state():
-            self._state = Consumer.CONSUMING
+            self._set_state(Consumer.CONSUMING)
 
     def _count(self, stat):
         """Return the current count quantity for a specific stat.
@@ -413,27 +454,9 @@ class Consumer(object):
         """
         return self._counts.get(stat, -1)
 
-    def _decompress(self, message):
-        """Decompress a zlib compressed body part
-
-        :param message: The AMQP message with the body part to decompress
-        :type message: Message
-        :returns: Message
-
-        """
-        try:
-            message.body = zlib.decompress(message.body)
-        except zlib.error:
-            self._logger.warn('%s: Invalid zlib compressed message.body',
-                              self.name)
-        return message
-
     def _error_count_check(self):
-        """Check the quantity of errors in the thread and shutdown if required
-
-        """
-        # If we've had too many according to the config, shutdown
-        if self._count(Consumer.ERROR) >= self._max_error_count:
+        """Check the quantity of errors in the thread & shutdown if required"""
+        if self._count(Consumer.ERROR) >= self._config['max_error_count']:
             self._logger.error('%s: Processor returned %i errors',
                                self.name, self._count(Consumer.ERROR))
             # Stop the consumer
@@ -473,7 +496,7 @@ class Consumer(object):
             except Exception as error:
                 self._logger.critical('Could not load %s.%s: %s',
                                       import_name, class_name, error)
-                return False
+                return None
 
         # No config to pass
         try:
@@ -481,7 +504,7 @@ class Consumer(object):
         except Exception as error:
             self._logger.critical('Could not load %s.%s: %s',
                                   import_name, class_name, error)
-            return False
+            return None
 
     def _process(self, message):
         """Wrap the actual processor processing bits
@@ -505,14 +528,15 @@ class Consumer(object):
         # We erred out so return False
         return False
 
-    def _nack(self, delivery_tag):
-        """Negatively acknowledge the message on the broker and log it
+    def _reject(self, delivery_tag):
+        """Reject the message on the broker and log it. We should move this to
+         use to nack when Pika supports it in a released version.
 
-        :param delivery_tag: Delivery tag to nack
+        :param delivery_tag: Delivery tag to reject
         :type delivery_tag: int
 
         """
-        self._logger.debug('%s: Nacking %s', self.name, delivery_tag)
+        self._logger.debug('%s: Rejecting %s', self.name, delivery_tag)
 
         # Switch to nack when we use a version of pika that has it
         self._channel.basic_reject(delivery_tag=delivery_tag)
@@ -524,30 +548,28 @@ class Consumer(object):
         """
         # Set our state to processing if we can
         if self._can_change_state():
-            self._state = Consumer.PROCESSING
+            self._set_state(Consumer.PROCESSING)
 
-    def _republish(self, exchange, routing_key, _previous_message):
+    def _republish(self, exchange, routing_key, message):
         """Republish a message (on error)
 
         :param exchange: The exchange to publish to
         :type exchange: str
         :param routing_key: The routing key to use
         :type routing_key: str
-        :param _previous_message: The message to republish
-        :type _previous_message: Message
+        :param message: The message to republish
+        :type message: Message
 
         """
-        # Compress the message if we need to
-        if self._compressed_messages:
-            _previous_message = self._compress(_previous_message)
-
-        properties = _previous_message.header.properties
+        # Override what sent the message
+        properties = message.properties
         properties.app_id =  _AMQP_APP_ID
         properties.user_id = self._config['connection']['user']
 
+        # Publish the message
         self._channel.basic_publish(exchange=exchange,
                                     routing_key=routing_key,
-                                    body=_previous_message.body,
+                                    body=message.get_body(),
                                     properties=properties)
 
     def _set_qos_prefetch(self):
@@ -558,43 +580,47 @@ class Consumer(object):
                           self.name, value)
         self._channel.basic_qos(prefetch_count=value, callback=None)
 
-    def _setup_attributes(self, config):
+    def _set_state(self, state):
+        """Assign the specified state to this consumer object.
 
-        # Get the full config section for consumers or bindings (legacy)
-        consumers = common.get_consumer_config(config)
-        self._config['consumer'] = consumers[self._consumer_name]
+        :param state: The current state of the object
+        :type state: int
 
-        # Set the queue name to config
-        self._queue_name = self._config['consumer']['queue']
+        """
+        if self._state not in Consumer._STATES:
+            raise ValueError('%i is not a valid state for this object', state)
 
-        # Initialize object wide variables
-        self._no_ack = self._config['consumer'].get('noack') or \
-                       self._config['consumer'].get('auto_ack', False)
-
-        # Are the messages compressed in and out with zlib?
-        self._compressed_messages = self._config.get('compressed', False)
-
-        # Republish on error? Not found, look for the legacy value
-        temp = self._config['consumer'].get('republish_on_error', None) or \
-               self._config['consumer'].get('requeue_on_error', False)
-
-        # Set our republish on error value
-        self._republish_on_error = temp
-
-        # The requeue key can be specified or use the consumer name
-        # for legacy support
-        self._republish_key = self._config['consumer'].get('republish_key',
-                                                           self._consumer_name)
-
-        # Get the republish exchange or legacy exchange value
-        temp = self._config['consumer'].get('republish_exchange', None) or \
-               self._config['consumer'].get('exchange', False)
-        self._republish_exchange = temp
-
-        # The maximum number of errors to tolerate
-        self._max_error_count = self._config['consumer'].get('max_errors', 5)
+        self._state = state
 
     ## Properties
+
+    @property
+    def is_running(self):
+        """Returns a bool determining if the consumer is in a running state or
+        not
+
+        :returns: bool
+
+        """
+        return self._state in [Consumer.CONSUMING, Consumer.PROCESSING]
+
+    @property
+    def is_stopped(self):
+        """Returns a bool determining if the consumer is stopped or stopping
+
+        :returns: bool
+
+        """
+        return self._state in [Consumer.SHUTTING_DOWN, Consumer.STOPPED]
+
+    @property
+    def name(self):
+        """Return the name of the consumer
+
+        :returns: str
+
+        """
+        return self._config['name']
 
     @property
     def state(self):
@@ -615,21 +641,136 @@ class Consumer(object):
         return Consumer._STATES[self._state]
 
 
-class Message(object):
+class DataObject(object):
+    """A class that will return a plain text representation of all of the
+    attributes assigned to the object.
 
-    def __init__(self, channel, method, header, body):
+    """
+    def __init__(self):
+        self._logger = logging.getLogger('rejected.%s' %
+                                         self.__class__.__name__)
+
+    def __repr__(self):
+        """Return a string representation of the object and all of its
+        attributes.
+
+        :returns: str
+
+        """
+        items = list()
+        for key, value in self.__dict__.iteritems():
+            if getattr(self.__class__, key, None) != value:
+                items.append('%s=%s' % (key, value))
+        return "<%s(%s)>" % items
+
+
+class Message(DataObject):
+    """Class for containing all the attributes about a message object creating a
+    flatter, move convenient way to access the data while supporting the legacy
+    methods that were previously in place in rejected < 2.0
+
+    """
+
+    def __init__(self, channel, method, header, body, compressed):
+        """Initialize a message setting the attributes from the given channel,
+        method, header and body.
+
+        :param channel: Pika Channel original message was received on
+        :type channel: pika.channel.Channel
+        :param method: Pika Method Frame object with attributes
+        :type method: pika.frames.Method
+        :param header: Pika Header Frame object with attributes
+        :type header: pika.frames.Header
+        :param body: Pika message body
+        :type body: pika.frames.Body
+        :param compressed: Is the body compressed with zlib?
+        :type compressed: bool
+
+        """
+        DataObject.__init__(self)
 
         # Map the channel so we have access to it in our clients
-        self.channel = channel
+        self._pika_objects = {'channel': channel,
+                              'method': method,
+                              'header': header,
+                              'compressed': compressed,
+                              'body': body}
 
         # Map method properties
+        self.consumer_tag = method.consumer_tag
         self.delivery_tag = method.delivery_tag
+        self.exchange = method.exchange
         self.redelivered = method.redelivered
         self.routing_key = method.routing_key
-        self.exchange = method.exchange
-        self.consumer_tag = method.consumer_tag
 
         # BasicProperties fields
+        self.properties = Properties(header)
+
+    def get_body(self, decompress=False):
+        """Return the body, decompressing it if we asked for decompressed and
+        if we are configured to support compressed objects.
+
+        :returns: str
+
+        """
+        if decompress and self._pika_objects['compressed']:
+            try:
+                return zlib.decompress(self._pika_objects['body'])
+            except zlib.error:
+                self._logger.warn('Invalid zlib compressed message body')
+
+        return self._pika_objects['body']
+
+    @property
+    def body(self):
+        """Return the message body, decompressing it if it was compressed.
+
+        :returns: str
+
+        """
+        return self.get_body(True)
+
+    @property
+    def channel(self):
+        """Returns the channel attribute while raising a DeprecationWarning
+        about using the Processor base class instead.
+
+        """
+        self._logger.warning("""You should be using the rejected Processor base
+ class instead of the message.channel or message.delivery_info['channel']
+ attributes""")
+        return self._pika_objects['channel']
+
+    @property
+    def delivery_info(self):
+        """Returns the delivery_info dictionary while logging a warning about
+        accessing the delivery_info property
+
+        """
+        self._logger.warning("""Use the attributes of the Message object instead
+ of the delivery_info attribute""")
+        return {'channel': self.channel,
+                'delivery_tag': self.delivery_tag,
+                'redelivered': self.redelivered,
+                'routing_key': self.routing_key,
+                'exchange': self.exchange,
+                'consumer_tag': self.consumer_tag}
+
+
+class Properties(DataObject):
+    """A class that represents all of the field attributes of AMQP's
+    Basic.Properties
+
+    """
+
+    def __init__(self, header):
+        """Create a base object to contain all of the properties we need
+
+        :param header: A header object from Pika
+        :type header: pika.spec.BasicProperties
+
+        """
+        DataObject.__init__(self)
         self.content_type = header.content_type
         self.content_encoding = header.content_encoding
         self.delivery_mode = header.delivery_mode
@@ -643,32 +784,3 @@ class Message(object):
         self.user_id = header.user_id
         self.app_id = header.app_id
         self.cluster_id = header.cluster_id
-
-        # Content
-        self.body = body
-
-    def __repr__(self):
-        """Return a string representation of the object and all of its
-        attributes.
-
-
-        """
-        items = ['delivery_info=<dict "amqplib compatibility, do not use">']
-        for key, value in self.__dict__.iteritems():
-            if getattr(self.__class__, key, None) != value:
-                items.append('%s=%s' % (key, value))
-        return "<Message(%s)>" % items
-
-    @property
-    def delivery_info(self):
-        """Legacy mapping dictionary for consumers that use amqplib's
-        delivery_info attribute
-
-        :returns: dict
-        """
-        return  {'exchange': self.exchange,
-                 'consumer_tag': self.consumer_tag,
-                 'routing_key': self.routing_key,
-                 'redelivered': self.redelivered,
-                 'delivery_tag': self.delivery_tag,
-                 'channel': self.channel}

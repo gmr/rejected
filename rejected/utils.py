@@ -4,9 +4,11 @@ Functions used mainly in startup and shutdown of rejected
 
 """
 import logging
+from logging import handlers
 import os
-import os.path
+from os import path
 import signal
+from socket import gethostname
 import sys
 import traceback
 import yaml
@@ -14,16 +16,15 @@ import yaml
 # Windows doesn't support this
 try:
     import pwd
+    _SUPPORTS_PWD = True
 except ImportError:
-    pwd = None
-
-from functools import wraps
-from socket import gethostname
+    _SUPPORTS_PWD = False
 
 # Logger
-LOGGER = logging.getLogger('rejected.utils')
+_LOGGER = logging.getLogger('rejected.utils')
 
 # Callback handlers
+_REHASH_HANDLER = None
 _SHUTDOWN_HANDLER = None
 
 # Application state for shutdown
@@ -39,63 +40,34 @@ LEVELS = {'debug':    logging.DEBUG,
           'error':    logging.ERROR,
           'critical': logging.CRITICAL}
 
-
-def log_method_call(method):
-    """
-    Logging decorator to send the method and arguments to logging.debug
-    """
-    @wraps(method)
-    def debug_log(*args, **kwargs):
-
-        if logging.getLogger('').getEffectiveLevel() == logging.DEBUG:
-
-            # Get the class name of what was passed to us
-            try:
-                class_name = args[0].__class__.__name__
-            except AttributeError:
-                class_name = 'Unknown'
-            except IndexError:
-                class_name = 'Unknown'
-
-            # Build a list of arguments to send to the logging
-            log_args = list()
-            for x in xrange(1, len(args)):
-                log_args.append(args[x])
-            if len(kwargs) > 1:
-                log_args.append(kwargs)
-
-            # If we have arguments, log them as well, otherwise just the method
-            if log_args:
-                LOGGER.debug("%s.%s(%r) Called", class_name, method.__name__,
-                             log_args)
-            else:
-                LOGGER.debug("%s.%s() Called", class_name, method.__name__)
-
-        # Actually execute the method
-        return method(*args, **kwargs)
-
-    # Return the debug_log function to the python stack for execution
-    return debug_log
+# For mapping of log statements
+_SIGNALS = {signal.SIGTERM: 'SIGTERM',
+            signal.SIGHUP: 'SIGHUP',
+            signal.SIGUSR1: 'SIGUSR1'}
 
 
 def application_name():
+    """Returns the currently running application name
+
+    :returns: str
+
     """
-    Returns the currently running application name
-    """
-    return os.path.split(sys.argv[0])[1]
+    return path.split(sys.argv[0])[1]
 
 
 def hostname():
-    """
-    Returns the hostname for the machine we're running on
+    """Returns the hostname for the machine we're running on
+
+    :returns: str
+
     """
     return gethostname().split(".")[0]
 
 
 def daemonize(pidfile=None, user=None):
     """Fork the Python app into the background and close the appropriate
-    "files" to detach from console. Based off of code by Jürgen Hermann and
-    http://code.activestate.com/recipes/66012/
+    file handles to detach from console. Based off of code by Jürgen Hermann
+    at http://code.activestate.com/recipes/66012/
 
     :param pidfile: Filename to write the pidfile as
     :type pidfile: str
@@ -109,7 +81,7 @@ def daemonize(pidfile=None, user=None):
     sys.stderr.flush()
 
     # Get the user id if we have a user set
-    if pwd and user:
+    if _SUPPORTS_PWD and user:
         uid = pwd.getpwnam(user).pw_uid
     else:
         uid = -1
@@ -124,16 +96,16 @@ def daemonize(pidfile=None, user=None):
     if pid > 0:
         # Setup a pidfile if we weren't passed one
         pidfile = pidfile or \
-                  os.path.normpath('/tmp/%s-%i.pid' % (application_name(),
+                  path.normpath('/tmp/%s-%i.pid' % (application_name(),
                                                        pid))
 
         # Write the pidfile out
-        with open(pidfile, 'w') as f:
-            f.write('%i\n' % pid)
+        with open(pidfile, 'w') as pidfile_handle:
+            pidfile_handle.write('%i\n' % pid)
 
             # If we have uid or gid change the uid for the file
             if uid > -1:
-                os.fchown(f.fileno(), uid, _DEFAULT_GID)
+                os.fchown(pidfile_handle.fileno(), uid, _DEFAULT_GID)
 
         # Exit the parent process
         sys.exit(0)
@@ -144,12 +116,12 @@ def daemonize(pidfile=None, user=None):
     os.setsid()
 
     # Redirect stdout, stderr, stdin
-    si = file('/dev/null', 'r')
-    so = file('/dev/null', 'a+')
-    se = file('/dev/null', 'a+', 0)
-    os.dup2(si.fileno(), sys.stdin.fileno())
-    os.dup2(so.fileno(), sys.stdout.fileno())
-    os.dup2(se.fileno(), sys.stderr.fileno())
+    stdin_ = file('/dev/null', 'r')
+    stdout_ = file('/dev/null', 'a+')
+    stderr_ = file('/dev/null', 'a+', 0)
+    os.dup2(stdin_.fileno(), sys.stdin.fileno())
+    os.dup2(stdout_.fileno(), sys.stdout.fileno())
+    os.dup2(stderr_.fileno(), sys.stderr.fileno())
 
     # Set the running user
     if  user:
@@ -157,17 +129,17 @@ def daemonize(pidfile=None, user=None):
 
     # If we have a uid and it's not for the running user
     if uid > -1 and uid != os.geteuid():
-            try:
-                os.seteuid(uid)
-                LOGGER.debug("User changed to %s(%i)", user, uid)
-            except OSError as e:
-                LOGGER.error("Could not set the user: %s", str(e))
+        try:
+            os.seteuid(uid)
+            _LOGGER.debug("User changed to %s(%i)", user, uid)
+        except OSError as error:
+            _LOGGER.error("Could not set the user: %s", error)
 
     return True
 
 
 def load_configuration_file(config_file):
-    """ Load our YAML configuration file from disk or error out
+    """Load our YAML configuration file from disk or error out
     if not found or parsable
 
     :param config_file: Path to the configuration file we want to load
@@ -176,22 +148,23 @@ def load_configuration_file(config_file):
 
     """
     try:
-        with file(config_file, 'r') as f:
-            config = yaml.load(f)
+        with file(config_file, 'r') as config_file_handle:
+            config = yaml.load(config_file_handle)
 
-    except IOError:
-        sys.stderr.write('Configuration file not found "%s"\n' % config_file)
+    except IOError as error:
+        sys.stderr.write('Error when trying to read %s: %s\n' % (config_file,
+                                                                 error))
         sys.exit(1)
 
-    except yaml.scanner.ScannerError as err:
+    except yaml.scanner.ScannerError as error:
         sys.stderr.write('Invalid configuration file "%s":\n%s\n' % \
-                         (config_file, err))
+                         (config_file, error))
         sys.exit(1)
 
     return config
 
 
-def setup_logger(name, level):
+def set_logger_level(name, level):
     """Setup an individual logger at a specified level.
 
     :param name: Logger name
@@ -200,14 +173,13 @@ def setup_logger(name, level):
     :type level: logging.LEVEL
 
     """
-    logger = logging.getLogger(name)
-    logger.setLevel(level)
+    logging.getLogger(name).setLevel(level)
 
 
-def setup_loggers(loggers, level):
+def set_logging_level_for_loggers(loggers, level):
     """Iterate through our loggers if specified and set their levels.
 
-    :param loggers: list of loggers
+    :param loggers: Loggers to set the level of
     :type loggers: list
     :param level: default logging level if not specified
     :type level: logging.LEVEL
@@ -222,29 +194,32 @@ def setup_loggers(loggers, level):
         # If it's a list expect a logger_name, level string format
         if isinstance(logger, list):
             level_ = LEVELS.get(logger[1], logging.NOTSET)
-            setup_logger(logger[0], level_)
+            set_logger_level(logger[0], level_)
 
         # Otherwise we just just want a specific logger at the default level
         elif isinstance(logger, str):
-            setup_logger(logger, level)
+            set_logger_level(logger, level)
 
 
 def setup_logging(config, debug=False):
-    """
-    Setup the logging module to respect our configuration values.
-    Expects a dictionary called config with the following parameters
-
-    * directory:   Optional log file output directory
-    * filename:    Optional filename, not needed for syslog
-    * format:      Format for non-debug mode
-    * level:       One of debug, error, warning, info
-    * handler:     Optional handler
-    * syslog:      If handler == syslog, parameters for syslog
-      * address:   Syslog address
-      * facility:  Syslog facility
-
+    """Setup the logging module to respect our configuration values.
     Passing in debug=True will disable any log output to anything but stdout
     and will set the log level to debug regardless of the config.
+
+    :param config: The logging configuration
+    :type dict: A dictionary of the following format:
+        * directory:   Optional log file output directory
+        * filename:    Optional filename, not needed for syslog
+        * format:      Format for non-debug mode
+        * level:       One of debug, error, warning, info
+        * handler:     Optional handler
+        * syslog:      If handler == syslog, parameters for syslog
+          * address:   Syslog address
+          * facility:  Syslog facility
+        * loggers:     A list of logger
+    :param debug: Debugging on?
+    :type debug: bool
+
     """
     if debug:
 
@@ -255,20 +230,17 @@ def setup_logging(config, debug=False):
         if 'filename' in config:
             del config['filename']
 
-    # Get the logging value from the dictionary
-    logging_level = config['level']
-
     # Use the configuration option for logging
     config['level'] = LEVELS.get(config['level'], logging.NOTSET)
 
     # Pass in our logging config
     logging.basicConfig(**config)
 
-    # Get the default logger
+    # Get the default _logger
     default_logging = logging.getLogger()
 
-    # Setup loggers
-    setup_loggers(config.get('loggers'), config['level'])
+    # Setup _loggers
+    set_logging_level_for_loggers(config.get('loggers'), config['level'])
 
     # Remove the default stream handler
     stream_handler = None
@@ -282,9 +254,7 @@ def setup_logging(config, debug=False):
 
         # If we want to syslog
         if config['handler'] == 'syslog':
-
             facility = config['syslog']['facility']
-            import logging.handlers as handlers
 
             # If we didn't type in the facility name
             if facility in handlers.SysLogHandler.facility_names:
@@ -305,59 +275,17 @@ def setup_logging(config, debug=False):
                               application_name())
 
 
-def shutdown(signum, frame):
-    """Cleanly shutdown the application
-
-    :param signum: Signal passed in
-    :type signum: int
-    :param frame: The frame
-    :type frame: frame or None
-
-    """
-    global _SHUTDOWN_HANDLER
-    LOGGER.info('SIGTERM received %i:%r', signum, frame)
-
-    # Tell all our children to stop
-    if _SHUTDOWN_HANDLER:
-        LOGGER.debug('Calling shutdown handler: %r', _SHUTDOWN_HANDLER)
-        _SHUTDOWN_HANDLER()
-    else:
-        LOGGER.info('No signal handler defined')
-
-def setup_signals():
-    """Setup the signals we want to be notified on"""
-    LOGGER.info('Setting up signals for PID %i', os.getpid())
-
-    # Set our signal handler so we can gracefully shutdown
-    signal.signal(signal.SIGTERM, shutdown)
-
-    # Now set all the others
-    #for num in [signal.SIGQUIT, signal.SIGUSR1, signal.SIGUSR2, signal.SIGHUP]:
-    #    signal.signal(num, _signal_handler)
-
-
-def _signal_handler(signum, frame):
-    """Call the generic sighandler
-
-    :param signum: Signal passed in
-    :type signum: int
-    :param frame: The frame
-    :type frame: uhh
-    """
-    LOGGER.info("Signal received: %i, %i", signum, frame)
-    if signum == signal.SIGHUP:
-        if REHASH_HANDLER:
-            REHASH_HANDLER()
-    elif signum == signal.SIGUSR1:
-        show_frames()
-
-def import_namespaced_class(path):
-    """
-    Pass in a string in the format of foo.Bar, foo.bar.Baz, foo.bar.baz.Qux
+def import_namespaced_class(namespaced_class):
+    """Pass in a string in the format of foo.Bar, foo.bar.Baz, foo.bar.baz.Qux
     and it will return a handle to the class
+
+    :param namespaced_class: The namespaced class
+    :type namespaced_class: str
+    :returns: class
+
     """
     # Split up our string containing the import and class
-    parts = path.split('.')
+    parts = namespaced_class.split('.')
 
     # Build our strings for the import name and the class name
     import_name = '.'.join(parts[0:-1])
@@ -370,15 +298,71 @@ def import_namespaced_class(path):
     # Return the class handle
     return class_handle
 
-def show_frames():
-    for threadId, stack in sys._current_frames().items():
-        LOGGER.info("# ThreadID: %s", threadId)
-        for filename, lineno, name, line in traceback.extract_stack(stack):
-            LOGGER.info('  File: "%s", line %d, in %s', filename, lineno, name)
-            if line:
-                LOGGER.info("    %s", line.strip())
+
+def setup_signals():
+    """Setup the signals we want to be notified on"""
+    _LOGGER.info('Setting up signals for PID %i', os.getpid())
+    for num in [signal.SIGTERM, signal.SIGUSR1, signal.SIGHUP]:
+        signal.signal(num, signal_handler)
+
+
+def signal_handler(signum, frame):
+    """Handle signals that we have registered.
+
+    :param signum: Signal passed in
+    :type signum: int
+    :param frame: The frame
+    :type frame: the frame address
+
+    """
+    _LOGGER.info("Signal received: %s, %r", _SIGNALS[signum], frame)
+
+    # Call the shutdown handler
+    if signum == signal.SIGTERM and _SHUTDOWN_HANDLER:
+        _LOGGER.debug('Calling shutdown handler: %r', _SHUTDOWN_HANDLER)
+        _SHUTDOWN_HANDLER()
+
+    # Call the rehash handler
+    elif signum == signal.SIGHUP and _REHASH_HANDLER:
+        _REHASH_HANDLER()
+
+    # Handle USR1
+    elif signum == signal.SIGUSR1:
+        show_frames()
+
+    # Odd we received a signal we don't support
+    else:
+        _LOGGER.info('No valid signal handler defined: %s', _SIGNALS[signum])
+
+
+def rehash_handler(handler):
+    """Specify the shutdown handler callback for when we receive a SIGHUP
+
+    :param handler: The callback to call on SIGHUP
+    :type hanlder: method or function
+
+    """
+    global _REHASH_HANDLER
+    _REHASH_HANDLER = handler
+    _LOGGER.debug('Rehash handler set to %r', handler)
+
 
 def shutdown_handler(handler):
+    """Specify the shutdown handler callback for when we receive a SIGTERM.
+
+    :param handler: The callback to call on SIGTERM
+    :type hanlder: method or function
+
+    """
     global _SHUTDOWN_HANDLER
     _SHUTDOWN_HANDLER = handler
-    LOGGER.debug('Shutdown handler set to %r', handler)
+    _LOGGER.debug('Shutdown handler set to %r', handler)
+
+
+def show_frames():
+    """Log the current framestack to _LOGGER.info, called from SIG_USER1"""
+    for stack in sys._current_frames().items():
+        for filename, lineno, name, line in traceback.extract_stack(stack[1]):
+            _LOGGER.info('  File: "%s", line %d, in %s', filename, lineno, name)
+            if line:
+                _LOGGER.info("    %s", line.strip())

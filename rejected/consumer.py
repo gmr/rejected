@@ -735,9 +735,9 @@ class Message(DataObject):
         about using the Processor base class instead.
 
         """
-        self._logger.warning("""You should be using the rejected Processor base
- class instead of the message.channel or message.delivery_info['channel']
- attributes""")
+        self._logger.warning("You should be using the rejected Processor base\
+ class instead of the message.channel or message.delivery_info['channel']\
+ attributes")
         return self._pika_objects['channel']
 
     @property
@@ -746,8 +746,8 @@ class Message(DataObject):
         accessing the delivery_info property
 
         """
-        self._logger.warning("""Use the attributes of the Message object instead
- of the delivery_info attribute""")
+        self._logger.warning("Use the attributes of the Message object instead\
+ of the delivery_info attribute")
         return {'channel': self.channel,
                 'delivery_tag': self.delivery_tag,
                 'redelivered': self.redelivered,

@@ -22,6 +22,6 @@ setup(name='rejected',
       url='http://github.com/gmr/rejected',
       license='BSD',
       packages=['rejected'],
-      requires=['pika'],
+      requires=['pika', 'pyyaml'],
       entry_points=dict(console_scripts=['rejected=rejected.cli:main']),
       zip_safe=True)

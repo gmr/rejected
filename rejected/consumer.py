@@ -24,7 +24,7 @@ _AMQP_APP_ID = 'rejected/%s' % __version__
 _QOS_PREFETCH_COUNT = 1
 
 
-class Consumer(object):
+class RejectedConsumer(object):
     """
     Core consumer class for processing messages and dealing with AMQP and
     message processing.
@@ -83,7 +83,7 @@ class Consumer(object):
 
         # Application State
         self._state = None
-        self._set_state(Consumer.INITIALIZING)
+        self._set_state(RejectedConsumer.INITIALIZING)
 
         # Connection objects
         self._connection = None
@@ -111,10 +111,10 @@ class Consumer(object):
         self._connect()
 
         # Setup a counter dictionary
-        self._counts = {Consumer.PROCESSED: 0,
-                        Consumer.ERROR: 0,
-                        Consumer.REDELIVERED: 0,
-                        Consumer.TIME_SPENT: 0}
+        self._counts = {RejectedConsumer.PROCESSED: 0,
+                        RejectedConsumer.ERROR: 0,
+                        RejectedConsumer.REDELIVERED: 0,
+                        RejectedConsumer.TIME_SPENT: 0}
 
     ## Public Methods
 
@@ -189,7 +189,7 @@ class Consumer(object):
         self._set_qos_prefetch()
 
         # Set our runtime state
-        self._set_state(Consumer.CONSUMING)
+        self._set_state(RejectedConsumer.CONSUMING)
 
         # Ask for stuck messages
         self._channel.basic_recover(requeue=True)
@@ -223,7 +223,7 @@ class Consumer(object):
                                self.name)
 
         # Set the runtime state
-        self._set_state(Consumer.STOPPED)
+        self._set_state(RejectedConsumer.STOPPED)
 
     def on_connected(self, connection):
         """We have connected to RabbitMQ so setup our connection attribute and
@@ -238,7 +238,7 @@ class Consumer(object):
         self._connection.add_on_close_callback(self.on_closed)
         self._connection.channel(self.on_channel_open)
 
-    def process(self, channel, method, header, body):
+    def process(self, channel=None, method=None, header=None, body=None):
         """Process a message from Rabbit
 
         @TODO Build new class structure support in as well for native Pika
@@ -255,11 +255,17 @@ class Consumer(object):
         :returns: bool
 
         """
+
+        print channel
+        print method
+        print header
+        print body
+
         # Set our state to processing
         self._processing()
 
         # Don't accept the message if we're shutting down
-        if self._state == Consumer.SHUTTING_DOWN:
+        if self._state == RejectedConsumer.SHUTTING_DOWN:
             self._logger.critical('%s: Received a message while shutting down',
                                   self.name)
             return False
@@ -269,7 +275,7 @@ class Consumer(object):
                           self._config['compressed_messages'])
         if method.redelivered:
             redelivered = ' - is a redelivered message'
-            self._increment_stat(Consumer.REDELIVERED)
+            self._increment_stat(RejectedConsumer.REDELIVERED)
         else:
             redelivered = ''
         self._logger.debug('%s: Received message #%s%s',
@@ -282,7 +288,7 @@ class Consumer(object):
         if self._process(message):
 
             # Message was processed
-            self._increment_stat(Consumer.PROCESSED, start_time)
+            self._increment_stat(RejectedConsumer.PROCESSED, start_time)
 
             # If no_ack was not set when we setup consuming, do so here
             if not self._config['no_ack']:
@@ -292,7 +298,7 @@ class Consumer(object):
             return self._consuming()
 
         # Processing failed
-        self._increment_stat(Consumer.ERROR, start_time)
+        self._increment_stat(RejectedConsumer.ERROR, start_time)
 
         # If we do not have no_ack set, then reject the message
         if not self._config['no_ack']:
@@ -319,21 +325,21 @@ class Consumer(object):
 
         # If we're processing set our state to let our processor know to call
         # us when we're done
-        if self._state == Consumer.PROCESSING:
-            self._set_state(Consumer.STOP_REQUESTED)
+        if self._state == RejectedConsumer.PROCESSING:
+            self._set_state(RejectedConsumer.STOP_REQUESTED)
             return
 
         # If we're already shutting down, note it for debugging purposes
-        if self._state == Consumer.SHUTTING_DOWN:
+        if self._state == RejectedConsumer.SHUTTING_DOWN:
             self._logger.debug('%s: Already shutting down', self.name)
             return
 
         # If we're already stopped, note it for debugging purposes
-        if self._state == Consumer.STOPPED:
+        if self._state == RejectedConsumer.STOPPED:
             self._logger.debug('%s: Already stopped', self.name)
             return
 
-        self._set_state(Consumer.SHUTTING_DOWN)
+        self._set_state(RejectedConsumer.SHUTTING_DOWN)
         self._channel.basic_cancel(consumer_tag=self.name,
                                    callback=self.on_basic_cancel)
 
@@ -404,7 +410,7 @@ class Consumer(object):
 
         """
         # If we have a requested stop, call it
-        if self._state == Consumer.STOP_REQUESTED:
+        if self._state == RejectedConsumer.STOP_REQUESTED:
             self._logger.debug('%s: Stop requested prior to changing state',
                                self.name)
             self.stop()
@@ -430,16 +436,16 @@ class Consumer(object):
             TornadoConnection(self._config['pika'], self.on_connected)
         except pika.exceptions.AMQPConnectionError as error:
             self._logger.critical('%s: Could not connect: %s', self.name, error)
-            self._set_state(Consumer.STOPPED)
+            self._set_state(RejectedConsumer.STOPPED)
 
     def _consuming(self):
-        """Set the state to Consumer.CONSUMING, checking if we need to shutdown
+        """Set the state to RejectedConsumer.CONSUMING, checking if we need to shutdown
         before we move forward
 
         """
         # Set our state to consuming if we can
         if self._can_change_state():
-            self._set_state(Consumer.CONSUMING)
+            self._set_state(RejectedConsumer.CONSUMING)
 
     def _count(self, stat):
         """Return the current count quantity for a specific stat.
@@ -453,9 +459,9 @@ class Consumer(object):
 
     def _error_count_check(self):
         """Check the quantity of errors in the thread & shutdown if required"""
-        if self._count(Consumer.ERROR) >= self._config['max_error_count']:
+        if self._count(RejectedConsumer.ERROR) >= self._config['max_error_count']:
             self._logger.error('%s: Processor returned %i errors',
-                               self.name, self._count(Consumer.ERROR))
+                               self.name, self._count(RejectedConsumer.ERROR))
             # Stop the consumer
             self.stop()
 
@@ -471,7 +477,7 @@ class Consumer(object):
         """
         self._counts[stat] += 1
         if start_time:
-            self._counts[Consumer.TIME_SPENT] += (time.time() - start_time)
+            self._counts[RejectedConsumer.TIME_SPENT] += (time.time() - start_time)
 
     def _init_processor(self):
         """Initialize the message processor"""
@@ -539,13 +545,13 @@ class Consumer(object):
         self._channel.basic_reject(delivery_tag=delivery_tag)
 
     def _processing(self):
-        """Set the state to Consumer.PROCESSING, checking first if there is a
+        """Set the state to RejectedConsumer.PROCESSING, checking first if there is a
         requested shutdown
 
         """
         # Set our state to processing if we can
         if self._can_change_state():
-            self._set_state(Consumer.PROCESSING)
+            self._set_state(RejectedConsumer.PROCESSING)
 
     def _republish(self, exchange, routing_key, message):
         """Republish a message (on error)
@@ -572,7 +578,7 @@ class Consumer(object):
     def _set_qos_prefetch(self):
         """Set the QOS Prefetch count for the channel"""
         value = self._config['consumer'].get('qos',
-                                             Consumer._QOS_PREFETCH_COUNT)
+                                             RejectedConsumer._QOS_PREFETCH_COUNT)
         self._logger.info('%s: Setting the QOS Prefetch to %i',
                           self.name, value)
         self._channel.basic_qos(prefetch_count=value, callback=None)
@@ -585,9 +591,9 @@ class Consumer(object):
 
         """
         # Make sure it's a valid state
-        if state not in Consumer._STATES:
+        if state not in RejectedConsumer._STATES:
             raise ValueError('%s is not a valid state for this object' % \
-                             Consumer._STATES[state])
+                             RejectedConsumer._STATES[state])
         # Set the state
         self._state = state
 
@@ -601,7 +607,7 @@ class Consumer(object):
         :returns: bool
 
         """
-        return self._state in [Consumer.CONSUMING, Consumer.PROCESSING]
+        return self._state in [RejectedConsumer.CONSUMING, RejectedConsumer.PROCESSING]
 
     @property
     def is_stopped(self):
@@ -610,7 +616,7 @@ class Consumer(object):
         :returns: bool
 
         """
-        return self._state in [Consumer.SHUTTING_DOWN, Consumer.STOPPED]
+        return self._state in [RejectedConsumer.SHUTTING_DOWN, RejectedConsumer.STOPPED]
 
     @property
     def name(self):
@@ -637,7 +643,7 @@ class Consumer(object):
         :returns: str
 
         """
-        return Consumer._STATES[self._state]
+        return RejectedConsumer._STATES[self._state]
 
 
 class DataObject(object):

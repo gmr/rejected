@@ -83,10 +83,10 @@ class MasterControlProgram(object):
                           os.getpid(), consumer_number)
 
         # Create the new consumer
-        return consumer.Consumer(self._config,
-                                 consumer_number,
-                                 consumer_name,
-                                 connection_name)
+        return consumer.RejectedConsumer(self._config,
+                                         consumer_number,
+                                         consumer_name,
+                                         connection_name)
 
     @property
     def _consumer_count(self):
@@ -96,9 +96,9 @@ class MasterControlProgram(object):
         """
         count = 0
         for consumer_ in self._all_consumers:
-            if consumer_.state in [consumer.Consumer.INITIALIZING,
-                                   consumer.Consumer.CONSUMING,
-                                   consumer.Consumer.PROCESSING]:
+            if consumer_.state in [consumer.RejectedConsumer.INITIALIZING,
+                                   consumer.RejectedConsumer.CONSUMING,
+                                   consumer.RejectedConsumer.PROCESSING]:
                 count += 1
         return count
 
@@ -133,8 +133,8 @@ class MasterControlProgram(object):
 
                     # Create the new consumer
                     consumer_ = self._create_consumer(consumer_number,
-                                                   name,
-                                                   connection_name)
+                                                      name,
+                                                      connection_name)
 
                     # Append the consumer to the consumer list
                     self._consumers[name]['consumers'].append(consumer_)

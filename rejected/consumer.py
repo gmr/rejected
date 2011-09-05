@@ -255,12 +255,6 @@ class RejectedConsumer(object):
         :returns: bool
 
         """
-
-        print channel
-        print method
-        print header
-        print body
-
         # Set our state to processing
         self._processing()
 

@@ -72,12 +72,9 @@ class Consumer(object):
         self._config = {'connection': config['Connections'][connection_name],
                         'connection_name': connection_name,
                         'consumer_name': consumer_name,
-                        'consumer_tag': '%s%i_tag%i' % (consumer_name,
-                                                        os.getpid(),
-                                                        consumer_number),
-                        'name': '%s-%s-%s' % (consumer_name,
-                                              connection_name,
-                                              consumer_number)}
+                        'name': '%s_%i_tag_%i' % (consumer_name,
+                                                  os.getpid(),
+                                                  consumer_number)}
 
         # Create our logger
         self._logger = logging.getLogger('rejected.consumer')
@@ -103,8 +100,8 @@ class Consumer(object):
 
         # Create our pika connection parameters attribute
         connection = self._config['connection']
-        credentials = pika.PlainCredentials(connection['connection']['user'],
-                                            connection['connection']['pass'])
+        credentials = pika.PlainCredentials(connection['user'],
+                                            connection['pass'])
         self._config['pika'] = pika.ConnectionParameters(connection['host'],
                                                          connection['port'],
                                                          connection['vhost'],
@@ -201,7 +198,7 @@ class Consumer(object):
         self._channel.basic_consume(consumer_callback = self.process,
                                     queue=self._config['queue_name'],
                                     no_ack=self._config['no_ack'],
-                                    consumer_tag=self._config['consumer_tag'])
+                                    consumer_tag=self.name)
 
     def on_closed(self, reason_code, reason_text):
         """Callback invoked by Pika when our connection has been closed.
@@ -337,7 +334,7 @@ class Consumer(object):
             return
 
         self._set_state(Consumer.SHUTTING_DOWN)
-        self._channel.basic_cancel(consumer_tag=self._config['consumer_tag'],
+        self._channel.basic_cancel(consumer_tag=self.name,
                                    callback=self.on_basic_cancel)
 
     ## Internal methods
@@ -369,7 +366,7 @@ class Consumer(object):
         # Initialize object wide variables
         self._config['no_ack'] = \
             compat.get_compatible_config(self._config['consumer'],
-                                        'noack',
+                                        'no_ack',
                                         'auto_ack')
 
         # Are the messages compressed in and out with zlib?
@@ -663,7 +660,7 @@ class DataObject(object):
         for key, value in self.__dict__.iteritems():
             if getattr(self.__class__, key, None) != value:
                 items.append('%s=%s' % (key, value))
-        return "<%s(%s)>" % items
+        return "<%s(%s)>" % (self.__class__.__name__, items)
 
 
 class Message(DataObject):
@@ -738,9 +735,9 @@ class Message(DataObject):
         about using the Processor base class instead.
 
         """
-        self._logger.warning("""You should be using the rejected Processor base
- class instead of the message.channel or message.delivery_info['channel']
- attributes""")
+        self._logger.warning("You should be using the rejected Processor base\
+ class instead of the message.channel or message.delivery_info['channel']\
+ attributes")
         return self._pika_objects['channel']
 
     @property
@@ -749,8 +746,8 @@ class Message(DataObject):
         accessing the delivery_info property
 
         """
-        self._logger.warning("""Use the attributes of the Message object instead
- of the delivery_info attribute""")
+        self._logger.warning("Use the attributes of the Message object instead\
+ of the delivery_info attribute")
         return {'channel': self.channel,
                 'delivery_tag': self.delivery_tag,
                 'redelivered': self.redelivered,

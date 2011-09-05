@@ -29,8 +29,8 @@ def get_compatible_config(config, key, compatible_key=None, default_value=None):
     """
     if key not in config:
         if compatible_key and compatible_key in config:
-            _LOGGER.warn("Returning deprecated configuration key: %s",
-                        compatible_key)
+            _LOGGER.warn("Returning deprecated configuration key: %s,\
+ use %s instead", compatible_key, key)
             return config.get(compatible_key, default_value)
     return config.get(key, default_value)
 
@@ -54,8 +54,8 @@ def get_consumer_config(config):
         if 'consumers' in config[name]:
             config[name].update(config[name]['consumers'])
             del config[name]['consumers']
-            _LOGGER.warn("""Consumers attributes automatically moved to same
- tree-depth as the consumers attribute itself.""")
+            _LOGGER.warn("Consumers attributes automatically moved to same\
+ tree-depth as the consumers attribute itself.")
 
     # Return the config sub-section
     return config
@@ -73,8 +73,8 @@ def get_poll_interval(config):
     """
     legacy_value = config.get('Monitoring', dict()).get('interval', None)
     if legacy_value:
-        logging.warning("""Monitoring->interval retrieved but will  be removed
- from support in favor of the  top level poll_interval attribute.""")
+        logging.warning("Monitoring->interval retrieved but will  be removed\
+ from support in favor of the  top level poll_interval attribute.")
 
     return config.get('poll_interval', )
 
@@ -99,8 +99,8 @@ def is_monitoring_enabled(config):
     if not config.get('Monitoring'):
         return False
 
-    _LOGGER.warning("""Top-level attribute of Monitoring found. This has been
- deprecated in favor of a single top level attribute of monitor: bool""")
+    _LOGGER.warning("Top-level attribute of Monitoring found. This has been\
+ deprecated in favor of a single top level attribute of monitor: bool")
 
     # Legacy had it as a sub-variable with interval
     return config['Monitoring'].get('enabled', False)

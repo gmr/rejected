@@ -230,7 +230,7 @@ class MasterControlProgram(object):
         # Iterate through all of the consumers
         for consumer_ in self._all_consumers:
             self._logger.debug('Polling %s', consumer_.name)
-            if consumer_.state == consumer.Consumer.STOPPED:
+            if consumer_.state == consumer.RejectedConsumer.STOPPED:
                 self._logger.warn('Found stopped consumer %s', consumer_.name)
                 non_active_consumers.append(consumer_.name)
             else:
@@ -342,10 +342,10 @@ class MasterControlProgram(object):
         for name in data:
 
             # Create a dict for our calculations
-            stats[name] = {consumer.Consumer.TIME_SPENT: 0,
-                           consumer.Consumer.PROCESSED: 0,
-                           consumer.Consumer.ERROR: 0,
-                           consumer.Consumer.REDELIVERED: 0}
+            stats[name] = {consumer.RejectedConsumer.TIME_SPENT: 0,
+                           consumer.RejectedConsumer.PROCESSED: 0,
+                           consumer.RejectedConsumer.ERROR: 0,
+                           consumer.RejectedConsumer.REDELIVERED: 0}
 
             # Iterate through all of the data points
             for consumer_ in data[name]:

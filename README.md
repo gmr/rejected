@@ -51,17 +51,10 @@ Example Configuration
             pass: guest
             ssl: False
             vhost: /
-        rabbit02:
-            host: rabbit02
-            port: 5672
-            user: rejected
-            pass: rabbitmq
-            ssl: False
-            vhost: messaging
 
     Consumers:
         overdraft:
-            import: overdraft.processor
+            import: myprocessor
             processor: Processor
             connections: [localhost]
             queue: test

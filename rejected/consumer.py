@@ -78,7 +78,6 @@ class RejectedConsumer(object):
 
         # Create our logger
         self._logger = logging.getLogger('rejected.consumer')
-        self._logger.info('rejected v%s', version)
         self._logger.debug('%s: Initializing for %s and %s',
                            self.name, consumer_name, connection_name)
 

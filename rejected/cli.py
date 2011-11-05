@@ -76,7 +76,7 @@ def main():
         utils.daemonize(user=config.get('user', None),
                         pidfile=config.get('pidfile', None))
     else:
-        logger.info('rejected has started in interactive mode')
+        logger.info('rejected v%s has started in interactive mode', version)
 
     # Handle signals
     utils.setup_signals()

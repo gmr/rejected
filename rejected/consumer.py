@@ -772,7 +772,7 @@ class Properties(DataObject):
         DataObject.__init__(self)
         self.content_type = header.content_type
         self.content_encoding = header.content_encoding
-        self.headers = header.headers
+        self.headers = header.headers or dict()
         self.delivery_mode = header.delivery_mode
         self.priority = header.priority
         self.correlation_id = header.correlation_id

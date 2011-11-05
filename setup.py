@@ -1,5 +1,5 @@
 from setuptools import setup
-from rejected import __version__
+from rejected import version
 
 long_description = """\
 Rejected is a RabbitMQ consumer daemon that allows you to focus on the
@@ -8,7 +8,7 @@ facilitates the communication with RabbitMQ.
 """
 
 setup(name='rejected',
-      version=__version__,
+      version=version,
       description="RabbitMQ consumer daemon",
       long_description=long_description,
       classifiers=[

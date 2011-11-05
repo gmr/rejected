@@ -13,7 +13,7 @@ import sys
 
 from . import mcp
 from . import utils
-from . import __version__
+from . import version
 
 
 def parse_options():
@@ -22,7 +22,7 @@ def parse_options():
     :returns: Tuple of OptionParser object, options and arguments
     """
     usage = "usage: %prog -c <configfile> [options]"
-    version_string = "%%prog %s" % __version__
+    version_string = "%%prog %s" % version
     description = "Rejected is a RabbitMQ consumer daemon"
 
     # Create our parser and setup our command line options

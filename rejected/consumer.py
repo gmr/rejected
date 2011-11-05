@@ -18,9 +18,9 @@ import zlib
 
 from . import compat
 from . import utils
-from . import __version__
+from . import version
 
-_AMQP_APP_ID = 'rejected/%s' % __version__
+_AMQP_APP_ID = 'rejected/%s' % version
 _QOS_PREFETCH_COUNT = 1
 
 
@@ -78,6 +78,7 @@ class RejectedConsumer(object):
 
         # Create our logger
         self._logger = logging.getLogger('rejected.consumer')
+        self._logger.info('rejected v%s', version)
         self._logger.debug('%s: Initializing for %s and %s',
                            self.name, consumer_name, connection_name)
 

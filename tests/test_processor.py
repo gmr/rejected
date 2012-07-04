@@ -32,7 +32,8 @@ except ImportError:
     yaml = None
 import zlib
 
-import rejected_consumer
+from rejected import processor
+
 
 class MockAllProperties(object):
     app_id = "go/1.2.7"
@@ -75,7 +76,7 @@ class MockJSONMessage(object):
         self.properties = MockJSONProperties()
 
 
-class LocalConsumer(rejected_consumer.Consumer):
+class LocalConsumer(processor.Processor):
 
     _CONFIG_DOC = {'pgsql': {
         'host': 'localhost',
@@ -172,9 +173,9 @@ Logging:
         del self._obj
 
     def test_initialize_called(self):
-        @mock.patch.object(rejected_consumer.Consumer, '_initialize')
+        @mock.patch.object(processor.Processor, '_initialize')
         def validate_method_called(mock_method=None):
-            obj = rejected_consumer.Consumer({})
+            obj = processor.Processor({})
             mock_method.assertCalled()
         validate_method_called()
 
@@ -213,7 +214,7 @@ Logging:
             return self.skipTest('Missing couchconfig package')
         @mock.patch('couchconfig.Configuration', autospec=True, **self._CONFIG)
         def test_object_creation(mock_method=None):
-            obj = rejected_consumer.Consumer(self._CONFIG)
+            obj = processor.Processor(self._CONFIG)
             self.assertEqual(obj._config._spec_class,
                              couchconfig.config.Configuration)
         test_object_creation()
@@ -236,7 +237,7 @@ Logging:
             return self.skipTest('Missing psycopg2 package')
         @mock.patch('pgsql_wrapper.PgSQL', autospec=True)
         def test_object_creation(mock_class=None):
-            obj = rejected_consumer.Consumer(self._CONFIG)
+            obj = processor.Processor(self._CONFIG)
             settings = self._obj._config.get_document('settings')
             value = obj._get_postgresql_cursor(**settings['pgsql'])
             self.assertEqual(value._mock_name, 'cursor')
@@ -248,7 +249,7 @@ Logging:
         @mock.patch('pgsql_wrapper.PgSQL', autospec=True,
                     side_effect=psycopg2.OperationalError)
         def test_object_creation(mock_class=None):
-            obj = rejected_consumer.Consumer(self._CONFIG)
+            obj = processor.Processor(self._CONFIG)
             settings = self._obj._config.get_document('settings')
             self.assertRaises(IOError,
                               obj._get_postgresql_cursor,
@@ -260,7 +261,7 @@ Logging:
             return self.skipTest('Missing redis package')
         @mock.patch('redis.Redis', autospec=True)
         def test_object_creation(mock_method=None):
-            obj = rejected_consumer.Consumer(self._CONFIG)
+            obj = processor.Processor(self._CONFIG)
             settings = self._obj._config.get_document('settings')
             value = obj._get_redis_client(**settings['redis'])
             self.assertIsInstance(value, redis.client.Redis)
@@ -479,7 +480,7 @@ Logging:
     def test_process_with_processing_exception(self):
         self._obj._MESSAGE_TYPE = None
         with mock.patch.object(LocalConsumer, '_process') as mock_method:
-            mock_method.side_effect = rejected_consumer.ProcessingException
+            mock_method.side_effect = processor.ProcessingException
             message = MockJSONMessage()
             response = self._obj.process(message)
             self.assertFalse(response)

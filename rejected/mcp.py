@@ -2,7 +2,6 @@
 Master Control Program
 
 """
-import collections
 from tornado import ioloop
 import logging
 import os
@@ -85,14 +84,14 @@ class MasterControlProgram(object):
     def _consumer_stats_counter(self):
         """Return a new consumer stats counter instance.
 
-        :rtype: collections.Counter
+        :rtype: dict
 
         """
-        return collections.Counter({consumer.RejectedConsumer.ERROR: 0,
-                                    consumer.RejectedConsumer.PROCESSED: 0,
-                                    consumer.RejectedConsumer.REDELIVERED: 0,
-                                    consumer.RejectedConsumer.TIME_SPENT: 0,
-                                    consumer.RejectedConsumer.TIME_WAITED: 0})
+        return {consumer.RejectedConsumer.ERROR: 0,
+                consumer.RejectedConsumer.PROCESSED: 0,
+                consumer.RejectedConsumer.REDELIVERED: 0,
+                consumer.RejectedConsumer.TIME_SPENT: 0,
+                consumer.RejectedConsumer.TIME_WAITED: 0}
 
     def _calculate_stats(self, data):
         """Calculate the stats data for our process level data.

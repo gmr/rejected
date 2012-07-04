@@ -3,7 +3,6 @@ delegation of messages to the Processor class for processing. Controls the life
 cycle of a message received from RabbitMQ.
 
 """
-import collections
 import copy
 import logging
 import os
@@ -254,16 +253,16 @@ class RejectedConsumer(object):
 
 
     def _initialize_counts(self):
-        """Return a collections.Counter object for our internal stats keeping.
+        """Return a dict object for our internal stats keeping.
 
-        :rtype: collections.Counter
+        :rtype: dict
 
         """
-        return collections.Counter({RejectedConsumer.ERROR: 0,
-                                    RejectedConsumer.PROCESSED: 0,
-                                    RejectedConsumer.REDELIVERED: 0,
-                                    RejectedConsumer.TIME_SPENT: 0,
-                                    RejectedConsumer.TIME_WAITED: 0})
+        return {RejectedConsumer.ERROR: 0,
+                RejectedConsumer.PROCESSED: 0,
+                RejectedConsumer.REDELIVERED: 0,
+                RejectedConsumer.TIME_SPENT: 0,
+                RejectedConsumer.TIME_WAITED: 0}
 
     def _process(self, message):
         """Wrap the actual processor processing bits

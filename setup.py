@@ -2,14 +2,14 @@ from setuptools import setup
 from rejected import __version__
 
 long_description = """\
-Rejected is a RabbitMQ consumer daemon that allows you to focus on the
-development of the code that handles the messages and not the code that
-facilitates the communication with RabbitMQ.
-"""
+Rejected is a RabbitMQ consumer framwork and controller daemon that allows you
+to focus on the development of the code that handles the messages and not the
+code that facilitates the communication with RabbitMQ."""
 
 setup(name='rejected',
       version=__version__,
-      description="RabbitMQ consumer daemon",
+      description="Rejected is a Python RabbitMQ Consumer Framework and " \
+                  "Controller Daemon",
       long_description=long_description,
       classifiers=[
         'Development Status :: 4 - Beta',
@@ -22,11 +22,14 @@ setup(name='rejected',
       url='http://github.com/gmr/rejected',
       license='BSD',
       packages=['rejected'],
-      requires=['logging-config'
-                'pika',
-                'python-daemon',
-                'pyyaml',
-                'tornado'],
+      install_requires=['clihelper',
+                        'pika',
+                        'tornado'],
+      extras_require={'Configuration': 'couchconfig',
+                      'HTML': 'beautifulsoup4',
+                      'PostgreSQL': 'pgsql_wrapper',
+                      'Redis': 'redis',
+                      'YAML': 'pyyaml'},
       tests_require=['mock', 'nose', 'unittests2'],
-      entry_points=dict(console_scripts=['rejected=rejected.cli:main']),
+      entry_points=dict(console_scripts=['rejected=rejected.controller:main']),
       zip_safe=True)

@@ -5,6 +5,10 @@ for rapid development of message processing consumers by handling all of the
 core functionality of communicating with RabbitMQ and management of consumer
 processes.
 
+Rejected runs as a master process with multiple consumer configurations that are
+each run it an isolated process. It has the ability to collect statistical
+data from the consumer processes and report on it.
+
 Example Processor
 -----------------
     from rejected import processor
@@ -35,6 +39,7 @@ Example Configuration
            processor: Test
            connections: [rabbitmq]
            queue: test_queue
+           min: 2
 
      Daemon:
          user: rejected

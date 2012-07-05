@@ -4,11 +4,14 @@ cycle of a message received from RabbitMQ.
 
 """
 import copy
+from tornado import ioloop
 import logging
 import os
+import multiprocessing
 import pika
 from pika import exceptions
 from pika.adapters import tornado_connection
+import signal
 import time
 import traceback
 
@@ -39,7 +42,7 @@ def import_namespaced_class(namespaced_class):
     return class_handle
 
 
-class RejectedConsumer(object):
+class RejectedConsumer(multiprocessing.Process):
     """Core consumer class for processing messages and dealing with AMQP and
     message processing.
 
@@ -76,22 +79,25 @@ class RejectedConsumer(object):
     _QOS_PREFETCH_COUNT = 1
     _MAX_ERROR_COUNT = 5
 
-    def __init__(self, config, consumer_number, consumer_name, connection_name):
-        """Initialize a new consumer thread, setting defaults and config values
-
-        :param dict config: Consumer config section from YAML File
-        :param int consumer_number: The identification number for the consumer
-        :param str consumer_name: The name of the consumer
-        :param str connection_name: The name of the connection
-        :raises: ImportError
-
-        """
-        logger.info('Initializing for %s on %s', consumer_name, connection_name)
+    def __init__(self, group=None, target=None, name=None, args=(), kwargs={}):
+        super(RejectedConsumer, self).__init__(group, target, name,
+                                               args, kwargs)
+        self._counts = self._initialize_counts()
         self._state = self.STATE_INITIALIZING
         self._state_start = time.time()
 
-        # Set the consumer name for logging purposes
-        self.name = self._get_name(consumer_name, consumer_number)
+    def _initialize(self, config, connection_name, consumer_name, stats_queue):
+        """Initialize a new consumer thread, setting defaults and config values
+
+        :param dict config: Consumer config section from YAML File
+        :param str connection_name: The name of the connection
+        :param str consumer_name: Consumer name for config
+        :param multiprocessing.Queue stats_queue: The queue to append stats in
+        :raises: ImportError
+
+        """
+        logger.info('Initializing for %s on %s', self.name, connection_name)
+        self._stats_queue = stats_queue
 
         # Hold the consumer config
         self._consumer = config['Consumers'][consumer_name]
@@ -111,13 +117,13 @@ class RejectedConsumer(object):
         self._prefetch_count = self._consumer.get('prefetch_count',
                                                   self._QOS_PREFETCH_COUNT)
 
-        # Get the RabbitMQ Connection started
+        # Setup the signal handler for stats
+        self._setup_signal_handlers()
+
+        # Create the RabbitMQ Connection
         self._channel = None
         self._connection = self._get_connection(config['Connections'],
                                                 connection_name)
-
-        # Setup a counter dictionary
-        self._counts = self._initialize_counts()
 
     def _ack_message(self, delivery_tag):
         """Acknowledge the message on the broker and log the ack
@@ -136,7 +142,7 @@ class RejectedConsumer(object):
 
         """
         # If we have a requested stop, call it
-        if self._state == RejectedConsumer.STATE_STOP_REQUESTED:
+        if self._state == self.STATE_STOP_REQUESTED:
             logger.debug('Stop requested prior to changing state')
             self.stop()
             return False
@@ -197,7 +203,7 @@ class RejectedConsumer(object):
             logger.critical('Could not connect to %s:%s:%s %r',
                             config[name]['host'], config[name]['port'],
                             config[name]['vhost'], error)
-            self._set_state(RejectedConsumer.STATE_STOPPED)
+            self._set_state(self.STATE_STOPPED)
 
     def _get_connection_parameters(self, host, port, vhost, username, password):
         """Return connection parameters for a pika connection.
@@ -212,16 +218,6 @@ class RejectedConsumer(object):
         """
         credentials = pika.PlainCredentials(username, password)
         return pika.ConnectionParameters(host, port, vhost, credentials)
-
-    def _get_name(self, consumer_name, consumer_number):
-        """Initialize a new consumer thread, setting defaults and config values
-
-        :param str consumer_name: The name of the consumer
-        :param int consumer_number: The identification number for the consumer
-        :rtype: str
-
-        """
-        return '%s_%i_tag_%i' % (consumer_name, os.getpid(), consumer_number)
 
     def _get_processor(self, config):
         """Initialize the message processor
@@ -251,18 +247,17 @@ class RejectedConsumer(object):
             logger.critical('Could not create %s: %r', namespaced_class, error)
             return None
 
-
     def _initialize_counts(self):
         """Return a dict object for our internal stats keeping.
 
         :rtype: dict
 
         """
-        return {RejectedConsumer.ERROR: 0,
-                RejectedConsumer.PROCESSED: 0,
-                RejectedConsumer.REDELIVERED: 0,
-                RejectedConsumer.TIME_SPENT: 0,
-                RejectedConsumer.TIME_WAITED: 0}
+        return {self.ERROR: 0,
+                self.PROCESSED: 0,
+                self.REDELIVERED: 0,
+                self.TIME_SPENT: 0,
+                self.TIME_WAITED: 0}
 
     def _process(self, message):
         """Wrap the actual processor processing bits
@@ -318,12 +313,20 @@ class RejectedConsumer(object):
             self._counts[self.TIME_SPENT] += self._time_in_state
 
         # Make sure it's a valid state
-        if state not in RejectedConsumer._STATES:
+        if state not in self._STATES:
             raise ValueError('%s is not a valid state for this object' %
                              self._STATES[state])
         # Set the state
         self._state = state
         self._state_start = time.time()
+
+    def _setup_signal_handlers(self):
+        """Setup the stats and stop signal handlers. Use SIGABRT instead of
+        SIGTERM due to the multiprocessing's behavior with SIGTERM.
+
+        """
+        signal.signal(signal.SIGINFO, self.get_stats)
+        signal.signal(signal.SIGABRT, self.stop)
 
     @property
     def _time_in_state(self):
@@ -333,6 +336,42 @@ class RejectedConsumer(object):
 
         """
         return time.time() - self._state_start
+
+    def get_stats(self, signum_unused, stack_frame_unused):
+        """Get the queue depth from a passive queue declare and call the
+        callback specified in the invocation with a dictionary of our current
+        running state.
+
+        :param int signum_unused: The signal received
+        :param frame stack_frame_unused: The current stack frame
+
+        """
+        def on_results(frame):
+            """Handle the callback from Pika with the queue depth information"""
+            logger.debug('Received queue depth info from RabbitMQ')
+
+            # Count the idle time thus far if the consumer is just waiting
+            if self.is_idle:
+                self._counts[self.TIME_WAITED] += self._time_in_state
+                self._state_start = time.time()
+
+            # Call the callback with the data
+            stats = {'name': self.name,
+                     'counts': self._counts,
+                     'queue': {'name': self._queue_name,
+                               'message_count': frame.method.message_count,
+                               'consumer_count': frame.method.consumer_count},
+                     'state': {'value': self._state,
+                               'description': self.state_desc}}
+
+            # Add the stats to the queue
+            self._stats_queue.put(stats, False)
+
+        # Perform the passive queue declare
+        logger.debug('SIGINFO received, Performing a queue depth check')
+        self._channel.queue_declare(callback=on_results,
+                                    queue=self._queue_name,
+                                    passive=True)
 
     @property
     def is_idle(self):
@@ -351,8 +390,7 @@ class RejectedConsumer(object):
         :rtype: bool
 
         """
-        return self._state in [RejectedConsumer.STATE_IDLE,
-                               RejectedConsumer.STATE_PROCESSING]
+        return self._state in [self.STATE_IDLE, self.STATE_PROCESSING]
 
     @property
     def is_shutting_down(self):
@@ -370,8 +408,7 @@ class RejectedConsumer(object):
         :rtype: bool
 
         """
-        return self._state in [RejectedConsumer.STATE_SHUTTING_DOWN,
-                               RejectedConsumer.STATE_STOPPED]
+        return self._state in [self.STATE_SHUTTING_DOWN, self.STATE_STOPPED]
 
     def on_basic_cancel(self, channel):
         """Callback indicating our basic.cancel has completed. Now close the
@@ -382,6 +419,7 @@ class RejectedConsumer(object):
         """
         logger.debug('Basic.Cancel on %r complete', channel)
         self._set_state(self.STATE_STOPPED)
+        ioloop.IOLoop.instance().stop()
 
     def on_channel_close(self, reason_code, reason_text):
         """Callback invoked by Pika when the channel has been closed by
@@ -410,7 +448,7 @@ class RejectedConsumer(object):
         self._set_qos_prefetch()
 
         # Set our runtime state
-        self._set_state(RejectedConsumer.STATE_IDLE)
+        self._set_state(self.STATE_IDLE)
 
         # Ask for stuck messages
         self._channel.basic_recover(requeue=True)
@@ -441,7 +479,7 @@ class RejectedConsumer(object):
             logger.debug('Processor does not have a shutdown method')
 
         # Set the runtime state
-        self._set_state(RejectedConsumer.STATE_STOPPED)
+        self._set_state(self.STATE_STOPPED)
 
     def on_connected(self, connection):
         """We have connected to RabbitMQ so setup our connection attribute and
@@ -517,17 +555,23 @@ class RejectedConsumer(object):
         if self._ack:
             self._ack_message(method.delivery_tag)
 
+        # Check if we need to check stats
+
+
         # Set the state as idle
         self._set_state(self.STATE_IDLE)
 
-    @property
-    def state(self):
-        """Return the current state value
-
-        :rtype: int
-
-        """
-        return self._state
+    def run(self):
+        """Start the consumer"""
+        self._initialize(self._kwargs['config'],
+                         self._kwargs['connection_name'],
+                         self._kwargs['consumer_name'],
+                         self._kwargs['stats_queue'])
+        try:
+            ioloop.IOLoop.instance().start()
+        except KeyboardInterrupt:
+            self.stop()
+            ioloop.IOLoop.instance().start()
 
     @property
     def state_desc(self):
@@ -536,39 +580,7 @@ class RejectedConsumer(object):
         :rtype: str
 
         """
-        return RejectedConsumer._STATES[self._state]
-
-    def stats(self, callback):
-        """Get the queue depth from a passive queue declare and call the
-        callback specified in the invocation with a dictionary of our current
-        running state.
-
-        :param method callback: Method to call when we have our data
-
-        """
-        def on_passive_queue_declare(frame):
-            """Handle the callback from Pika with the queue depth information"""
-            logger.debug('Calling %s with queue_state_data', callback)
-
-            # Count the idle time thus far if the consumer is just waiting
-            if self.is_idle:
-                self._counts[self.TIME_WAITED] += self._time_in_state
-                self._state_start = time.time()
-
-            # Call the callback with the data
-            callback({'name': self.name,
-                      'counts': self._counts,
-                      'queue': {'name': self._queue_name,
-                                'message_count': frame.method.message_count,
-                                'consumer_count': frame.method.consumer_count},
-                      'state': {'value': self.state,
-                                'description': self.state_desc}})
-
-        # Perform the passive queue declare
-        logger.debug('Performing a queue depth check')
-        self._channel.queue_declare(callback=on_passive_queue_declare,
-                                    queue=self._queue_name,
-                                    passive=True)
+        return self._STATES[self._state]
 
     def stop(self):
         """Stop the consumer from consuming by calling BasicCancel and setting
@@ -590,7 +602,7 @@ class RejectedConsumer(object):
                                    callback=self.on_basic_cancel)
 
         # Set the state to shutting down
-        self._set_state(RejectedConsumer.STATE_SHUTTING_DOWN)
+        self._set_state(self.STATE_SHUTTING_DOWN)
 
     @property
     def too_many_errors(self):

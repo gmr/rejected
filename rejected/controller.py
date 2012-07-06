@@ -9,6 +9,7 @@ __since__ = '2011-07-22'
 import clihelper
 import logging
 import sys
+import time
 
 from rejected import mcp
 from rejected import __version__
@@ -60,6 +61,8 @@ class Controller(clihelper.Controller):
         if self._mcp and self._mcp.is_running:
             logger.debug('Letting MCP know to shutdown')
             self._mcp.shutdown()
+            time.sleep(1)
+            del self._mcp
 
 
 def _cli_options(parser):

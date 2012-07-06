@@ -1,712 +1,486 @@
-"""Core consumer class that handles the communication with RabbitMQ and the
-delegation of messages to the Processor class for processing. Controls the life
-cycle of a message received from RabbitMQ.
+"""Base rejected message Consumer class that aims at simplifying the process
+of writing message Consumers that enforce good behaviors in dealing with
+messages.
 
 """
-import copy
-from tornado import ioloop
-import logging
-import os
-import multiprocessing
-import pika
-from pika import exceptions
-from pika.adapters import tornado_connection
-import signal
-import threading
-import time
-import traceback
+__author__ = 'gmr'
+__since__ = '2012-06-06'
+__version__ = '1.0.0'
 
-from rejected import __version__
+import bz2
+import csv
+import datetime
+try:
+    import simplejson as json
+except ImportError:
+    import json
+import logging
+import pickle
+import plistlib
+import StringIO as stringio
+import yaml
+import zlib
 
 logger = logging.getLogger(__name__)
 
-def import_namespaced_class(namespaced_class):
-    """Pass in a string in the format of foo.Bar, foo.bar.Baz, foo.bar.baz.Qux
-    and it will return a handle to the class
+# Optional imports
+try:
+    import bs4
+except ImportError:
+    logger.warning('BeautifulSoup not found, disabling html and xml support')
+    bs4 = None
 
-    :param str namespaced_class: The namespaced class
-    :return: tuple(Class, str)
+try:
+    import couchconfig
+except ImportError:
+    logger.warning('couchconfig not found, disabling configuration support')
+    couchconfig = None
+
+try:
+    import redis
+except ImportError:
+    logger.warning('redis-py not found, disabling Redis support')
+    redis = None
+
+try:
+    import pgsql_wrapper
+except ImportError:
+    logger.warning('pgsql_wrapper not found, disabling PostgreSQL support')
+    pgsql_wrapper = None
+
+
+class Consumer(object):
+    """Base Consumer class to ease the implementation of strongly typed message
+    Consumers that validate and automatically decode and deserialize the
+    inbound message body based upon the message properties.
+
+    If Child._MESSAGE_TYPE is set, it will be validated against when a message
+    is received, checking the properties.type value. If they are not matched,
+    the Consumer will not process the message and will drop the message,
+    returning True if Child._DROP_INVALID_MESSAGES is True. If it is False,
+    the message will cause the Consumer to return False and return the message
+    to the broker.
 
     """
-    # Split up our string containing the import and class
-    parts = namespaced_class.split('.')
+    _CONFIG_KEYS = ['service', 'config_host', 'config_domain', 'config_ttl']
+    _DROP_INVALID_MESSAGES = True
+    _MESSAGE_TYPE = None
+    _PICKLE_MIME_TYPES = ['application/pickle',
+                          'application/x-pickle',
+                          'application/x-vnd.python.pickle',
+                          'application/vnd.python.pickle']
+    _YAML_MIME_TYPES = ['text/yaml', 'text/x-yaml']
 
-    # Build our strings for the import name and the class name
-    import_name = '.'.join(parts[0:-1])
-    class_name = parts[-1]
+    def __init__(self, configuration):
+        """Creates a new instance of a Consumer class. To perform
+        initialization tasks, extend Consumer._initialize
 
-    import_handle = __import__(import_name, fromlist=class_name)
-    if hasattr(import_handle, '__version__'):
-        version = import_handle.__version__
-    else:
-        version = None
-
-    # Return the class handle
-    return getattr(import_handle, class_name), version
-
-
-class RejectedConsumer(multiprocessing.Process):
-    """Core consumer class for processing messages and dealing with AMQP and
-    message processing.
-
-    """
-    _AMQP_APP_ID = 'rejected/%s' % __version__
-    _QOS_PREFETCH_COUNT = 1
-
-    # State constants
-    STATE_INITIALIZING = 0x01
-    STATE_CONNECTING = 0x02
-    STATE_IDLE = 0x03
-    STATE_PROCESSING = 0x04
-    STATE_STOP_REQUESTED = 0x05
-    STATE_SHUTTING_DOWN = 0x06
-    STATE_STOPPED = 0x07
-
-    # For reverse lookup
-    _STATES = {0x01: 'Initializing',
-               0x02: 'Connecting',
-               0x03: 'Idle',
-               0x04: 'Processing',
-               0x05: 'Stop Requested',
-               0x06: 'Shutting down',
-               0x07: 'Stopped'}
-
-    # Counter constants
-    ERROR = 'failed'
-    PROCESSED = 'processed'
-    REDELIVERED = 'redelivered_messages'
-    TIME_SPENT = 'processing_time'
-    TIME_WAITED = 'waiting_time'
-
-    # Default message pre-allocation value
-    _QOS_PREFETCH_COUNT = 1
-    _MAX_ERROR_COUNT = 5
-    _MAX_SHUTDOWN_WAIT = 5
-
-    def __init__(self, group=None, target=None, name=None, args=(), kwargs={}):
-        super(RejectedConsumer, self).__init__(group, target, name,
-                                               args, kwargs)
-        self._consumer = None
-        self._counts = self._initialize_counts()
-        self._state = self.STATE_INITIALIZING
-        self._state_start = time.time()
-        self._shutdown_timer = None
-
-    def _ack_message(self, delivery_tag):
-        """Acknowledge the message on the broker and log the ack
-
-        :param int delivery_tag: Delivery tag to acknowledge
+        :param dict configuration: The configuration from rejected
 
         """
-        logger.debug('Acking %s', delivery_tag)
-        self._channel.basic_ack(delivery_tag=delivery_tag)
+        # Carry the configuration for use elsewhere
+        self._configuration = configuration
 
-    def _can_change_state(self):
-        """Check the current state, calling stop if required and returning False
-        if the state should not change.
+        # Automatically add a config object if the values are present
+        self._config = None
+        if couchconfig and [key for key in self._CONFIG_KEYS
+                            if key in configuration.keys()]:
+            self._config = self._get_configuration_obj(configuration)
 
-        :rtype: bool
+        # Each message received will be carried as an attribute
+        self._message = None
+        self._message_body = None
 
-        """
-        # If we have a requested stop, call it
-        if self._state == self.STATE_STOP_REQUESTED:
-            logger.debug('Stop requested prior to changing state')
-            self.stop()
-            return False
+        # Call the initialize method
+        self._initialize()
 
-        # Make sure we're not in a blocking state
-        if self.is_stopped:
-            logger.debug('No state change while stopping or stopped')
-            return False
-
-        # Let our calling party know it's ok
-        return True
-
-    def _count(self, stat):
-        """Return the current count quantity for a specific stat.
-
-        :param str stat: Name of stat to get value for
-        :rtype: int or float
+    def _initialize(self):
+        """Extend this method for actions to take in initializing the Consumer
+        instead of extending __init__.
 
         """
-        return self._counts.get(stat, 0)
+        pass
 
-    def _get_config(self, config, number, name, connection):
-        """Initialize a new consumer thread, setting defaults and config values
+    def _process(self):
+        """Extend this method for implementing your Consumer logic.
 
-        :param dict config: Consumer config section from YAML File
-        :param int number: The identification number for the consumer
-        :param str name: The name of the consumer
-        :param str connection: The name of the connection):
-        :rtype: dict
+        If the message can not be processed and the Consumer should stop after
+        n failures to process messages, raise the ConsumerException.
 
-        """
-        return {'connection': config['Connections'][connection],
-                'connection_name': connection,
-                'consumer_name': name,
-                'name': '%s_%i_tag_%i' % (name, os.getpid(), number)}
-
-    def _get_connection(self, config, name):
-        """Connect to RabbitMQ returning the connection handle.
-
-        :param dict config: The Connections section of the configuration
-        :param str name: The name of the connection
-        :rtype: pika.adapters.torando_connection.TorandoConnection
+        :raises: ConsumerException
+        :raises: NotImplementedError
 
         """
-        logger.debug('Connecting to %s:%i:%s as %s',
-                     config[name]['host'], config[name]['port'],
-                     config[name]['vhost'], config[name]['user'])
-        parameters = self._get_connection_parameters(config[name]['host'],
-                                                     config[name]['port'],
-                                                     config[name]['vhost'],
-                                                     config[name]['user'],
-                                                     config[name]['pass'])
-        # Get the configuration for convenience
-        try:
-            tornado_connection.TornadoConnection(parameters,
-                                                 self.on_connected)
-        except pika.exceptions.AMQPConnectionError as error:
-            logger.critical('Could not connect to %s:%s:%s %r',
-                            config[name]['host'], config[name]['port'],
-                            config[name]['vhost'], error)
-            self._set_state(self.STATE_STOPPED)
+        raise NotImplementedError
 
-    def _get_connection_parameters(self, host, port, vhost, username, password):
-        """Return connection parameters for a pika connection.
+    def _decode_bz2(self, value):
+        """Return a bz2 decompressed value.
 
-        :param str host: The RabbitMQ host to connect to
-        :param int port: The port to connect on
-        :param str vhost: The virtual host
-        :param str username: The username to use
-        :param str password: The password to use
-        :rtype: pika.ConnectionParameters
+        :param str value: Compressed value
+        :rtype: str
 
         """
-        credentials = pika.PlainCredentials(username, password)
-        return pika.ConnectionParameters(host, port, vhost, credentials)
+        return bz2.decompress(value)
 
-    def _get_processor(self, config):
-        """Initialize the message processor
+    def _decode_gzip(self, value):
+        """Return a zlib decompressed value.
 
-        :param dict config: The named consumer section of the configuration
-        :rtype: instance
-
-        """
-        # Try and import the module
-        namespaced_class = '%s.%s' % (config['import'], config['processor'])
-        processor_class, version = import_namespaced_class(namespaced_class)
-        if version:
-            logger.info('Creating processor %s v%s', namespaced_class, version)
-        else:
-            logger.info('Creating processor %s', namespaced_class)
-
-        # If we have a config, pass it in to the constructor
-        if 'config' in config:
-            try:
-                return processor_class(config['config'])
-            except Exception as error:
-                logger.critical('Could not create %s: %r',
-                                namespaced_class, error)
-                return None
-
-        # No config to pass
-        try:
-            return processor_class()
-        except Exception as error:
-            logger.critical('Could not create %s: %r', namespaced_class, error)
-            return None
-
-    def _initialize_counts(self):
-        """Return a dict object for our internal stats keeping.
-
-        :rtype: dict
+        :param str value: Compressed value
+        :rtype: str
 
         """
-        return {self.ERROR: 0,
-                self.PROCESSED: 0,
-                self.REDELIVERED: 0,
-                self.TIME_SPENT: 0,
-                self.TIME_WAITED: 0}
+        return zlib.decompress(value)
 
-    def _process(self, message):
-        """Wrap the actual processor processing bits
+    def _get_configuration_obj(self, config):
+        """Return a new instance of couchconfig.Configuration with the service
+        defined in normal, forward DNS notation (service.domain.tld).
 
-        :param Message message: Message to process
-        :rtype: bool
-
-        """
-        # Try and process the message
-        try:
-            return self._processor.process(message)
-        except Exception as error:
-            formatted_lines = traceback.format_exc().splitlines()
-            logger.critical('Processor threw an uncaught exception %s: %s',
-                            type(error), error)
-            for line in formatted_lines:
-                logger.debug('%s', line.strip())
-
-        # We erred out so return False
-        return False
-
-    def _reject(self, delivery_tag):
-        """Reject the message on the broker and log it. We should move this to
-         use to nack when Pika supports it in a released version.
-
-        :param int delivery_tag: Delivery tag to reject
-        :type delivery_tag: int
-
-        """
-        self._channel.basic_reject(delivery_tag=delivery_tag)
-
-    def _set_qos_prefetch(self, value=None):
-        """Set the QOS Prefetch count for the channel.
-
-        :param int value: The value to set the prefetch to
-
-        """
-        value = value or self._prefetch_count
-        logger.info('Setting the QOS Prefetch to %i', value)
-        self._channel.basic_qos(prefetch_count=value, callback=None)
-
-    def _set_state(self, state):
-        """Assign the specified state to this consumer object.
-
-        :param int state: The new state of the object
-        :raises: ValueError
-
-        """
-        # Keep track of how much time we're spending waiting and processing
-        if state == self.STATE_PROCESSING and self._state == self.STATE_IDLE:
-            self._counts[self.TIME_WAITED] += self._time_in_state
-        elif state == self.STATE_IDLE and self._state == self.STATE_PROCESSING:
-            self._counts[self.TIME_SPENT] += self._time_in_state
-
-        # Make sure it's a valid state
-        if state not in self._STATES:
-            raise ValueError('%s is not a valid state for this object' %
-                             self._STATES[state])
-        # Set the state
-        self._state = state
-        self._state_start = time.time()
-
-    def _setup(self, config, connection_name, consumer_name, stats_queue):
-        """Initialize the consumer, setting up needed attributes and connecting
-        to RabbitMQ.
-
-        :param dict config: Consumer config section from YAML File
-        :param str connection_name: The name of the connection
-        :param str consumer_name: Consumer name for config
-        :param multiprocessing.Queue stats_queue: The queue to append stats in
+        :param dict config: Configuration dictionary
+        :rtype: couchconfig.Configuration
         :raises: ImportError
 
         """
-        logger.info('Initializing for %s on %s', self.name, connection_name)
-        self._stats_queue = stats_queue
+        if not pgsql_wrapper:
+            raise ImportError('Could not import couchconfig for configuration '
+                              'service support')
 
-        # Hold the consumer config
-        self._consumer_name = consumer_name
-        self._consumer = config['Consumers'][consumer_name]
+        service = self._get_service(config.get('service'))
+        return couchconfig.Configuration(service,
+                                         config.get('config_host'),
+                                         config.get('config_domain'),
+                                         config.get('config_ttl'))
 
-        # Setup the processor
-        self._processor = self._get_processor(self._consumer)
-        if not self._processor:
-            raise ImportError('Could not import and start processor')
+    def _get_postgresql_cursor(self, host, port, dbname, user,
+                               password=None):
+        """Connect to PostgreSQL and return the cursor.
 
-        # Set the routing information
-        self._queue_name = self._consumer['queue']
-
-        # Set the various control nobs
-        self._ack = self._consumer.get('ack', True)
-        self._max_error_count = self._consumer.get('max_errors',
-                                                   self._MAX_ERROR_COUNT)
-        self._prefetch_count = self._consumer.get('prefetch_count',
-                                                  self._QOS_PREFETCH_COUNT)
-
-        # Setup the signal handler for stats
-        self._setup_signal_handlers()
-
-        # Create the RabbitMQ Connection
-        self._channel = None
-        self._connection = self._get_connection(config['Connections'],
-                                                connection_name)
-
-    def _setup_signal_handlers(self):
-        """Setup the stats and stop signal handlers. Use SIGABRT instead of
-        SIGTERM due to the multiprocessing's behavior with SIGTERM.
+        :param str host: The PostgreSQL host
+        :param int port: The PostgreSQL port
+        :param str dbname: The database name
+        :param str user: The user name
+        :param str password: The optional password
+        :rtype: psycopg2.Cursor
+        :raises: ImportError
 
         """
-        signal.signal(signal.SIGPROF, self.get_stats)
-        signal.signal(signal.SIGABRT, self.stop)
-
-    def _shutdown(self):
-        """Shutdown steps called any time the connection or channel is closed.
-
-        """
-        self._connection = None
-        self._stop_processor()
-        ioloop.IOLoop.instance().stop()
-        self._set_state(self.STATE_STOPPED)
-        logger.info('%s shutdown', self.name)
-
-    def _stop_processor(self):
-        """Stop the processor class and let it shutdown nicely if it wants."""
-        # Shutdown the message processor
+        if not pgsql_wrapper:
+            raise ImportError('Could not import pgsql_wrapper for PostgreSQL '
+                              'support')
+        # Connect to PostgreSQL
         try:
-            logger.debug('Shutting down processor')
-            self._processor.shutdown()
-        except AttributeError:
-            logger.debug('Processor does not have a shutdown method')
+            connection = pgsql_wrapper.PgSQL(host, port, dbname, user, password)
+        except pgsql_wrapper.OperationalError as exception:
+            raise IOError(exception)
+
+        # Return a cursor
+        return connection.cursor
+
+    def _get_redis_client(self, host, port, db):
+        """Return a redis client for the given host, port and db.
+
+        :param str host: The redis host to connect to
+        :param int port: The redis port to connect to
+        :param int db: The redis database number to use
+        :rtype: redis.client.Redis
+        :raises: ImportError
+
+        """
+        if not redis:
+            raise ImportError('Could not import redis for redis support')
+        return redis.Redis(host=host, port=port, db=db)
+
+    def _get_service(self, fqdn):
+        """Return the service notation for the fqdn value (tld_domain_service).
+
+        :param str fqdn: The fqdn value (service.domain.tld, etc)
+        :rtype: str
+
+        """
+        return couchconfig.service_notation(fqdn)
+
+    def _load_csv_value(self, value):
+        """Create a csv.DictReader instance for the sniffed dialect for the
+        value passed in.
+
+        :param str value: The CSV value
+        :rtype: csv.DictReader
+
+        """
+        csv_buffer = stringio.StringIO(value)
+        dialect = csv.Sniffer().sniff(csv_buffer.read(1024))
+        csv_buffer.seek(0)
+        return csv.DictReader(csv_buffer, dialect=dialect)
+
+    def _load_html_value(self, value):
+        """Load an HTML string into an bs4.BeautifulSoup object.
+
+        :param str value: The HTML string
+        :rtype: bs4.BeautifulSoup
+        :raises: ConsumerException
+
+        """
+        if not bs4:
+            raise ConsumerException('BeautifulSoup is not enabled')
+        return bs4.BeautifulSoup(value)
+
+    def _load_json_value(self, value):
+        """Deserialize a JSON string returning the native Python data type
+        for the value.
+
+        :param str value: The JSON string
+        :rtype: object
+
+        """
+        return json.loads(value, use_decimal=True)
+
+    def _load_pickle_value(self, value):
+        """Deserialize a pickle string returning the native Python data type
+        for the value.
+
+        :param str value: The pickle string
+        :rtype: object
+
+        """
+        return pickle.loads(value)
+
+    def _load_plist_value(self, value):
+        """Deserialize a plist string returning the native Python data type
+        for the value.
+
+        :param str value: The pickle string
+        :rtype: dict
+
+        """
+        return plistlib.readPlistFromString(value)
+
+    def _load_xml_value(self, value):
+        """Load an XML string into an lxml etree object.
+
+        :param str value: The XML string
+        :rtype: bs4.BeautifulSoup
+        :raises: ConsumerException
+
+        """
+        if not bs4:
+            raise ConsumerException('BeautifulSoup is not enabled')
+        return bs4.BeautifulSoup(value)
+
+    def _load_yaml_value(self, value):
+        """Load an YAML string into an dict object.
+
+        :param str value: The YAML string
+        :rtype: any
+        :raises: ConsumerException
+
+        """
+        if not bs4:
+            raise ConsumerException('YAML is not enabled')
+        return yaml.load(value)
 
     @property
-    def _time_in_state(self):
-        """Return the time that has been spent in the current state.
-
-        :rtype: float
-
-        """
-        return time.time() - self._state_start
-
-    def get_stats(self, signum_unused, stack_frame_unused):
-        """Get the queue depth from a passive queue declare and call the
-        callback specified in the invocation with a dictionary of our current
-        running state.
-
-        :param int signum_unused: The signal received
-        :param frame stack_frame_unused: The current stack frame
-
-        """
-        def on_results(frame):
-            """Handle the callback from Pika with the queue depth information"""
-            logger.debug('Received queue depth info from RabbitMQ')
-
-            # Count the idle time thus far if the consumer is just waiting
-            if self.is_idle:
-                self._counts[self.TIME_WAITED] += self._time_in_state
-                self._state_start = time.time()
-
-            # Call the callback with the data
-            stats = {'consumer_name': self._consumer_name,
-                     'name': self.name,
-                     'counts': self._counts,
-                     'queue': {'name': self._queue_name,
-                               'message_count': frame.method.message_count,
-                               'consumer_count': frame.method.consumer_count},
-                     'state': {'value': self._state,
-                               'description': self.state_desc}}
-
-            # Add the stats to the queue
-            self._stats_queue.put(stats, False)
-
-        # Perform the passive queue declare
-        logger.debug('SIGINFO received, Performing a queue depth check')
-        self._channel.queue_declare(callback=on_results,
-                                    queue=self._queue_name,
-                                    passive=True)
-
-    @property
-    def is_idle(self):
-        """Returns a bool specifying if the consumer is currently idle.
-
-        :rtype: bool
-
-        """
-        return self._state == self.STATE_IDLE
-
-    @property
-    def is_running(self):
-        """Returns a bool determining if the consumer is in a running state or
-        not
-
-        :rtype: bool
-
-        """
-        return self._state in [self.STATE_IDLE, self.STATE_PROCESSING]
-
-    @property
-    def is_shutting_down(self):
-        """Designates if the consumer is shutting down.
-
-        :rtype: bool
-
-        """
-        return self._state == self.STATE_SHUTTING_DOWN
-
-    @property
-    def is_stopped(self):
-        """Returns a bool determining if the consumer is stopped or stopping
-
-        :rtype: bool
-
-        """
-        return self._state in [self.STATE_SHUTTING_DOWN, self.STATE_STOPPED]
-
-    def on_channel_close(self, reason_code, reason_text):
-        """Callback invoked by Pika when the channel has been closed by
-        RabbitMQ
-
-        :param int reason_code: AMQP close status code
-        :param str reason_text: AMQP close message
-
-        """
-        logger.critical('Channel closed by remote (%s): %s',
-                        reason_code, reason_text)
-        self._set_state(self.STATE_STOPPED)
-
-    def on_channel_open(self, channel):
-        """The channel is open so now lets set our QOS prefetch and register
-        the consumer.
-
-        :param pika.channel.Channel channel: The open channel
-
-        """
-        logger.info('Channel #%i to RabbitMQ Opened', channel.channel_number)
-        self._channel = channel
-        self._channel.add_on_close_callback(self.on_channel_close)
-
-        # Set our QOS Prefetch Count
-        self._set_qos_prefetch()
-
-        # Set our runtime state
-        self._set_state(self.STATE_IDLE)
-
-        # Ask for stuck messages
-        self._channel.basic_recover(requeue=True)
-
-        # Start the message consumer
-        self._channel.basic_consume(consumer_callback = self.process,
-                                    queue=self._queue_name,
-                                    no_ack=not self._ack,
-                                    consumer_tag=self.name)
-
-    def on_closed(self, reason_code='Unknown', reason_text='Unknown'):
-        """Callback invoked by Pika when our connection has been closed.
-
-        :param int reason_code: AMQP close status code
-        :param str reason_text: AMQP close message
-
-        """
-        # We've closed our pika connection so stop
-        # Log that we're done
-        logger.info('RabbitMQ connection closed: (%s) %s',
-                    reason_code, reason_text)
-        self._shutdown()
-
-    def on_connected(self, connection):
-        """We have connected to RabbitMQ so setup our connection attribute and
-        then open a channel.
-
-        :param pika.connection.Connection connection: RabbitMQ Connection
-
-        """
-        logger.debug('Connected to RabbitMQ')
-        self._connection = connection
-        self._connection.add_on_close_callback(self.on_closed)
-        self._connection.channel(self.on_channel_open)
-
-    def on_error(self, method, exception):
-        """Called when a runtime error encountered.
-
-        :param pika.frames.MethodFrame method: The method frame with an error
-        :param Exception exception: The error that occurred
-
-        """
-        logger.error('Runtime exception raised: %s', exception)
-        self._count[self.ERROR] += 1
-
-        # If we do not have no_ack set, then reject the message
-        if self._ack:
-            self._reject(method.delivery_tag)
-
-        # Check our error count
-        if self.too_many_errors:
-            logger.debug('Error threshold exceeded, stopping')
-            self.stop()
-
-        # Set our state to consuming
-        self._set_state(self.STATE_IDLE)
-
-    def process(self, channel=None, method=None, header=None, body=None):
-        """Process a message from Rabbit
-
-        :param pika.channel.Channel channel: The channel the message was sent on
-        :param pika.frames.MethodFrame method: The method frame
-        :param pika.frames.HeaderFrame header: The header frame
-        :param str body: The message body
-        :rtype: bool
-
-        """
-        if self.is_shutting_down:
-            logger.critical('Received a message while shutting down')
-            self._reject(method.delivery_tag)
-            return False
-
-        # Set our state to processing
-        self._set_state(self.STATE_PROCESSING)
-        logger.debug('Received message #%s', method.delivery_tag)
-
-        # Build the message wrapper object for all the parts
-        message = Message(channel, method, header, body)
-        if method.redelivered:
-            self._counts[self.REDELIVERED] += 1
-
-        # Set our start time
-        self._state_start = time.time()
-
-        # Process the message, evaluating the success
-        try:
-            self._process(message)
-        except RuntimeError as error:
-            return self.on_error(method, error)
-
-        # Message was processed
-        self._counts[self.PROCESSED] += 1
-
-        # If no_ack was not set when we setup consuming, do so here
-        if self._ack:
-            self._ack_message(method.delivery_tag)
-
-        # Set the state as idle
-        self._set_state(self.STATE_IDLE)
-
-    def run(self):
-        """Start the consumer"""
-        try:
-            self._setup(self._kwargs['config'],
-                        self._kwargs['connection_name'],
-                        self._kwargs['consumer_name'],
-                        self._kwargs['stats_queue'])
-        except ImportError:
-            logger.debug('Could not import processor, stopping this process')
-            return
-
-        try:
-            ioloop.IOLoop.instance().start()
-        except KeyboardInterrupt:
-            logger.debug('Caught keyboard interrupt, stopping')
-            self.stop()
-            ioloop.IOLoop.instance().start()
-        logger.debug('Exiting')
-
-    @property
-    def state_desc(self):
-        """Return the string description of our running state.
+    def message_app_id(self):
+        """Return the app-id from the message properties.
 
         :rtype: str
 
         """
-        return self._STATES[self._state]
+        return self._message.properties.app_id
 
-    def stop(self, signum_unused=None, frame_unused=None):
-        """Stop the consumer from consuming by calling BasicCancel and setting
-        our state.
+    @property
+    def message_body(self):
+        """Return the message body, unencoded if needed,
+        deserialized if possible.
+
+        :rtype: any
 
         """
-        if self.is_stopped:
-            logger.debug('Stop requested but consumer is already stopped')
-            return
-        elif self.is_shutting_down:
-            logger.debug('Stop requested but consumer is already shutting down')
-            return
+        # Return a materialized view of the body if it has been previously set
+        if self._message_body:
+            return self._message_body
+
+        # Sanitize a improperly set content-encoding from mybPublish
+        if self.message_content_encoding == 'utf-8':
+            self._message.properties.content_encoding = None
+            self._message_body = self._message.body
+            logger.debug('Coerced an incorrect content-encoding of utf-8 to '
+                         'None')
+
+        # Handle bzip2 compressed content
+        elif self.message_content_encoding == 'bzip2':
+            self._message_body = self._decode_bz2(self._message.body)
+
+        # Handle zlib compressed content
+        elif self.message_content_encoding == 'gzip':
+            self._message_body = self._decode_gzip(self._message.body)
+
+        # Else we want to assign self._message.body to self._message_body
         else:
-            logger.debug('Stopping the consumer and setting max shutdown wait '
-                         'timer for %i seconds', self._MAX_SHUTDOWN_WAIT)
+            self._message_body = self._message.body
 
-        # A shutdown timer that will stop the process if it not stopped in time
-        self._shutdown_timer = threading.Timer(self._MAX_SHUTDOWN_WAIT,
-                                               self.terminate)
-        self._shutdown_timer.start()
+        # If it's JSON, auto-deserialize it
+        if self.message_content_type == 'application/json':
+            self._message_body = self._load_json_value(self._message_body)
 
-        # A stop was requested, close the channel and stop the IOLoop
-        self._channel.close()
+        # If it's pickled, auto unpickle it
+        elif self.message_content_type in self._PICKLE_MIME_TYPES:
+            self._message_body = self._load_pickle_value(self._message_body)
 
-        # Shutdown the consumer
-        self._shutdown()
+        elif self.message_content_type == 'application/x-plist':
+            self._message_body = self._load_plist_value(self._message_body)
+
+        elif self.message_content_type == 'text/csv':
+            self._message_body = self._load_csv_value(self._message_body)
+
+        # If it's HTML, load it into a BeautifulSoup object
+        elif bs4 and self.message_content_type == 'text/html':
+            self._message_body = self._load_html_value(self._message_body)
+
+        # If it's XML, load the content into lxml.etree
+        elif bs4 and self.message_content_type == 'text/xml':
+            self._message_body = self._load_xml_value(self._message_body)
+
+        # If it's YAML, load the content via pyyaml into a dict
+        elif self.message_content_type in self._YAML_MIME_TYPES:
+            self._message_body = self._load_yaml_value(self._message_body)
+
+        # Return the message body
+        return self._message_body
 
     @property
-    def too_many_errors(self):
-        """Return a bool if too many errors have occurred.
-
-        :rtype: bool
-
-        """
-        return self._count(self.ERROR) >= self._max_error_count
-
-
-class DataObject(object):
-    """A class that will return a plain text representation of all of the
-    attributes assigned to the object.
-
-    """
-    def __repr__(self):
-        """Return a string representation of the object and all of its
-        attributes.
+    def message_content_encoding(self):
+        """Return the content-encoding from the message properties.
 
         :rtype: str
 
         """
-        items = list()
-        for key, value in self.__dict__.iteritems():
-            if getattr(self.__class__, key, None) != value:
-                items.append('%s=%s' % (key, value))
-        return "<%s(%s)>" % (self.__class__.__name__, items)
+        return (self._message.properties.content_encoding or '').lower() or None
 
+    @property
+    def message_content_type(self):
+        """Return the content-type from the message properties.
 
-class Message(DataObject):
-    """Class for containing all the attributes about a message object creating a
-    flatter, move convenient way to access the data while supporting the legacy
-    methods that were previously in place in rejected < 2.0
-
-    """
-
-    def __init__(self, channel, method, header, body):
-        """Initialize a message setting the attributes from the given channel,
-        method, header and body.
-
-        :param pika.channel.Channel channel: The channel the msg was received on
-        :param pika.frames.Method method: Pika Method Frame object
-        :param pika.frames.Header header: Pika Header Frame object
-        :param str body: Pika message body
+        :rtype: str
 
         """
-        DataObject.__init__(self)
-        self.channel = channel
-        self.method = method
-        self.properties = Properties(header)
-        self.body = copy.copy(body)
+        return (self._message.properties.content_type or '').lower() or None
 
-        # Map method properties
-        self.consumer_tag = method.consumer_tag
-        self.delivery_tag = method.delivery_tag
-        self.exchange = method.exchange
-        self.redelivered = method.redelivered
-        self.routing_key = method.routing_key
+    @property
+    def message_correlation_id(self):
+        """Return the correlation-id from the message properties.
 
-
-class Properties(DataObject):
-    """A class that represents all of the field attributes of AMQP's
-    Basic.Properties
-
-    """
-
-    def __init__(self, header):
-        """Create a base object to contain all of the properties we need
-
-        :param pika.spec.BasicProperties header: A header object from Pika
+        :rtype: str
 
         """
-        DataObject.__init__(self)
-        self.content_type = header.content_type
-        self.content_encoding = header.content_encoding
-        self.headers = copy.deepcopy(header.headers) or dict()
-        self.delivery_mode = header.delivery_mode
-        self.priority = header.priority
-        self.correlation_id = header.correlation_id
-        self.reply_to = header.reply_to
-        self.expiration = header.expiration
-        self.message_id = header.message_id
-        self.timestamp = header.timestamp
-        self.type = header.type
-        self.user_id = header.user_id
-        self.app_id = header.app_id
-        self.cluster_id = header.cluster_id
+        return self._message.properties.correlation_id
+
+    @property
+    def message_expiration(self):
+        """Return the expiration as a datetime from the message properties.
+
+        :rtype: datetime.datetime
+
+        """
+        if not self._message.properties.expiration:
+            return None
+        float_value = float(self._message.properties.expiration)
+        return datetime.datetime.fromtimestamp(float_value)
+
+    @property
+    def message_headers(self):
+        """Return the headers from the message properties.
+
+        :rtype: dict
+
+        """
+        return self._message.properties.headers
+
+    @property
+    def message_id(self):
+        """Return the message-id from the message properties.
+
+        :rtype: str
+
+        """
+        return self._message.properties.message_id
+
+    @property
+    def message_priority(self):
+        """Return the priority from the message properties.
+
+        :rtype: int
+
+        """
+        return self._message.properties.priority
+
+    @property
+    def message_reply_to(self):
+        """Return the priority from the message properties.
+
+        :rtype: str
+
+        """
+        return self._message.properties.reply_to
+
+    @property
+    def message_type(self):
+        """Return the type from the message properties.
+
+        :rtype: str
+
+        """
+        return self._message.properties.type
+
+    @property
+    def message_time(self):
+        """Return the time of the message from the properties.
+
+        :rtype: datetime.datetime
+
+        """
+        if not self._message.properties.timestamp:
+            return None
+        float_value = float(self._message.properties.timestamp)
+        return datetime.datetime.fromtimestamp(float_value)
+
+    @property
+    def message_user_id(self):
+        """Return the user-id from the message properties.
+
+        :rtype: str
+
+        """
+        return self._message.properties.user_id
+
+    def process(self, message_in):
+        """Process the message from RabbitMQ. To implement logic for processing
+        a message, extend Consumer._process, not this method.
+
+        :param rejected.Consumer.Message message_in: The message to process
+        :rtype: bool
+
+        """
+        logger.debug('Received: %r', message_in)
+        self._message = message_in
+
+        # Validate the message type if the child sets _MESSAGE_TYPE
+        if self._MESSAGE_TYPE and self._MESSAGE_TYPE != self.message_type:
+            logger.error('Received a non-supported message type: %s',
+                         self.message_type)
+
+            # Should the message be dropped or returned to the broker?
+            if self._DROP_INVALID_MESSAGES:
+                logger.debug('Dropping the invalid message')
+                return
+            else:
+                raise ConsumerException('Invalid message type')
+
+        # Let the child object process the message
+        self._process()
+
+
+class ConsumerException(Exception):
+    """May be called when processing a message to indicate a problem that the
+    Consumer may be experiencing that should cause it to stop.
+
+    """
+    pass

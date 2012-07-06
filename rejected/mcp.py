@@ -36,7 +36,7 @@ class MasterControlProgram(object):
         self._config = config
         self.is_running = True
         self._last_poll_results = dict()
-        self._poll_data = {'time': 0, 'consumers': list()}
+        self._poll_data = {'time': 0, 'processes': list()}
         self._poll_results_timer = None
         self._poll_timer = None
         self._stats = dict()
@@ -113,7 +113,7 @@ class MasterControlProgram(object):
                     consumer_stats[consumer_name][key] += value
 
         return {'last_poll': timestamp,
-                'consumers': len(self._active_processes),
+                'processes': len(self._active_processes),
                 'consumer_data': consumer_stats,
                 'process_data': data,
                 'counts': stats}
@@ -163,7 +163,7 @@ class MasterControlProgram(object):
 
         """
         return len([process for process in self._active_processes
-                    if process.find(name) > -1])
+                    if process.name.find(name) > -1])
 
     def _create_consumer(self, consumer_number, consumer_name, connection_name):
         """Create a new consumer instances
@@ -250,7 +250,7 @@ class MasterControlProgram(object):
 
         # Start our data collection dict
         self._poll_data = {'timestamp': time.time(),
-                           'consumers': list()}
+                           'processes': list()}
 
         # Iterate through all of the consumers
         for process in self._active_processes:
@@ -262,7 +262,7 @@ class MasterControlProgram(object):
                 if self._monitoring:
                     logger.debug('Asking %s for stats', process.name)
                     self._poll_data['processes'].append(process.name)
-                    os.kill(consumer_.pid, signal.SIGPROF)
+                    os.kill(process.pid, signal.SIGPROF)
 
         # Remove the objects if we have them
         for process_name in dead_processes:

@@ -332,7 +332,7 @@ class RejectedConsumer(multiprocessing.Process):
         SIGTERM due to the multiprocessing's behavior with SIGTERM.
 
         """
-        signal.signal(signal.SIGINFO, self.get_stats)
+        signal.signal(signal.SIGPROF, self.get_stats)
         signal.signal(signal.SIGABRT, self.stop)
 
     @property

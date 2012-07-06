@@ -234,7 +234,7 @@ class MasterControlProgram(object):
                 if self._monitoring:
                     logger.debug('Asking %s for stats', consumer_.name)
                     self._poll_data['consumers'].append(consumer_.name)
-                    os.kill(consumer_.pid, signal.SIGINFO)
+                    os.kill(consumer_.pid, signal.SIGPROF)
 
         # Remove the objects if we have them
         self._prune_non_active_consumers(non_active_consumers)

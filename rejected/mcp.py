@@ -377,8 +377,12 @@ class MasterControlProgram(object):
                          process.name, process.pid)
             os.kill(process.pid, signal.SIGABRT)
 
-        # Add a shutdown timer to call this method again in n seconds
-        #self._add_shutdown_timer()
+        # Sleep for 200ms
+        time.sleep(0.2)
+
+        # If they shut down that fast, stop
+        if not self._active_processes:
+            self._stopped()
 
     def _stopped(self):
         """Called when the consumers have all stopped, to exit out of
@@ -386,7 +390,6 @@ class MasterControlProgram(object):
 
         """
         self.is_running = False
-        os.kill(os.getpid(), signal.SIGALRM)
 
     @property
     def _total_consumer_count(self):
@@ -402,7 +405,7 @@ class MasterControlProgram(object):
         consumer consumers and then loop while we process messages.
 
         """
-        logger.info('rejected v%s - i am consumer whore', __version__)
+        logger.info('rejected v%s - i am a consumer whore', __version__)
         # Get the consumer section from the config
         if 'Consumers' not in self._config:
             logger.error('Missing Consumers section of configuration, '
@@ -457,6 +460,11 @@ class MasterControlProgram(object):
         """Graceful shutdown of the MCP means shutting down consumers too"""
         logger.debug('Master Control Program Shutting Down')
         self._stop_consumers()
+        iterations = 0
         while self._active_processes:
-            time.sleep(0.2)
+            time.sleep(1)
+            iterations += 1
+            if iterations == self._MAX_SHUTDOWN_WAIT:
+                self._kill_consumers()
+            self.is_running = False
         logger.info('Exiting Master Control Program')

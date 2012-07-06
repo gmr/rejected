@@ -57,7 +57,7 @@ class Controller(clihelper.Controller):
     def _cleanup(self):
         """Stop the child processes and threads"""
         logger.info('Shutdown cleanup request received')
-        if self._mcp:
+        if self._mcp and self._mcp.is_running:
             logger.debug('Letting MCP know to shutdown')
             self._mcp.shutdown()
 

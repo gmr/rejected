@@ -339,6 +339,25 @@ class RejectedConsumer(multiprocessing.Process):
         signal.signal(signal.SIGPROF, self.get_stats)
         signal.signal(signal.SIGABRT, self.stop)
 
+    def _shutdown(self):
+        """Shutdown steps called any time the connection or channel is closed.
+
+        """
+        self._connection = None
+        self._stop_processor()
+        ioloop.IOLoop.instance().stop()
+        self._set_state(self.STATE_STOPPED)
+        logger.info('%s shutdown', self.name)
+
+    def _stop_processor(self):
+        """Stop the processor class and let it shutdown nicely if it wants."""
+        # Shutdown the message processor
+        try:
+            logger.debug('Shutting down processor')
+            self._processor.shutdown()
+        except AttributeError:
+            logger.debug('Processor does not have a shutdown method')
+
     @property
     def _time_in_state(self):
         """Return the time that has been spent in the current state.
@@ -422,17 +441,6 @@ class RejectedConsumer(multiprocessing.Process):
         """
         return self._state in [self.STATE_SHUTTING_DOWN, self.STATE_STOPPED]
 
-    def on_basic_cancel(self, channel):
-        """Callback indicating our basic.cancel has completed. Now close the
-        connection.
-
-        :param pika.channel.Channel channel: The open channel
-
-        """
-        logger.debug('Basic.Cancel on %r complete', channel)
-        self._set_state(self.STATE_STOPPED)
-        ioloop.IOLoop.instance().stop()
-
     def on_channel_close(self, reason_code, reason_text):
         """Callback invoked by Pika when the channel has been closed by
         RabbitMQ
@@ -471,7 +479,7 @@ class RejectedConsumer(multiprocessing.Process):
                                     no_ack=not self._ack,
                                     consumer_tag=self.name)
 
-    def on_closed(self, reason_code, reason_text):
+    def on_closed(self, reason_code='Unknown', reason_text='Unknown'):
         """Callback invoked by Pika when our connection has been closed.
 
         :param int reason_code: AMQP close status code
@@ -482,16 +490,7 @@ class RejectedConsumer(multiprocessing.Process):
         # Log that we're done
         logger.info('RabbitMQ connection closed: (%s) %s',
                     reason_code, reason_text)
-
-        # Shutdown the message processor
-        try:
-            logger.debug('Shutting down processor')
-            self._processor.shutdown()
-        except AttributeError:
-            logger.debug('Processor does not have a shutdown method')
-
-        # Set the runtime state
-        self._set_state(self.STATE_STOPPED)
+        self._shutdown()
 
     def on_connected(self, connection):
         """We have connected to RabbitMQ so setup our connection attribute and
@@ -567,9 +566,6 @@ class RejectedConsumer(multiprocessing.Process):
         if self._ack:
             self._ack_message(method.delivery_tag)
 
-        # Check if we need to check stats
-
-
         # Set the state as idle
         self._set_state(self.STATE_IDLE)
 
@@ -587,8 +583,10 @@ class RejectedConsumer(multiprocessing.Process):
         try:
             ioloop.IOLoop.instance().start()
         except KeyboardInterrupt:
+            logger.debug('Caught keyboard interrupt, stopping')
             self.stop()
             ioloop.IOLoop.instance().start()
+        logger.debug('Exiting')
 
     @property
     def state_desc(self):
@@ -604,25 +602,26 @@ class RejectedConsumer(multiprocessing.Process):
         our state.
 
         """
-        logger.info('Stopping the consumer')
         if self.is_stopped:
-            logger.error('Stop requested but consumer is already stopped')
+            logger.debug('Stop requested but consumer is already stopped')
             return
         elif self.is_shutting_down:
-            logger.error('Stop requested but consumer is already shutting down')
+            logger.debug('Stop requested but consumer is already shutting down')
             return
+        else:
+            logger.debug('Stopping the consumer and setting max shutdown wait '
+                         'timer for %i seconds', self._MAX_SHUTDOWN_WAIT)
 
         # A shutdown timer that will stop the process if it not stopped in time
         self._shutdown_timer = threading.Timer(self._MAX_SHUTDOWN_WAIT,
                                                self.terminate)
         self._shutdown_timer.start()
 
-        # A stop was requested, send basic cancel
-        self._channel.basic_cancel(consumer_tag=self.name,
-                                   callback=self.on_basic_cancel)
+        # A stop was requested, close the channel and stop the IOLoop
+        self._channel.close()
 
-        # Set the state to shutting down
-        self._set_state(self.STATE_SHUTTING_DOWN)
+        # Shutdown the consumer
+        self._shutdown()
 
     @property
     def too_many_errors(self):

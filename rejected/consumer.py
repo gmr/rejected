@@ -12,6 +12,7 @@ import pika
 from pika import exceptions
 from pika.adapters import tornado_connection
 import signal
+import threading
 import time
 import traceback
 
@@ -80,6 +81,7 @@ class RejectedConsumer(multiprocessing.Process):
     # Default message pre-allocation value
     _QOS_PREFETCH_COUNT = 1
     _MAX_ERROR_COUNT = 5
+    _MAX_SHUTDOWN_WAIT = 5
 
     def __init__(self, group=None, target=None, name=None, args=(), kwargs={}):
         super(RejectedConsumer, self).__init__(group, target, name,
@@ -88,6 +90,7 @@ class RejectedConsumer(multiprocessing.Process):
         self._counts = self._initialize_counts()
         self._state = self.STATE_INITIALIZING
         self._state_start = time.time()
+        self._shutdown_timer = None
 
     def _ack_message(self, delivery_tag):
         """Acknowledge the message on the broker and log the ack
@@ -608,6 +611,11 @@ class RejectedConsumer(multiprocessing.Process):
         elif self.is_shutting_down:
             logger.error('Stop requested but consumer is already shutting down')
             return
+
+        # A shutdown timer that will stop the process if it not stopped in time
+        self._shutdown_timer = threading.Timer(self._MAX_SHUTDOWN_WAIT,
+                                               self.terminate)
+        self._shutdown_timer.start()
 
         # A stop was requested, send basic cancel
         self._channel.basic_cancel(consumer_tag=self.name,

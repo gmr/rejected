@@ -596,7 +596,7 @@ class RejectedConsumer(multiprocessing.Process):
         """
         return self._STATES[self._state]
 
-    def stop(self):
+    def stop(self, signum_unused=None, frame_unused=None):
         """Stop the consumer from consuming by calling BasicCancel and setting
         our state.
 

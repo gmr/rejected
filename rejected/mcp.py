@@ -316,6 +316,7 @@ class MasterControlProgram(object):
             logger.debug('Pruning non-active consumer: %s', consumer_)
             if not self._remove_consumer(consumer_):
                 logger.error('Could not find consumer %s to delete', consumer_)
+                logger.debug('Consumers: %r', self._consumers)
 
     def _remove_consumer(self, consumer_name):
         """Remove the specified consumer name from the active consumer list.

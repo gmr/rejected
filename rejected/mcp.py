@@ -20,7 +20,7 @@ class MasterControlProgram(object):
     """Master Control Program keeps track of consumers"""
     _MIN_CONSUMERS = 1
     _MAX_CONSUMERS = 2
-    _MAX_SHUTDOWN_WAIT = 30
+    _MAX_SHUTDOWN_WAIT = 10
     _POLL_INTERVAL = 30
     _POLL_RESULTS_INTERVAL = 1
     _SHUTDOWN_WAIT = 1
@@ -105,13 +105,22 @@ class MasterControlProgram(object):
 
         # Iterate through the last poll results
         stats = self._consumer_stats_counter()
-        for name in data:
-            for key in stats:
-                stats[key] += data[name]['counts'][key]
-        self._stats = {'last_poll': timestamp,
-                       'consumers': len(self._all_consumers),
-                       'consumer_data': data,
-                       'counts': stats}
+        consumer_stats = dict()
+        for consumer_name in data.keys():
+            consumer_stats[consumer_name] = self._consumer_stats_counter()
+            consumer_stats[consumer_name]['consumers'] = \
+                self._consumer_count(consumer_name)
+            for process in data[consumer_name].keys():
+                for key in stats:
+                    value = data[consumer_name][process]['counts'][key]
+                    stats[key] += value
+                    consumer_stats[consumer_name][key] += value
+
+        return {'last_poll': timestamp,
+                'consumers': len(self._all_consumers),
+                'consumer_data': consumer_stats,
+                'process_data': data,
+                'counts': stats}
 
     def _collect_results(self, data_values):
         """Receive the data from the consumers polled and process it.
@@ -123,17 +132,22 @@ class MasterControlProgram(object):
         self._last_poll_results['timestamp'] = self._poll_data['timestamp']
 
         # Get the name and consumer name and remove it from what is reported
-        name = data_values['name']
+        consumer_name = data_values['consumer_name']
+        del data_values['consumer_name']
+        process_name = data_values['name']
         del data_values['name']
 
         # Add it to our last poll global data
-        self._last_poll_results[name] = data_values
+        if consumer_name not in self._last_poll_results:
+            self._last_poll_results[consumer_name] = dict()
+        self._last_poll_results[consumer_name][process_name] = data_values
 
         # Find the position to remove the consumer from the list
         try:
-            position = self._poll_data['consumers'].index(name)
+            position = self._poll_data['consumers'].index(process_name)
         except ValueError:
-            logger.error('Poll data from non-tracked consumer: %s', name)
+            logger.error('Poll data from non-tracked consumer: %s',
+                         process_name)
             position = None
 
         # Remove the consumer from the list we're waiting for data from
@@ -143,11 +157,20 @@ class MasterControlProgram(object):
         # Calculate global stats
         if not self._poll_data['consumers']:
             if self._stats_logging:
-                self._calculate_stats(self._last_poll_results)
+                self._stats = self._calculate_stats(self._last_poll_results)
                 self._log_stats()
 
+    def _consumer_count(self, name):
+        """Returns the active consumer count for the given consumer type
+
+        :rtype: int
+
+        """
+        return len([consumer_ for consumer_ in self._all_consumers
+                    if consumer_.is_alive() and consumer_.name.find(name) > -1])
+
     @property
-    def _consumer_count(self):
+    def _total_consumer_count(self):
         """Returns the active consumer count
 
         :rtype: int
@@ -187,15 +210,24 @@ class MasterControlProgram(object):
 
     def _log_stats(self):
         """Output the stats to the logger."""
-        logger.info('rejected <PID %i> has %i consumers and has processed %i '
-                    'messages with %i errors, waiting %.2f seconds and '
-                    'has spent %.2f seconds processing messages',
-                    os.getpid(),
+        logger.info('%i total consumers have processed %i  messages with %i '
+                    'errors, waiting %.2f seconds and have spent %.2f seconds '
+                    'processing messages',
                     self._stats['consumers'],
                     self._stats['counts']['processed'],
                     self._stats['counts']['failed'],
                     self._stats['counts']['waiting_time'],
                     self._stats['counts']['processing_time'])
+        for key in self._stats['consumer_data'].keys():
+            logger.info('%i %s consumers have processed %i  messages with %i '
+                        'errors, waiting %.2f seconds and have spent %.2f '
+                        'seconds processing messages',
+                        self._stats['consumer_data'][key]['consumers'],
+                        key,
+                        self._stats['consumer_data'][key]['processed'],
+                        self._stats['consumer_data'][key]['failed'],
+                        self._stats['consumer_data'][key]['waiting_time'],
+                        self._stats['consumer_data'][key]['processing_time'])
 
     @property
     def _max_shutdown_wait_exceeded(self):
@@ -240,7 +272,7 @@ class MasterControlProgram(object):
         self._prune_non_active_consumers(non_active_consumers)
 
         # If we don't have any active consumers, shutdown
-        if not self._consumer_count:
+        if not self._total_consumer_count:
             logger.debug('Did not find any active consumers in poll')
             return self.shutdown()
 
@@ -445,4 +477,5 @@ class MasterControlProgram(object):
         self._shutdown_start = time.time()
         self._stop_consumers()
         signal.pause()
-        logger.info("Exiting the Master Control Program")
+        logger.info('Exiting Master Control Program with up to a %i '
+                    'second delay', self._MAX_SHUTDOWN_WAIT)

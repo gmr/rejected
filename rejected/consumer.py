@@ -302,6 +302,7 @@ class RejectedConsumer(multiprocessing.Process):
         self._stats_queue = stats_queue
 
         # Hold the consumer config
+        self._consumer_name = consumer_name
         self._consumer = config['Consumers'][consumer_name]
 
         # Setup the processor
@@ -363,7 +364,8 @@ class RejectedConsumer(multiprocessing.Process):
                 self._state_start = time.time()
 
             # Call the callback with the data
-            stats = {'name': self.name,
+            stats = {'consumer_name': self._consumer_name,
+                     'name': self.name,
                      'counts': self._counts,
                      'queue': {'name': self._queue_name,
                                'message_count': frame.method.message_count,

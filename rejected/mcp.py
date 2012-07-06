@@ -39,10 +39,10 @@ class MasterControlProgram(object):
         self._poll_data = {'time': 0, 'consumers': list()}
         self._poll_results_timer = None
         self._poll_timer = None
-        self._shutdown_start = 0
+        self._shutdown_timer = None
         self._stats = dict()
         self._stats_queue = multiprocessing.Queue()
-        self._timeouts = list()
+
 
         # Setup the signal handler for sigabrt
         self._setup_sigabrt()
@@ -57,28 +57,31 @@ class MasterControlProgram(object):
         logger.debug('Set consumer poll interval to %i', self._poll_interval)
 
     def _add_shutdown_timer(self):
-        """Add a timer to the IOLoop if the IOLoop is running to shut down in
-        self._SHUTDOWN_WAIT seconds.
+        """Add a timer that forces the consumers to terminate if they're not
+        already gone.
 
         """
-        logger.debug('Waiting %i seconds to check shutdown state',
-                     self._SHUTDOWN_WAIT)
-        timer = threading.Timer(self._SHUTDOWN_WAIT,
-                                self._stop_consumers)
-        timer.start()
-        self._timeouts.append(timer)
+        self._shutdown_timer = threading.Timer(self._MAX_SHUTDOWN_WAIT,
+                                               self._stop_consumers)
+        self._shutdown_timer.start()
 
     @property
-    def _all_consumers(self):
-        """Return a list of all consumers
+    def _active_consumers(self):
+        """Return a list of all active consumers
 
         :rtype: list
 
         """
         consumers = list()
+        consumers_to_remove = list()
         for name in self._consumers:
             for consumer_ in self._consumers[name]['consumers']:
-                consumers.append(consumer_)
+                if consumer_.is_alive():
+                    consumers.append(consumer_)
+                else:
+                    consumers_to_remove.append(consumer_.name)
+        if consumers_to_remove:
+            self._prune_non_active_consumers(consumers_to_remove)
         return consumers
 
     def _consumer_stats_counter(self):
@@ -117,7 +120,7 @@ class MasterControlProgram(object):
                     consumer_stats[consumer_name][key] += value
 
         return {'last_poll': timestamp,
-                'consumers': len(self._all_consumers),
+                'consumers': len(self._active_consumers),
                 'consumer_data': consumer_stats,
                 'process_data': data,
                 'counts': stats}
@@ -166,8 +169,8 @@ class MasterControlProgram(object):
         :rtype: int
 
         """
-        return len([consumer_ for consumer_ in self._all_consumers
-                    if consumer_.is_alive() and consumer_.name.find(name) > -1])
+        return len([consumer_ for consumer_ in self._active_consumers
+                    if consumer_.name.find(name) > -1])
 
     @property
     def _total_consumer_count(self):
@@ -176,7 +179,7 @@ class MasterControlProgram(object):
         :rtype: int
 
         """
-        return len([consumer_ for consumer_ in self._all_consumers
+        return len([consumer_ for consumer_ in self._active_consumers
                     if consumer_.is_alive()])
 
     def _create_consumer(self, consumer_number, consumer_name, connection_name):
@@ -257,7 +260,7 @@ class MasterControlProgram(object):
                            'consumers': list()}
 
         # Iterate through all of the consumers
-        for consumer_ in self._all_consumers:
+        for consumer_ in self._active_consumers:
             logger.debug('Checking runtime state of %s', consumer_.name)
             if not consumer_.is_alive():
                 logger.warning('Found dead consumer %s', consumer_.name)
@@ -351,11 +354,6 @@ class MasterControlProgram(object):
             logger.debug('Stopping the poll results timer')
             self._poll_results_timer.cancel()
 
-        for timeout in self._timeouts:
-            logger.debug('Removing a timeout: %r', timeout)
-            timeout.cancel()
-        self._timeouts = list()
-
     def _start_poll_results_timer(self):
         """Setup a new poll results timer and start it"""
         self._poll_results_timer = threading.Timer(self._POLL_RESULTS_INTERVAL,
@@ -374,21 +372,23 @@ class MasterControlProgram(object):
         """Called on initialization to setup the signal handler for SIGABRT"""
         signal.signal(signal.SIGABRT, self._handle_sigabrt)
 
+    def _kill_consumers(self):
+        """Gets called by the timer when too much time has gone by, calling
+        the terminate method instead of nicely asking for the consumers to
+        stop.
+
+        """
+        logger.critical('Max shutdown exceeded, forcibly exiting')
+        for consumer_ in self._active_consumers:
+            if consumer_.is_alive():
+                consumer_.terminate()
+        del self._consumers
+        logger.debug('Consumers all terminated and removed')
+        return self._stopped()
+
     def _stop_consumers(self):
         """Iterate through all of the consumers shutting them down."""
         self._remove_timeouts()
-
-        # See if we need to just stop
-        if self._max_shutdown_wait_exceeded:
-            logger.critical('Max shutdown exceeded, forcibly exiting')
-            consumers_to_remove = list()
-            for consumer_ in self._all_consumers:
-                if consumer_.is_alive():
-                    consumer_.terminate()
-                    consumers_to_remove.append(consumer_)
-            self._prune_non_active_consumers(consumers_to_remove)
-            logger.debug('Consumers all terminated and removed')
-            return self._stopped()
 
         # Stop if we have no running consumers
         if not self._consumer_count:
@@ -398,10 +398,9 @@ class MasterControlProgram(object):
         # Loop through all of the bindings and try and shutdown consumers
         logger.debug('Asking %i consumer(s) nicely to stop',
                      self._consumer_count)
-        for consumer_ in self._all_consumers:
-            if consumer_.is_running:
-                logger.debug('Sending signal to %s to stop', consumer_.name)
-                os.kill(consumer_.pid, signal.SIGABRT)
+        for consumer_ in self._active_consumers:
+            logger.debug('Sending signal to %s to stop', consumer_.name)
+            os.kill(consumer_.pid, signal.SIGABRT)
 
         # Add a shutdown timer to call this method again in n seconds
         self._add_shutdown_timer()
@@ -477,6 +476,7 @@ class MasterControlProgram(object):
         logger.debug('Master Control Program Shutting Down')
         self._shutdown_start = time.time()
         self._stop_consumers()
-        signal.pause()
+        while self._active_consumers:
+            signal.pause()
         logger.info('Exiting Master Control Program with up to a %i '
                     'second delay', self._MAX_SHUTDOWN_WAIT)

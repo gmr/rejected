@@ -66,14 +66,14 @@ class MasterControlProgram(object):
         for name in self._consumers:
             for process_name in self._consumers[name]['processes']:
                 process = self._process(name, process_name)
-                try:
-                    if process.is_alive():
-                        processes.append(process)
-                    else:
-                        dead_processes.append(process_name)
-                except AssertionError:
-                    logger.error('Child pid is our own pid, cant test: %i',
-                                 process.pid)
+                if process.pid == os.getpid():
+                    logger.warning('Process %s should be %s and is reporting '
+                                   'MCP pid', process.name, process_name)
+                    continue
+                if process.is_alive():
+                    processes.append(process)
+                else:
+                    dead_processes.append(process_name)
         if dead_processes:
             logger.debug('Found %i dead processes to remove',
                          len(dead_processes))
@@ -207,12 +207,12 @@ class MasterControlProgram(object):
         logger.critical('Max shutdown exceeded, forcibly exiting')
         for process in self._active_processes:
             name = process.name
-            try:
-                if process.is_alive():
-                    process.terminate()
-            except AssertionError:
-                logger.error('Child pid is our own pid, cant test: %i',
-                             process.pid)
+            if process.pid == os.getpid():
+                logger.warning('Process %s and is reporting MCP pid',
+                               process.name)
+                continue
+            if process.is_alive():
+                process.terminate()
             for consumer_name in self._consumers:
                 if name in self._consumers[consumer_name]['processes']:
                     del self._consumers[consumer_name]['processes'][name]

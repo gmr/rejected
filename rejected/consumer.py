@@ -24,7 +24,7 @@ def import_namespaced_class(namespaced_class):
     and it will return a handle to the class
 
     :param str namespaced_class: The namespaced class
-    :rtype: class
+    :return: tuple(Class, str)
 
     """
     # Split up our string containing the import and class
@@ -34,12 +34,14 @@ def import_namespaced_class(namespaced_class):
     import_name = '.'.join(parts[0:-1])
     class_name = parts[-1]
 
-    # get the handle to the class for the given import
-    class_handle = getattr(__import__(import_name, fromlist=class_name),
-                           class_name)
+    import_handle = __import__(import_name, fromlist=class_name)
+    if hasattr(import_handle, '__version__'):
+        version = import_handle.__version__
+    else:
+        version = None
 
     # Return the class handle
-    return class_handle
+    return getattr(import_handle, class_name), version
 
 
 class RejectedConsumer(multiprocessing.Process):
@@ -82,48 +84,10 @@ class RejectedConsumer(multiprocessing.Process):
     def __init__(self, group=None, target=None, name=None, args=(), kwargs={}):
         super(RejectedConsumer, self).__init__(group, target, name,
                                                args, kwargs)
+        self._consumer = None
         self._counts = self._initialize_counts()
         self._state = self.STATE_INITIALIZING
         self._state_start = time.time()
-
-    def _initialize(self, config, connection_name, consumer_name, stats_queue):
-        """Initialize a new consumer thread, setting defaults and config values
-
-        :param dict config: Consumer config section from YAML File
-        :param str connection_name: The name of the connection
-        :param str consumer_name: Consumer name for config
-        :param multiprocessing.Queue stats_queue: The queue to append stats in
-        :raises: ImportError
-
-        """
-        logger.info('Initializing for %s on %s', self.name, connection_name)
-        self._stats_queue = stats_queue
-
-        # Hold the consumer config
-        self._consumer = config['Consumers'][consumer_name]
-
-        # Setup the processor
-        self._processor = self._get_processor(self._consumer)
-        if not self._processor:
-            raise ImportError('Could not import and start processor')
-
-        # Set the routing information
-        self._queue_name = self._consumer['queue']
-
-        # Set the various control nobs
-        self._ack = self._consumer.get('ack', True)
-        self._max_error_count = self._consumer.get('max_errors',
-                                                   self._MAX_ERROR_COUNT)
-        self._prefetch_count = self._consumer.get('prefetch_count',
-                                                  self._QOS_PREFETCH_COUNT)
-
-        # Setup the signal handler for stats
-        self._setup_signal_handlers()
-
-        # Create the RabbitMQ Connection
-        self._channel = None
-        self._connection = self._get_connection(config['Connections'],
-                                                connection_name)
 
     def _ack_message(self, delivery_tag):
         """Acknowledge the message on the broker and log the ack
@@ -228,8 +192,11 @@ class RejectedConsumer(multiprocessing.Process):
         """
         # Try and import the module
         namespaced_class = '%s.%s' % (config['import'], config['processor'])
-        logger.info('Creating message processor: %s', namespaced_class)
-        processor_class = import_namespaced_class(namespaced_class)
+        processor_class, version = import_namespaced_class(namespaced_class)
+        if version:
+            logger.info('Creating processor %s v%s', namespaced_class, version)
+        else:
+            logger.info('Creating processor %s', namespaced_class)
 
         # If we have a config, pass it in to the constructor
         if 'config' in config:
@@ -319,6 +286,46 @@ class RejectedConsumer(multiprocessing.Process):
         # Set the state
         self._state = state
         self._state_start = time.time()
+
+    def _setup(self, config, connection_name, consumer_name, stats_queue):
+        """Initialize the consumer, setting up needed attributes and connecting
+        to RabbitMQ.
+
+        :param dict config: Consumer config section from YAML File
+        :param str connection_name: The name of the connection
+        :param str consumer_name: Consumer name for config
+        :param multiprocessing.Queue stats_queue: The queue to append stats in
+        :raises: ImportError
+
+        """
+        logger.info('Initializing for %s on %s', self.name, connection_name)
+        self._stats_queue = stats_queue
+
+        # Hold the consumer config
+        self._consumer = config['Consumers'][consumer_name]
+
+        # Setup the processor
+        self._processor = self._get_processor(self._consumer)
+        if not self._processor:
+            raise ImportError('Could not import and start processor')
+
+        # Set the routing information
+        self._queue_name = self._consumer['queue']
+
+        # Set the various control nobs
+        self._ack = self._consumer.get('ack', True)
+        self._max_error_count = self._consumer.get('max_errors',
+                                                   self._MAX_ERROR_COUNT)
+        self._prefetch_count = self._consumer.get('prefetch_count',
+                                                  self._QOS_PREFETCH_COUNT)
+
+        # Setup the signal handler for stats
+        self._setup_signal_handlers()
+
+        # Create the RabbitMQ Connection
+        self._channel = None
+        self._connection = self._get_connection(config['Connections'],
+                                                connection_name)
 
     def _setup_signal_handlers(self):
         """Setup the stats and stop signal handlers. Use SIGABRT instead of
@@ -563,10 +570,15 @@ class RejectedConsumer(multiprocessing.Process):
 
     def run(self):
         """Start the consumer"""
-        self._initialize(self._kwargs['config'],
-                         self._kwargs['connection_name'],
-                         self._kwargs['consumer_name'],
-                         self._kwargs['stats_queue'])
+        try:
+            self._setup(self._kwargs['config'],
+                        self._kwargs['connection_name'],
+                        self._kwargs['consumer_name'],
+                        self._kwargs['stats_queue'])
+        except ImportError:
+            logger.debug('Could not import processor, stopping this process')
+            return
+
         try:
             ioloop.IOLoop.instance().start()
         except KeyboardInterrupt:
@@ -588,12 +600,10 @@ class RejectedConsumer(multiprocessing.Process):
 
         """
         logger.info('Stopping the consumer')
-
         if self.is_stopped:
             logger.error('Stop requested but consumer is already stopped')
             return
-
-        if self.is_shutting_down:
+        elif self.is_shutting_down:
             logger.error('Stop requested but consumer is already shutting down')
             return
 

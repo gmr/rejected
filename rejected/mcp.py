@@ -11,6 +11,7 @@ import threading
 import time
 
 from rejected import consumer
+from rejected import __version__
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +54,7 @@ class MasterControlProgram(object):
 
         # Setup the queue depth polling
         self._poll_interval = config.get('poll_interval', self._POLL_INTERVAL)
-        logger.info('Set consumer poll interval to %i', self._poll_interval)
+        logger.debug('Set consumer poll interval to %i', self._poll_interval)
 
     def _add_shutdown_timer(self):
         """Add a timer to the IOLoop if the IOLoop is running to shut down in
@@ -165,8 +166,8 @@ class MasterControlProgram(object):
 
         """
         process_name = '%s_%s' % (consumer_name, consumer_number)
-        logger.info('Creating a new consumer for %s: %s',
-                    connection_name, process_name)
+        logger.debug('Creating a new consumer for %s: %s',
+                     connection_name, process_name)
         kwargs = {'config': self._config,
                   'connection_name': connection_name,
                   'consumer_name': consumer_name,
@@ -240,7 +241,7 @@ class MasterControlProgram(object):
 
         # If we don't have any active consumers, shutdown
         if not self._consumer_count:
-            logger.info('Did not find any active consumers in poll')
+            logger.debug('Did not find any active consumers in poll')
             return self.shutdown()
 
         # Check to see if any consumers reported back and start timer if not
@@ -362,8 +363,8 @@ class MasterControlProgram(object):
             return self._stopped()
 
         # Loop through all of the bindings and try and shutdown consumers
-        logger.info('Asking %i consumer(s) nicely to stop',
-                    self._consumer_count)
+        logger.debug('Asking %i consumer(s) nicely to stop',
+                     self._consumer_count)
         for consumer_ in self._all_consumers:
             if consumer_.is_running:
                 logger.debug('Sending signal to %s to stop', consumer_.name)
@@ -385,8 +386,7 @@ class MasterControlProgram(object):
         consumer consumers and then loop while we process messages.
 
         """
-        logger.debug('Master Control Program Initialized' )
-
+        logger.info('rejected v%s - i am consumer whore', __version__)
         # Get the consumer section from the config
         if 'Consumers' not in self._config:
             logger.error('Missing Consumers section of configuration, '
@@ -402,16 +402,16 @@ class MasterControlProgram(object):
                 continue
 
             # Create the dictionary values for this consumer consumer
-            consumer = consumers[name]
-            self._consumers[name] = {'min': consumer.get('min',
-                                                         self._MIN_CONSUMERS),
-                                     'max': consumer.get('max',
+            consumer_ = consumers[name]
+            self._consumers[name] = {'min': consumer_.get('min',
+                                                          self._MIN_CONSUMERS),
+                                     'max': consumer_.get('max',
                                                          self._MAX_CONSUMERS),
-                                     'queue': consumer['queue'],
+                                     'queue': consumer_['queue'],
                                      'consumers': list()}
 
             # Iterate through the connections to create new consumers
-            for connection_name in consumer['connections']:
+            for connection_name in consumer_['connections']:
 
                 logger.debug('Starting %i consumer(s) for %s on %s',
                              self._consumers[name]['min'],
@@ -420,16 +420,16 @@ class MasterControlProgram(object):
                 # Create the min amount of consumers per connection
                 for consumer_number in xrange(0, self._consumers[name]['min']):
 
-                    # Create the new consumer
-                    consumer_ = self._create_consumer(consumer_number,
-                                                      name,
-                                                      connection_name)
+                    # Create the new consumer process
+                    process = self._create_consumer(consumer_number,
+                                                    name,
+                                                    connection_name)
 
                     # Append the consumer to the consumer list
-                    self._consumers[name]['consumers'].append(consumer_)
+                    self._consumers[name]['consumers'].append(process)
 
                     # Start the consumer
-                    consumer_.start()
+                    process.start()
 
         # Kick off our poll timer
         self._start_poll_timer()
@@ -441,7 +441,7 @@ class MasterControlProgram(object):
 
     def shutdown(self):
         """Graceful shutdown of the MCP means shutting down consumers too"""
-        logger.info('Master Control Program Shutting Down')
+        logger.debug('Master Control Program Shutting Down')
         self._shutdown_start = time.time()
         self._stop_consumers()
         signal.pause()

@@ -1,8 +1,6 @@
 """Tests for rejected.process"""
 import copy
-import json
 import mock
-import multiprocessing
 from pika import channel
 from pika import connection
 from pika import credentials
@@ -16,6 +14,8 @@ except ImportError:
 from rejected import consumer
 from rejected import process
 from rejected import __version__
+
+from . import test_state
 
 class TestImportNamspacedClass(unittest.TestCase):
 
@@ -41,7 +41,7 @@ class TestImportNamspacedClass(unittest.TestCase):
                           'rejected.fake_module.Classname')
 
 
-class TestProcess(unittest.TestCase):
+class TestProcess(test_state.TestState):
 
     config = {'Connections':
                       {'MockConnection':
@@ -83,10 +83,10 @@ class TestProcess(unittest.TestCase):
                  'stats_queue': 'StatsQueue'}
 
     def setUp(self):
-        self._process = self.new_process()
+        self._obj = self.new_process()
 
     def tearDown(self):
-        del self._process
+        del self._obj
 
     def new_kwargs(self, kwargs):
         return copy.deepcopy(kwargs)
@@ -125,7 +125,7 @@ class TestProcess(unittest.TestCase):
     def get_connection_parameters(self, host, port, vhost, user, password):
         with mock.patch('pika.credentials.PlainCredentials'):
             with mock.patch('pika.connection.ConnectionParameters'):
-                return self._process._get_connection_parameters(host,
+                return self._obj._get_connection_parameters(host,
                                                                 port,
                                                                 vhost,
                                                                 user,
@@ -144,10 +144,10 @@ class TestProcess(unittest.TestCase):
 
     def test_app_id(self):
         expectation = 'rejected/%s' % __version__
-        self.assertEqual(self._process._AMQP_APP_ID, expectation)
+        self.assertEqual(self._obj._AMQP_APP_ID, expectation)
 
     def test_counter_data_structure(self):
-        self.assertEqual(self._process._new_counter_dict(), self.new_counter())
+        self.assertEqual(self._obj._new_counter_dict(), self.new_counter())
 
     def test_startup_state(self):
         new_process = self.new_process()
@@ -174,15 +174,15 @@ class TestProcess(unittest.TestCase):
     def test_ack_message(self):
         delivery_tag = 'MockDeliveryTag-1'
         mock_ack = mock.Mock()
-        self._process._channel = self.new_mock_channel()
-        self._process._channel.basic_ack = mock_ack
-        self._process._ack_message(delivery_tag)
+        self._obj._channel = self.new_mock_channel()
+        self._obj._channel.basic_ack = mock_ack
+        self._obj._ack_message(delivery_tag)
         mock_ack.assert_called_once_with(delivery_tag=delivery_tag)
 
     def test_count(self):
         expectation = 10
-        self._process._counts[process.Process.REDELIVERED] = expectation
-        self.assertEqual(self._process._count(process.Process.REDELIVERED),
+        self._obj._counts[process.Process.REDELIVERED] = expectation
+        self.assertEqual(self._obj._count(process.Process.REDELIVERED),
                                               expectation)
 
     def test_get_config(self):
@@ -195,7 +195,7 @@ class TestProcess(unittest.TestCase):
                        'consumer_name': name,
                        'name': '%s_%i_tag_%i' % (name, pid, number)}
         with mock.patch('os.getpid', return_value=pid):
-            self.assertEqual(self._process._get_config(self.config, number,
+            self.assertEqual(self._obj._get_config(self.config, number,
                                                        name, connection),
                              expectation)
 
@@ -263,23 +263,23 @@ class TestProcess(unittest.TestCase):
                                  process.Process.STATE_STOPPED)
 
     def test_get_consumer_raises_import_error(self):
-        self.assertRaises(ImportError, self._process._get_consumer,
+        self.assertRaises(ImportError, self._obj._get_consumer,
                           self.config['Consumers']['MockConsumer2'])
 
     def test_get_consumer_version_output(self):
         config = {'consumer': 'optparse.OptionParser'}
         with mock.patch('logging.Logger.info') as info:
             import optparse
-            self._process._get_consumer(config)
-            info.assert_called_with('Creating processor %s v%s',
+            self._obj._get_consumer(config)
+            info.assert_called_with('Creating consumer %s v%s',
                                     config['consumer'],
                                     optparse.__version__)
 
     def test_get_consumer_no_version_output(self):
         config = {'consumer': 'StringIO.StringIO'}
         with mock.patch('logging.Logger.info') as info:
-            self._process._get_consumer(config)
-            info.assert_called_with('Creating processor %s', config['consumer'])
+            self._obj._get_consumer(config)
+            info.assert_called_with('Creating consumer %s', config['consumer'])
 
     @mock.patch.object(consumer.Consumer, '__init__')
     def test_get_consumer_with_config(self, mock_method):
@@ -339,9 +339,9 @@ class TestProcess(unittest.TestCase):
     def test_reject_message(self):
         delivery_tag = 'MockDeliveryTag-1'
         mock_reject = mock.Mock()
-        self._process._channel = self.new_mock_channel()
-        self._process._channel.basic_reject = mock_reject
-        self._process._reject(delivery_tag)
+        self._obj._channel = self.new_mock_channel()
+        self._obj._channel.basic_reject = mock_reject
+        self._obj._reject(delivery_tag)
         mock_reject.assert_called_once_with(delivery_tag=delivery_tag)
 
     def test_set_qos_prefetch_value(self):
@@ -385,31 +385,16 @@ class TestProcess(unittest.TestCase):
             new_process._set_state(new_process.STATE_IDLE)
             self.assertEqual(new_process._counts[new_process.TIME_SPENT], value)
 
-    def test_set_state_invalid_value(self):
-        self.assertRaises(ValueError, self._process._set_state, 9999)
-
-    def test_set_state_expected_assignment(self):
-        self._state = self._process.STATE_IDLE
-        self._process._set_state(self._process.STATE_CONNECTING)
-        self.assertEqual(self._process._state, self._process.STATE_CONNECTING)
-
-    def test_set_state_state_start(self):
-        self._state = self._process.STATE_IDLE
-        value = 86400
-        with mock.patch('time.time', return_value=value):
-            self._process._set_state(self._process.STATE_CONNECTING)
-            self.assertEqual(self._process._state_start, value)
-
     def test_setup_signal_handlers(self):
-        signals = {signal.SIGPROF: self._process.get_stats,
-                   signal.SIGABRT: self._process.stop}
+        signals = {signal.SIGPROF: self._obj.get_stats,
+                   signal.SIGABRT: self._obj.stop}
         def side_effect(*args):
             if args[0] not in signals:
                 assert False, '%i not in %r' % (args[0], signals)
             assert (args[1] == signals[args[0]]), \
                    'Callback for %i was not %r' % (args[0], args[1])
         with mock.patch('signal.signal', side_effect=side_effect):
-            self._process._setup_signal_handlers()
+            self._obj._setup_signal_handlers()
 
     def mock_setup(self, new_process=None, side_effect=None):
         with mock.patch('signal.signal', side_effect=side_effect):
@@ -488,159 +473,33 @@ class TestProcess(unittest.TestCase):
             mock_process = self.mock_setup()
             self.assertEqual(mock_process._connection, mock_connection)
 
-    def test_is_idle_state_initializing(self):
-        self._process._state = self._process.STATE_INITIALIZING
-        self.assertFalse(self._process.is_idle)
-
-    def test_is_idle_state_connecting(self):
-        self._process._state = self._process.STATE_CONNECTING
-        self.assertFalse(self._process.is_idle)
-
-    def test_is_idle_state_idle(self):
-        self._process._state = self._process.STATE_IDLE
-        self.assertTrue(self._process.is_idle)
-
     def test_is_idle_state_processing(self):
-        self._process._state = self._process.STATE_PROCESSING
-        self.assertFalse(self._process.is_idle)
-
-    def test_is_idle_state_stop_requested(self):
-        self._process._state = self._process.STATE_STOP_REQUESTED
-        self.assertFalse(self._process.is_idle)
-
-    def test_is_idle_state_shutting_down(self):
-        self._process._state = self._process.STATE_SHUTTING_DOWN
-        self.assertFalse(self._process.is_idle)
-
-    def test_is_idle_state_stopped(self):
-        self._process._state = self._process.STATE_STOPPED
-        self.assertFalse(self._process.is_idle)
-
-    def test_is_running_state_initializing(self):
-        self._process._state = self._process.STATE_INITIALIZING
-        self.assertFalse(self._process.is_running)
-
-    def test_is_running_state_connecting(self):
-        self._process._state = self._process.STATE_CONNECTING
-        self.assertFalse(self._process.is_running)
-
-    def test_is_running_state_idle(self):
-        self._process._state = self._process.STATE_IDLE
-        self.assertTrue(self._process.is_running)
+        self._obj._state = self._obj.STATE_PROCESSING
+        self.assertFalse(self._obj.is_idle)
 
     def test_is_running_state_processing(self):
-        self._process._state = self._process.STATE_PROCESSING
-        self.assertTrue(self._process.is_running)
-
-    def test_is_running_state_stop_requested(self):
-        self._process._state = self._process.STATE_STOP_REQUESTED
-        self.assertFalse(self._process.is_running)
-
-    def test_is_running_state_shutting_down(self):
-        self._process._state = self._process.STATE_SHUTTING_DOWN
-        self.assertFalse(self._process.is_running)
-
-    def test_is_running_state_stopped(self):
-        self._process._state = self._process.STATE_STOPPED
-        self.assertFalse(self._process.is_running)
-
-    def test_is_shutting_down_state_initializing(self):
-        self._process._state = self._process.STATE_INITIALIZING
-        self.assertFalse(self._process.is_shutting_down)
-
-    def test_is_shutting_down_state_connecting(self):
-        self._process._state = self._process.STATE_CONNECTING
-        self.assertFalse(self._process.is_shutting_down)
-
-    def test_is_shutting_down_state_idle(self):
-        self._process._state = self._process.STATE_IDLE
-        self.assertFalse(self._process.is_shutting_down)
+        self._obj._state = self._obj.STATE_PROCESSING
+        self.assertTrue(self._obj.is_running)
 
     def test_is_shutting_down_state_processing(self):
-        self._process._state = self._process.STATE_PROCESSING
-        self.assertFalse(self._process.is_shutting_down)
-
-    def test_is_shutting_down_state_stop_requested(self):
-        self._process._state = self._process.STATE_STOP_REQUESTED
-        self.assertFalse(self._process.is_shutting_down)
-
-    def test_is_shutting_down_state_shutting_down(self):
-        self._process._state = self._process.STATE_SHUTTING_DOWN
-        self.assertTrue(self._process.is_shutting_down)
-
-    def test_is_shutting_down_state_stopped(self):
-        self._process._state = self._process.STATE_STOPPED
-        self.assertFalse(self._process.is_shutting_down)
-
-    def test_is_stopped_state_initializing(self):
-        self._process._state = self._process.STATE_INITIALIZING
-        self.assertFalse(self._process.is_stopped)
-
-    def test_is_stopped_state_connecting(self):
-        self._process._state = self._process.STATE_CONNECTING
-        self.assertFalse(self._process.is_stopped)
-
-    def test_is_stopped_state_idle(self):
-        self._process._state = self._process.STATE_IDLE
-        self.assertFalse(self._process.is_stopped)
+        self._obj._state = self._obj.STATE_PROCESSING
+        self.assertFalse(self._obj.is_shutting_down)
 
     def test_is_stopped_state_processing(self):
-        self._process._state = self._process.STATE_PROCESSING
-        self.assertFalse(self._process.is_stopped)
-
-    def test_is_stopped_state_stop_requested(self):
-        self._process._state = self._process.STATE_STOP_REQUESTED
-        self.assertFalse(self._process.is_stopped)
-
-    def test_is_stopped_state_shutting_down(self):
-        self._process._state = self._process.STATE_SHUTTING_DOWN
-        self.assertTrue(self._process.is_stopped)
-
-    def test_is_stopped_state_stopped(self):
-        self._process._state = self._process.STATE_STOPPED
-        self.assertTrue(self._process.is_stopped)
+        self._obj._state = self._obj.STATE_PROCESSING
+        self.assertFalse(self._obj.is_stopped)
 
     def test_too_many_errors_true(self):
-        self._process._max_error_count = 1
-        self._process._counts[self._process.ERROR] = 2
-        self.assertTrue(self._process.too_many_errors)
+        self._obj._max_error_count = 1
+        self._obj._counts[self._obj.ERROR] = 2
+        self.assertTrue(self._obj.too_many_errors)
 
     def test_too_many_errors_false(self):
-        self._process._max_error_count = 5
-        self._process._counts[self._process.ERROR] = 2
-        self.assertFalse(self._process.too_many_errors)
-
-    def test_state_initializing_desc(self):
-        self._process._state = self._process.STATE_INITIALIZING
-        self.assertEqual(self._process.state_desc,
-                         self._process._STATES[self._process.STATE_INITIALIZING])
-
-    def test_state_connecting_desc(self):
-        self._process._state = self._process.STATE_CONNECTING
-        self.assertEqual(self._process.state_desc,
-                         self._process._STATES[self._process.STATE_CONNECTING])
-
-    def test_state_idle_desc(self):
-        self._process._state = self._process.STATE_IDLE
-        self.assertEqual(self._process.state_desc,
-                         self._process._STATES[self._process.STATE_IDLE])
+        self._obj._max_error_count = 5
+        self._obj._counts[self._obj.ERROR] = 2
+        self.assertFalse(self._obj.too_many_errors)
 
     def test_state_processing_desc(self):
-        self._process._state = self._process.STATE_PROCESSING
-        self.assertEqual(self._process.state_desc,
-                         self._process._STATES[self._process.STATE_PROCESSING])
-
-    def test_state_stop_requested_desc(self):
-        self._process._state = self._process.STATE_STOP_REQUESTED
-        self.assertEqual(self._process.state_desc,
-                         self._process._STATES[self._process.STATE_STOP_REQUESTED])
-
-    def test_state_shutting_down_desc(self):
-        self._process._state = self._process.STATE_SHUTTING_DOWN
-        self.assertEqual(self._process.state_desc,
-                         self._process._STATES[self._process.STATE_SHUTTING_DOWN])
-
-    def test_state_stopped_desc(self):
-        self._process._state = self._process.STATE_STOPPED
-        self.assertEqual(self._process.state_desc,
-                         self._process._STATES[self._process.STATE_STOPPED])
+        self._obj._state = self._obj.STATE_PROCESSING
+        self.assertEqual(self._obj.state_description,
+                         self._obj._STATES[self._obj.STATE_PROCESSING])

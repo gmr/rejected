@@ -59,8 +59,7 @@ class Controller(clihelper.Controller):
         """Stop the child processes and threads"""
         logger.info('Shutdown cleanup request received')
         if self._mcp and self._mcp.is_running:
-            logger.debug('Letting MCP know to shutdown')
-            self._mcp.shutdown()
+            self._mcp.stop_processes()
             time.sleep(1)
             del self._mcp
 
@@ -81,3 +80,7 @@ def main():
     """Called when invoking the command line script."""
     clihelper.setup('rejected', 'RabbitMQ consumer framework', __version__)
     clihelper.run(Controller, _cli_options)
+
+
+if __name__ == '__main__':
+    main()

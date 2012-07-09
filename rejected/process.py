@@ -10,13 +10,13 @@ import pika
 from pika import exceptions
 from pika.adapters import tornado_connection
 import signal
-import threading
 import time
 import traceback
 
 from rejected import __version__
 from rejected import consumer
 from rejected import data
+from rejected import state
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +29,7 @@ def import_namespaced_class(namespaced_class):
     :return: tuple(Class, str)
 
     """
+    logger.debug('Importing %s', namespaced_class)
     # Split up our string containing the import and class
     parts = namespaced_class.split('.')
 
@@ -46,30 +47,15 @@ def import_namespaced_class(namespaced_class):
     return getattr(import_handle, class_name), version
 
 
-class Process(multiprocessing.Process):
+class Process(multiprocessing.Process, state.State):
     """Core process class that
 
     """
     _AMQP_APP_ID = 'rejected/%s' % __version__
     _QOS_PREFETCH_COUNT = 1
 
-    # State constants
-    STATE_INITIALIZING = 0x01
-    STATE_CONNECTING = 0x02
-    STATE_IDLE = 0x03
+    # Additional State constants
     STATE_PROCESSING = 0x04
-    STATE_STOP_REQUESTED = 0x05
-    STATE_SHUTTING_DOWN = 0x06
-    STATE_STOPPED = 0x07
-
-    # For reverse lookup
-    _STATES = {0x01: 'Initializing',
-               0x02: 'Connecting',
-               0x03: 'Idle',
-               0x04: 'Processing',
-               0x05: 'Stop Requested',
-               0x06: 'Shutting down',
-               0x07: 'Stopped'}
 
     # Counter constants
     ERROR = 'failed'
@@ -86,10 +72,16 @@ class Process(multiprocessing.Process):
     def __init__(self, group=None, target=None, name=None, args=(), kwargs={}):
         super(Process, self).__init__(group, target, name, args, kwargs)
         self._channel = None
+        self._config= None
         self._consumer = None
         self._counts = self._new_counter_dict()
+        self._prefetch_count = self._QOS_PREFETCH_COUNT
         self._state = self.STATE_INITIALIZING
         self._state_start = time.time()
+        self._stats_queue = None
+
+        # Override ACTIVE with PROCESSING
+        self._STATES [0x04] = 'Processing'
 
     def _ack_message(self, delivery_tag):
         """Acknowledge the message on the broker and log the ack
@@ -132,6 +124,10 @@ class Process(multiprocessing.Process):
         :rtype: pika.adapters.torando_connection.TorandoConnection
 
         """
+
+        # Process is initially idle
+        self._set_state(self.STATE_CONNECTING)
+
         logger.debug('Connecting to %s:%i:%s as %s',
                      config[name]['host'], config[name]['port'],
                      config[name]['vhost'], config[name]['user'])
@@ -173,17 +169,16 @@ class Process(multiprocessing.Process):
 
         """
         # Try and import the module
-        processor, version = import_namespaced_class(config['consumer'])
+        consumer_, version = import_namespaced_class(config['consumer'])
         if version:
-            logger.info('Creating processor %s v%s',
-                        config['consumer'], version)
+            logger.info('Creating consumer %s v%s', config['consumer'], version)
         else:
-            logger.info('Creating processor %s', config['consumer'])
+            logger.info('Creating consumer %s', config['consumer'])
 
         # If we have a config, pass it in to the constructor
         if 'config' in config:
             try:
-                return processor(config['config'])
+                return consumer_(config['config'])
             except Exception as error:
                 logger.critical('Could not create %s: %r',
                                 config['consumer'], error)
@@ -191,7 +186,7 @@ class Process(multiprocessing.Process):
 
         # No config to pass
         try:
-            return processor()
+            return consumer_()
         except Exception as error:
             logger.critical('Could not create %s: %r',
                             config['consumer'], error)
@@ -218,7 +213,7 @@ class Process(multiprocessing.Process):
         """
         # Try and process the message
         try:
-            self._processor.process(message)
+            self._consumer.process(message)
         except consumer.ConsumerException as exception:
             raise exception
         except Exception as error:
@@ -248,32 +243,29 @@ class Process(multiprocessing.Process):
         logger.info('Setting the QOS Prefetch to %i', value)
         self._channel.basic_qos(prefetch_count=value, callback=None)
 
-    def _set_state(self, state):
+    def _set_state(self, new_state):
         """Assign the specified state to this consumer object.
 
-        :param int state: The new state of the object
+        :param int new_state: The new state of the object
         :raises: ValueError
 
         """
         # Keep track of how much time we're spending waiting and processing
-        if state == self.STATE_PROCESSING and self._state == self.STATE_IDLE:
+        if (new_state == self.STATE_PROCESSING and
+            self._state == self.STATE_IDLE):
             self._counts[self.TIME_WAITED] += self._time_in_state
-        elif state == self.STATE_IDLE and self._state == self.STATE_PROCESSING:
+        elif (new_state == self.STATE_IDLE and
+              self._state == self.STATE_PROCESSING):
             self._counts[self.TIME_SPENT] += self._time_in_state
 
-        # Make sure it's a valid state
-        if state not in self._STATES:
-            raise ValueError('%s is not a valid state for this object' %
-                             self._STATES[state])
-        # Set the state
-        self._state = state
-        self._state_start = time.time()
+        # Use the parent object to set the state
+        super(Process, self)._set_state(new_state)
 
     def _setup(self, config, connection_name, consumer_name, stats_queue):
         """Initialize the consumer, setting up needed attributes and connecting
         to RabbitMQ.
 
-        :param dict config: Consumer config section from YAML File
+        :param dict config: Consumer config section
         :param str connection_name: The name of the connection
         :param str consumer_name: Consumer name for config
         :param multiprocessing.Queue stats_queue: The queue to append stats in
@@ -285,22 +277,22 @@ class Process(multiprocessing.Process):
 
         # Hold the consumer config
         self._consumer_name = consumer_name
-        self._consumer = config['Consumers'][consumer_name]
+        self._config = config['Consumers'][consumer_name]
 
-        # Setup the processor
-        self._processor = self._get_processor(self._consumer)
-        if not self._processor:
+        # Setup the consumer
+        self._consumer = self._get_consumer(self._config)
+        if not self._consumer:
             raise ImportError('Could not import and start processor')
 
         # Set the routing information
-        self._queue_name = self._consumer['queue']
+        self._queue_name = self._config['queue']
 
         # Set the various control nobs
-        self._ack = self._consumer.get('ack', True)
-        self._max_error_count = self._consumer.get('max_errors',
-                                                   self._MAX_ERROR_COUNT)
-        self._prefetch_count = self._consumer.get('prefetch_count',
-                                                  self._QOS_PREFETCH_COUNT)
+        self._ack = self._config.get('ack', True)
+        self._max_error_count = self._config.get('max_errors',
+                                                 self._MAX_ERROR_COUNT)
+        self._prefetch_count = self._config.get('prefetch_count',
+                                                self._QOS_PREFETCH_COUNT)
 
         # Setup the signal handler for stats
         self._setup_signal_handlers()
@@ -331,13 +323,19 @@ class Process(multiprocessing.Process):
         self._set_state(self.STATE_SHUTTING_DOWN)
         logger.info('Shutting down')
 
+
+        # A stop was requested, close the channel and stop the IOLoop
+        logger.debug('Closing channel in %s state', self.state_description)
+        if self._channel:
+            self._channel.close()
+
         # If the connection is still around, close it
         if self._connection.is_open:
             logger.info('Closing open connection to RabbitMQ')
             self._connection.close()
 
-        # Allow the processor to gracefully stop
-        self._stop_processor()
+        # Allow the consumer to gracefully stop
+        self._stop_consumer()
 
         # Stop the IOLoop which is what is blocking the process in run
         ioloop.IOLoop.instance().stop()
@@ -346,14 +344,16 @@ class Process(multiprocessing.Process):
         self._set_state(self.STATE_STOPPED)
         logger.info('Shutdown complete')
 
-    def _stop_processor(self):
-        """Stop the processor class and let it shutdown nicely if it wants."""
-        # Shutdown the message processor
+    def _stop_consumer(self):
+        """Stop the consumer object and allow it to do a clean shutdown if it
+        has the ability to do so.
+
+        """
         try:
-            logger.debug('Shutting down processor')
-            self._processor.shutdown()
+            logger.info('Shutting down the consumer')
+            self._consumer.shutdown()
         except AttributeError:
-            logger.debug('Processor does not have a shutdown method')
+            logger.debug('Consumer does not have a shutdown method')
 
     @property
     def _time_in_state(self):
@@ -390,7 +390,7 @@ class Process(multiprocessing.Process):
                                'message_count': frame.method.message_count,
                                'consumer_count': frame.method.consumer_count},
                      'state': {'value': self._state,
-                               'description': self.state_desc}}
+                               'description': self.state_description}}
 
             # Add the stats to the queue
             self._stats_queue.put(stats, False)
@@ -401,42 +401,6 @@ class Process(multiprocessing.Process):
                                     queue=self._queue_name,
                                     passive=True)
 
-    @property
-    def is_idle(self):
-        """Returns a bool specifying if the consumer is currently idle.
-
-        :rtype: bool
-
-        """
-        return self._state == self.STATE_IDLE
-
-    @property
-    def is_running(self):
-        """Returns a bool determining if the consumer is in a running state or
-        not
-
-        :rtype: bool
-
-        """
-        return self._state in [self.STATE_IDLE, self.STATE_PROCESSING]
-
-    @property
-    def is_shutting_down(self):
-        """Designates if the consumer is shutting down.
-
-        :rtype: bool
-
-        """
-        return self._state == self.STATE_SHUTTING_DOWN
-
-    @property
-    def is_stopped(self):
-        """Returns a bool determining if the consumer is stopped or stopping
-
-        :rtype: bool
-
-        """
-        return self._state in [self.STATE_SHUTTING_DOWN, self.STATE_STOPPED]
 
     def on_channel_close(self, reason_code, reason_text):
         """Callback invoked by Pika when the channel has been closed by
@@ -448,7 +412,9 @@ class Process(multiprocessing.Process):
         """
         logger.critical('Channel closed by remote (%s): %s',
                         reason_code, reason_text)
-        self._shutdown()
+        if not self.is_shutting_down and not self.is_running:
+            self._shutdown()
+        self._channel = None
 
     def on_channel_open(self, channel):
         """The channel is open so now lets set our QOS prefetch and register
@@ -486,7 +452,8 @@ class Process(multiprocessing.Process):
         # We've closed our pika connection so stop
         # Log that we're done
         logger.warning('Connection closed (%s): %s', reason_code, reason_text)
-        self._shutdown()
+        if not self.is_shutting_down and not self.is_running:
+            self._shutdown()
 
     def on_connected(self, connection):
         """We have connected to RabbitMQ so setup our connection attribute and
@@ -554,6 +521,7 @@ class Process(multiprocessing.Process):
             self._process(message)
         except consumer.ConsumerException as error:
             return self.on_error(method, error)
+        logger.debug('Message processed')
 
         # Message was processed
         self._counts[self.PROCESSED] += 1
@@ -572,26 +540,20 @@ class Process(multiprocessing.Process):
                         self._kwargs['connection_name'],
                         self._kwargs['consumer_name'],
                         self._kwargs['stats_queue'])
-        except ImportError:
-            logger.debug('Could not import processor, stopping this process')
+        except ImportError as error:
+            name = self._kwargs['consumer_name']
+            consumer = self._kwargs['config']['Consumers'][name]['consumer']
+            logger.critical('Could not import %s, stopping process: %r',
+                            consumer, error)
             return
 
-        try:
-            ioloop.IOLoop.instance().start()
-        except KeyboardInterrupt:
-            logger.debug('Caught keyboard interrupt, stopping')
-            self.stop()
-            ioloop.IOLoop.instance().start()
+        while self.is_connecting or self.is_running:
+            try:
+                ioloop.IOLoop.instance().start()
+            except KeyboardInterrupt:
+                logger.debug('Caught keyboard interrupt')
+
         logger.debug('Exiting')
-
-    @property
-    def state_desc(self):
-        """Return the string description of our running state.
-
-        :rtype: str
-
-        """
-        return self._STATES[self._state]
 
     def stop(self, signum_unused=None, frame_unused=None):
         """Stop the consumer from consuming by calling BasicCancel and setting
@@ -604,10 +566,6 @@ class Process(multiprocessing.Process):
         elif self.is_shutting_down:
             logger.debug('Stop requested but consumer is already shutting down')
             return
-
-        # A stop was requested, close the channel and stop the IOLoop
-        logger.debug('Closing channel in state %i', self._state)
-        self._channel.close()
 
         # Shutdown the consumer
         self._shutdown()

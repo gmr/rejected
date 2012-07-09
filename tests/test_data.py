@@ -1,5 +1,4 @@
 """Tests for rejected.data"""
-import mock
 try:
     import unittest2 as unittest
 except ImportError:

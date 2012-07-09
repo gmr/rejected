@@ -37,16 +37,16 @@ except ImportError:
     couchconfig = None
 
 try:
-    import redis
-except ImportError:
-    logger.warning('redis-py not found, disabling Redis support')
-    redis = None
-
-try:
     import pgsql_wrapper
 except ImportError:
     logger.warning('pgsql_wrapper not found, disabling PostgreSQL support')
     pgsql_wrapper = None
+
+try:
+    import redis
+except ImportError:
+    logger.warning('redis-py not found, disabling Redis support')
+    redis = None
 
 
 class Consumer(object):
@@ -140,10 +140,8 @@ class Consumer(object):
         :raises: ImportError
 
         """
-        if not pgsql_wrapper:
-            raise ImportError('Could not import couchconfig for configuration '
-                              'service support')
-
+        if not couchconfig:
+            raise ImportError('couchconfig not installed')
         service = self._get_service(config.get('service'))
         return couchconfig.Configuration(service,
                                          config.get('config_host'),
@@ -164,8 +162,7 @@ class Consumer(object):
 
         """
         if not pgsql_wrapper:
-            raise ImportError('Could not import pgsql_wrapper for PostgreSQL '
-                              'support')
+            raise ImportError('pgsql_wrapper not installed')
         # Connect to PostgreSQL
         try:
             connection = pgsql_wrapper.PgSQL(host, port, dbname, user, password)
@@ -186,7 +183,7 @@ class Consumer(object):
 
         """
         if not redis:
-            raise ImportError('Could not import redis for redis support')
+            raise ImportError('redis not installed')
         return redis.Redis(host=host, port=port, db=db)
 
     def _get_service(self, fqdn):
@@ -196,6 +193,8 @@ class Consumer(object):
         :rtype: str
 
         """
+        if not couchconfig:
+            raise ImportError('couchconfig not installed')
         return couchconfig.service_notation(fqdn)
 
     def _load_csv_value(self, value):
@@ -273,8 +272,6 @@ class Consumer(object):
         :raises: ConsumerException
 
         """
-        if not bs4:
-            raise ConsumerException('YAML is not enabled')
         return yaml.load(value)
 
     @property

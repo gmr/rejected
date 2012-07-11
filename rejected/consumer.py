@@ -603,6 +603,10 @@ class Consumer(object):
         logger.debug('Received: %r', message_in)
         self._message = message_in
 
+        # Clear out our previous values
+        self._message_body = None
+        self._message = None
+
         # Validate the message type if the child sets _MESSAGE_TYPE
         if self._MESSAGE_TYPE and self._MESSAGE_TYPE != self.message_type:
             logger.error('Received a non-supported message type: %s',

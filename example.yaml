@@ -20,6 +20,14 @@ Application:
       max: 5
       config:
         republish: True
+    test:
+      consumer: rejected.example.Consumer
+      connections: [rabbitmq]
+      queue: generated_messages
+      min: 2
+      max: 5
+      config:
+        republish: True
 
 Daemon:
   user: rejected
@@ -56,7 +64,7 @@ Logging:
       propagate: true
       handlers: [console, syslog]
     rejected:
-      level: INFO
+      level: DEBUG
       propagate: false
       handlers: [console, syslog]
     rejected.consumer:

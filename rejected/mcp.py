@@ -26,16 +26,18 @@ class MasterControlProgram(state.State):
     _POLL_RESULTS_INTERVAL = 3.0
     _SHUTDOWN_WAIT = 1
 
-    def __init__(self, config):
+    def __init__(self, config, consumer=None):
         """Initialize the Master Control Program
 
         :param dict config: The full content from the YAML config file
+        :param str consumer: If specified, only run processes for this consumer
 
         """
         logger.info('rejected v%s initializing', __version__)
         super(MasterControlProgram, self).__init__()
 
         # Default values
+        self._consumer = consumer
         self._consumers = dict()
         self._config = config
         self._last_poll_results = dict()
@@ -612,6 +614,14 @@ class MasterControlProgram(state.State):
                          'aborting: %r', self._config)
             return self._set_state(self.STATE_STOPPED)
 
+        # Strip consumers if a consumer is specified
+        if self._consumer:
+            consumers = self._config['Consumers'].keys()
+            for consumer in consumers:
+                if consumer != self._consumer:
+                    logger.debug('Removing %s for %s only processing',
+                                 consumer, self._consumer)
+                    del self._config['Consumers'][consumer]
 
         # Setup consumers and start the processes
         self._setup_consumers()

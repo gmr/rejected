@@ -24,7 +24,8 @@ class Controller(clihelper.Controller):
         :rtype: rejected.mcp.MasterControlProgram
 
         """
-        return mcp.MasterControlProgram(self._get_application_config())
+        return mcp.MasterControlProgram(self._get_application_config(),
+                                        consumer=self._options.consumer)
 
     def _prepend_python_path(self, path):  #pragma: no cover
         """Add the specified value to the python path.
@@ -66,6 +67,11 @@ def _cli_options(parser):
     :param optparse.OptionParser parser: The option parser to add options to
 
     """
+    parser.add_option('-o', '--only',
+                      action='store',
+                      default=None,
+                      dest='consumer',
+                      help='Only run the consumer specified')
     parser.add_option('-p', '--prepend-path',
                       action='store',
                       default=None,

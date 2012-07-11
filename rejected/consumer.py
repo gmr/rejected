@@ -300,8 +300,7 @@ class Consumer(object):
             properties.user_id = properties_in.user_id
         return properties
 
-    def _get_postgresql_cursor(self, host, port, dbname, user,
-                               password=None):
+    def _get_pgsql_cursor(self, host, port, dbname, user, password=None):
         """Connect to PostgreSQL and return the cursor.
 
         :param str host: The PostgreSQL host

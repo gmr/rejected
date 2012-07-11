@@ -52,7 +52,7 @@ class State(object):
 
     @property
     def is_connecting(self):
-        """Returns a bool specifying if the consumer is currently connecting.
+        """Returns a bool specifying if the process is currently connecting.
 
         :rtype: bool
 
@@ -61,7 +61,7 @@ class State(object):
 
     @property
     def is_idle(self):
-        """Returns a bool specifying if the consumer is currently idle.
+        """Returns a bool specifying if the process is currently idle.
 
         :rtype: bool
 
@@ -70,7 +70,7 @@ class State(object):
 
     @property
     def is_running(self):
-        """Returns a bool determining if the consumer is in a running state or
+        """Returns a bool determining if the process is in a running state or
         not
 
         :rtype: bool
@@ -80,7 +80,7 @@ class State(object):
 
     @property
     def is_shutting_down(self):
-        """Designates if the consumer is shutting down.
+        """Designates if the process is shutting down.
 
         :rtype: bool
 
@@ -89,12 +89,21 @@ class State(object):
 
     @property
     def is_stopped(self):
-        """Returns a bool determining if the consumer is stopped or stopping
+        """Returns a bool determining if the process is stopped or stopping
 
         :rtype: bool
 
         """
-        return self._state in [self.STATE_SHUTTING_DOWN, self.STATE_STOPPED]
+        return self._state == self.STATE_STOPPED
+
+    @property
+    def is_waiting_to_shutdown(self):
+        """Designates if the process is waiting to start shutdown
+
+        :rtype: bool
+
+        """
+        return self._state == self.STATE_STOP_REQUESTED
 
     @property
     def state_description(self):

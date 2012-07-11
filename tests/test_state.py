@@ -169,4 +169,4 @@ class TestState(unittest.TestCase):
 
     def test_is_stopped_state_shutting_down(self):
         self._obj._state = self._obj.STATE_SHUTTING_DOWN
-        self.assertTrue(self._obj.is_stopped)
+        self.assertFalse(self._obj.is_stopped)

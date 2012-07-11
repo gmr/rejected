@@ -1,18 +1,32 @@
 # coding=utf-8
 """Tests for rejected.consumer"""
-import bs4
+import sys
+try:
+    import bs4
+except ImportError:
+    bs4 = None
 import bz2
 import csv
 import datetime
 import mock
 import pickle
-import pgsql_wrapper
-import psycopg2
-import redis
 try:
-    import unittest2 as unittest
+    import pgsql_wrapper
 except ImportError:
+    pgsql_wrapper = None
+try:
+    import psycopg2
+except ImportError:
+    psycopg2 = None
+try:
+    import redis
+except ImportError:
+    redis = None
+# Import unittest if 2.7, unittest2 if other version
+if (sys.version_info[0], sys.version_info[1]) == (2, 7):
     import unittest
+else:
+    import unittest2 as unittest
 import zlib
 
 from rejected import consumer
@@ -177,41 +191,80 @@ Logging:
         expectation = 'baz_bar_foo'
         self.assertEqual(self._obj._get_service(value), expectation)
 
-    @mock.patch('pgsql_wrapper.PgSQL', autospec=True)
-    def test_get_postgresql_cursor_connect(self, mock_pgsql_wrapper):
-        with mock.patch('psycopg2.connect') as mock_method:
-            self._obj._get_postgresql_cursor(**self._obj._CONFIG['pgsql'])
-            mock_method.assertCalledWith(**self._obj._CONFIG['pgsql'])
+    def test_get_pgsql_cursor_connect(self):
+        if not psycopg2:
+            self.skipTest('psycopg2 not installed')
+        if not pgsql_wrapper:
+            self.skipTest('pgsql_wrapper not installed')
+        with mock.patch('pgsql_wrapper.PgSQL', autospec=True):
+            with mock.patch('psycopg2.connect') as mock_method:
+                self._obj._get_pgsql_cursor(**self._obj._CONFIG['pgsql'])
+                mock_method.assertCalledWith(**self._obj._CONFIG['pgsql'])
 
-    @mock.patch('pgsql_wrapper.PgSQL', autospec=True,
-                side_effect=psycopg2.OperationalError)
-    def test_get_postgresql_connection_error(self, mock_pgsql_wrapper):
-        self.assertRaises(IOError,
-                          self._obj._get_postgresql_cursor,
-                          **self._obj._CONFIG['pgsql'])
-
-    @mock.patch('pgsql_wrapper.PgSQL', autospec=True)
-    def test_get_postgresql_cursor_value(self, mock_pgsql_wrapper):
-        with mock.patch('psycopg2.connect'):
-            val = self._obj._get_postgresql_cursor(**self._obj._CONFIG['pgsql'])
-            self.assertEqual(val._mock_name, 'cursor')
-
-    def test_get_postgresql_cursor_with_no_pgsql_wrapper_module(self):
-        with mock.patch('rejected.consumer.pgsql_wrapper', new=None):
-            self.assertRaises(ImportError,
-                              self._obj._get_postgresql_cursor,
+    def test_get_postgresql_connection_error(self):
+        if not psycopg2:
+            self.skipTest('psycopg2 not installed')
+        if not pgsql_wrapper:
+            self.skipTest('pgsql_wrapper not installed')
+        with mock.patch('pgsql_wrapper.PgSQL', autospec=True,
+                        side_effect=psycopg2.OperationalError):
+            self.assertRaises(IOError,
+                              self._obj._get_pgsql_cursor,
                               **self._obj._CONFIG['pgsql'])
 
-    @mock.patch.object(redis, 'Redis', spec=redis.Redis)
-    def test_get_redis(self, mock_redis):
-        client = self._obj._get_redis_client(**self._obj._CONFIG['redis'])
-        self.assertIsInstance(client, mock.NonCallableMagicMock)
-        self.assertEqual(client._spec_class, redis.Redis._spec_class)
+    def test_get_pgsql_cursor_value(self):
+        if not psycopg2:
+            self.skipTest('psycopg2 not installed')
+        if not pgsql_wrapper:
+            self.skipTest('pgsql_wrapper not installed')
+        with mock.patch('pgsql_wrapper.PgSQL', autospec=True):
+            with mock.patch('psycopg2.connect'):
+                    val = self._obj._get_pgsql_cursor(**self._obj._CONFIG['pgsql'])
+                    self.assertEqual(val._mock_name, 'cursor')
+
+    def test_get_pgsql_cursor_with_no_pgsql_wrapper_module(self):
+        with mock.patch('rejected.consumer.pgsql_wrapper', new=None):
+            self.assertRaises(ImportError,
+                              self._obj._get_pgsql_cursor,
+                              **self._obj._CONFIG['pgsql'])
+
+    def test_get_redis(self):
+        if not redis:
+            self.skipTest('redis client not installed')
+        with mock.patch.object(redis, 'Redis', spec=redis.Redis):
+            client = self._obj._get_redis_client(**self._obj._CONFIG['redis'])
+            self.assertIsInstance(client, mock.NonCallableMagicMock)
+            self.assertEqual(client._spec_class, redis.Redis._spec_class)
 
     def test_get_redis_with_no_redis_module(self):
         with mock.patch('rejected.consumer.redis', new=None):
             self.assertRaises(ImportError,
                               self._obj._get_redis_client, 'localhost', 6379, 0)
+
+
+    def test_load_bs4_value_html_return_type(self):
+        if not bs4:
+            self.skipTest('BeautifulSoup4 is not installed')
+        self.assertIsInstance(self._obj._load_bs4_value(self._HTML),
+                              bs4.BeautifulSoup)
+
+    def test_load_bs4_html_value(self):
+        if not bs4:
+            self.skipTest('BeautifulSoup4 is not installed')
+        expectation = 'hi'
+        result = self._obj._load_bs4_value(self._HTML)
+        self.assertEqual(result.title.string, expectation)
+
+    def test_load_bs4_xml_value(self):
+        if not bs4:
+            self.skipTest('BeautifulSoup4 is not installed')
+        value = self._obj._load_bs4_value(self._PLIST)
+        self.assertEqual(value.find('key').string, 'Name')
+
+    def test_load_bs4_with_no_bs4(self):
+        with mock.patch('rejected.consumer.bs4', new=None):
+            self.assertRaises(consumer.ConsumerException,
+                              self._obj._load_bs4_value, '<html></html>')
 
     def test_load_csv_value_return_type(self):
         self.assertIsInstance(self._obj._load_csv_value(self._CSV),
@@ -220,15 +273,6 @@ Logging:
     def test_load_csv_value(self):
         result = list(self._obj._load_csv_value(self._CSV))
         self.assertListEqual(result, self._CSV_EXPECTATION)
-
-    def test_load_bs4_value_html_return_type(self):
-        self.assertIsInstance(self._obj._load_bs4_value(self._HTML),
-                              bs4.BeautifulSoup)
-
-    def test_load_bs4_html_value(self):
-        expectation = 'hi'
-        result = self._obj._load_bs4_value(self._HTML)
-        self.assertEqual(result.title.string, expectation)
 
     def test_load_json_value_return_type(self):
         self.assertIsInstance(self._obj._load_json_value(MockJSONMessage.body),
@@ -255,15 +299,6 @@ Logging:
     def test_load_plist_value(self):
         self.assertEqual(self._obj._load_plist_value(self._PLIST),
                          self._PLIST_EXPECTATION)
-
-
-    def test_load_bs4_xml_value_return_type(self):
-        self.assertIsInstance(self._obj._load_bs4_value(self._PLIST),
-                              bs4.BeautifulSoup)
-
-    def test_load_bs4_xml_value(self):
-        value = self._obj._load_bs4_value(self._PLIST)
-        self.assertEqual(value.find('key').string, 'Name')
 
     def test_message_app_id(self):
         self.assertEqual(self._obj.message_app_id, MockJSONProperties.app_id)
@@ -533,8 +568,3 @@ Logging:
             self._obj.process(message)
             unused_body_for_first_call = self._obj.message_body
             self.assertEqual(self._obj.message_body, self._PLIST)
-
-    def test_load_bs4_with_no_bs4(self):
-        with mock.patch('rejected.consumer.bs4', new=None):
-            self.assertRaises(consumer.ConsumerException,
-                              self._obj._load_bs4_value, '<html></html>')

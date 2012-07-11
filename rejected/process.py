@@ -422,7 +422,13 @@ class Process(multiprocessing.Process, state.State):
         self._channel = channel
         self._channel.add_on_close_callback(self.on_channel_closed)
 
-        # Set our QOS Prefetch Count
+        # Set the channel in the consumer
+        try:
+            self._consumer.set_channel(channel)
+        except AttributeError:
+            logger.warning('Consumer does not support channel assignment')
+
+            # Set our QOS Prefetch Count
         self._set_qos_prefetch()
 
         # Set our runtime state
@@ -469,7 +475,7 @@ class Process(multiprocessing.Process, state.State):
 
         """
         logger.error('Runtime exception raised: %s', exception)
-        self._count[self.ERROR] += 1
+        self._counts[self.ERROR] += 1
 
         # If we do not have no_ack set, then reject the message
         if self._ack:

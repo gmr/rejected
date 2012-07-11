@@ -46,7 +46,8 @@ class MasterControlProgram(state.State):
         self._stats_queue = multiprocessing.Queue()
 
         # Carry for logging internal stats collection data
-        self._stats_logging = config.get('log_stats', True)
+        self._log_stats_enabled = config.get('log_stats', True)
+        logger.debug('Stats logging enabled: %s', self._log_stats_enabled)
 
         # Setup the poller related threads
         self._poll_interval = config.get('poll_interval', self._POLL_INTERVAL)
@@ -196,7 +197,7 @@ class MasterControlProgram(state.State):
         self._stats = self._calculate_stats(self._last_poll_results)
 
         # If stats logging is enabled, log the stats
-        if self._stats_logging:
+        if self._log_stats_enabled:
             self._log_stats()
 
     def _kill_processes(self):
@@ -244,6 +245,11 @@ class MasterControlProgram(state.State):
                         self._stats['consumer_data'][key]['failed'],
                         self._stats['consumer_data'][key]['waiting_time'],
                         self._stats['consumer_data'][key]['processing_time'])
+        if self._poll_data['processes']:
+            logger.warning('%i processes did not respond with stats in '
+                           'time: %r',
+                           len(self._poll_data['processes']),
+                           self._poll_data['processes'])
 
     def _new_process(self, consumer_name, connection_name):
         """Create a new consumer instances
@@ -322,6 +328,15 @@ class MasterControlProgram(state.State):
         # Start the timer again
         self._start_poll_timer()
 
+    @property
+    def _poll_duration_exceeded(self):
+        """Return true if the poll time has been exceeded.
+        :rtype: bool
+
+        """
+        return  (time.time() -
+                 self._poll_data['timestamp']) >= self._poll_interval
+    
     def _poll_results_check(self):
         """Check the polling results by checking to see if the stats queue is
         empty. If it is not, try and collect stats. If it is set a timer to
@@ -341,6 +356,9 @@ class MasterControlProgram(state.State):
 
         # If there are pending consumers to get stats for, start the timer
         if self._poll_data['processes']:
+
+            if self._poll_duration_exceeded and self._log_stats_enabled:
+                self._log_stats()
             logger.debug('Starting poll results timer for %i consumer(s)',
                          len(self._poll_data['processes']))
             self._start_poll_results_timer()
@@ -517,7 +535,7 @@ class MasterControlProgram(state.State):
         which will stop the process without a clean shutdown.
 
         :param multiprocessing.Process process: The process to stop
-        :param bool kill: When true, dont be nice
+        :param bool kill: When true, don't be nice
 
         """
         if not process.is_alive():

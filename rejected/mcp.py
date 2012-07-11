@@ -107,8 +107,8 @@ class MasterControlProgram(state.State):
                     consumer_stats[name][key] += value
 
         # Return a data structure that can be used in reporting out the stats
+        stats['processes'] = len(self._active_processes)
         return {'last_poll': timestamp,
-                'processes': len(self._active_processes),
                 'consumers': consumer_stats,
                 'process_data': data,
                 'counts': stats}
@@ -123,7 +123,7 @@ class MasterControlProgram(state.State):
         """
         total_time = counts['waiting_time'] + counts['processing_time']
         if total_time == 0 or counts['processes'] == 0:
-            return 0
+            logger.debug('Returning 0')
         return float(counts['processes']) / float(total_time)
 
     def _check_consumer_process_counts(self):
@@ -166,6 +166,7 @@ class MasterControlProgram(state.State):
         :rtype: str
 
         """
+        logger.debug('Received %r', counts)
         return 'consumer' if counts['processes'] == 1 else 'consumers'
 
     def _consumer_stats_counter(self):
@@ -255,15 +256,15 @@ class MasterControlProgram(state.State):
                     'errors, waiting %.2f seconds and have spent %.2f seconds '
                     'processing messages with an overall velocity of %.2f '
                     'messages per second.',
-                    self._stats['processes'],
-                    self._consumer_keyword(self._stats),
+                    self._stats['counts']['processes'],
+                    self._consumer_keyword(self._stats['counts']),
                     self._stats['counts']['processed'],
                     self._stats['counts']['failed'],
                     self._stats['counts']['waiting_time'],
                     self._stats['counts']['processing_time'],
                     self._calculate_velocity(self._stats['counts']))
         for key in self._stats['consumers'].keys():
-            logger.info('%i %s have processed %i  messages with %i '
+            logger.info('%i %s for %s have processed %i messages with %i '
                         'errors, waiting %.2f seconds and have spent %.2f '
                         'seconds processing messages with an overall velocity '
                         'of %.2f messages per second.',

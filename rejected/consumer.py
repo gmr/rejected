@@ -719,7 +719,7 @@ class Consumer(object):
             raise ValueError('Missing reply_to in properties or as argument')
 
         if auto_id and properties.message_id:
-            properties.app_id = '%s.%s' % (__name__, self.__name__)
+            properties.app_id = __name__
             properties.correlation_id = properties.message_id
             properties.message_id = str(uuid.uuid4())
             properties.timestamp = int(time.time())

@@ -256,7 +256,7 @@ class MasterControlProgram(state.State):
                     'processing messages with an overall velocity of %.2f '
                     'messages per second.',
                     self._stats['processes'],
-                    self._consumer_keyword(self._stats['counts']),
+                    self._consumer_keyword(self._stats),
                     self._stats['counts']['processed'],
                     self._stats['counts']['failed'],
                     self._stats['counts']['waiting_time'],

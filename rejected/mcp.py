@@ -336,7 +336,7 @@ class MasterControlProgram(state.State):
         """
         return  (time.time() -
                  self._poll_data['timestamp']) >= self._poll_interval
-    
+
     def _poll_results_check(self):
         """Check the polling results by checking to see if the stats queue is
         empty. If it is not, try and collect stats. If it is set a timer to

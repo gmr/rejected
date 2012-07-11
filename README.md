@@ -11,9 +11,9 @@ data from the consumer processes and report on it.
 
 Example Processor
 -----------------
-    from rejected import processor
+    from rejected import consumer
 
-    class Test(processor.Processor):
+    class Test(consumer.COnsumer):
         def process(self, message):
             self._logger.debug('In Test.process: %s' % message.body)
 
@@ -35,8 +35,7 @@ Example Configuration
            vhost: /
        Consumers:
          test_processor:
-           import: test_processor
-           processor: Test
+           consumer: test_processor.Test
            connections: [rabbitmq]
            queue: test_queue
            min: 2

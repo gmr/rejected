@@ -10,6 +10,7 @@ import pika
 from pika import exceptions
 from pika.adapters import tornado_connection
 import signal
+import threading
 import time
 import traceback
 
@@ -81,7 +82,7 @@ class Process(multiprocessing.Process, state.State):
         self._stats_queue = None
 
         # Override ACTIVE with PROCESSING
-        self._STATES [0x04] = 'Processing'
+        self._STATES[0x04] = 'Processing'
 
     def _ack_message(self, delivery_tag):
         """Acknowledge the message on the broker and log the ack
@@ -91,6 +92,12 @@ class Process(multiprocessing.Process, state.State):
         """
         logger.debug('Acking %s', delivery_tag)
         self._channel.basic_ack(delivery_tag=delivery_tag)
+        self._reset_state()
+
+    def _cancel_consumer_with_rabbitmq(self):
+        """Tell RabbitMQ the process no longer wants to consumer messages."""
+        logger.debug('Sending a Basic.Cancel to RabbitMQ')
+        self._channel.basic_cancel(consumer_tag=self.name)
 
     def _count(self, stat):
         """Return the current count quantity for a specific stat.
@@ -232,6 +239,20 @@ class Process(multiprocessing.Process, state.State):
 
         """
         self._channel.basic_reject(delivery_tag=delivery_tag)
+        self._reset_state()
+
+    def _reset_state(self):
+        """Reset the runtime state after processing a message to either idle
+        or shutting down based upon the current state.
+
+        """
+        if self.is_processing:
+            self._set_state(self.STATE_IDLE)
+        elif self.is_waiting_to_shutdown:
+            self._set_state(self.STATE_SHUTTING_DOWN)
+        else:
+            logger.critical('Unexepected state: %s', self.state_description)
+
 
     def _set_qos_prefetch(self, value=None):
         """Set the QOS Prefetch count for the channel.
@@ -309,41 +330,6 @@ class Process(multiprocessing.Process, state.State):
         signal.signal(signal.SIGPROF, self.get_stats)
         signal.signal(signal.SIGABRT, self.stop)
 
-    def _shutdown(self):
-        """Shutdown steps called any time the connection or channel is closed.
-
-        """
-        logger.debug('Shutdown request received')
-        # Loop while the state is set to processing
-        while self._state == self.STATE_PROCESSING:
-            logger.debug('Waiting for state to change to shut down')
-            time.sleep(0.1)
-
-        # Set the state to shutting down
-        self._set_state(self.STATE_SHUTTING_DOWN)
-        logger.info('Shutting down')
-
-
-        # A stop was requested, close the channel and stop the IOLoop
-        logger.debug('Closing channel in %s state', self.state_description)
-        if self._channel:
-            self._channel.close()
-
-        # If the connection is still around, close it
-        if self._connection.is_open:
-            logger.info('Closing open connection to RabbitMQ')
-            self._connection.close()
-
-        # Allow the consumer to gracefully stop
-        self._stop_consumer()
-
-        # Stop the IOLoop which is what is blocking the process in run
-        ioloop.IOLoop.instance().stop()
-
-        # Reset the state and report shutdown complete
-        self._set_state(self.STATE_STOPPED)
-        logger.info('Shutdown complete')
-
     def _stop_consumer(self):
         """Stop the consumer object and allow it to do a clean shutdown if it
         has the ability to do so.
@@ -363,6 +349,18 @@ class Process(multiprocessing.Process, state.State):
 
         """
         return time.time() - self._state_start
+
+    def _wait_to_shutdown(self):
+        """Loop while the existing message is processing so the process can
+        shutdown cleanly after the message has been processed and if
+        no_ack is False, acked or rejected.
+
+        """
+        # It's possible to go from waiting to shutdown to idle
+        while self.is_waiting_to_shutdown and not self.is_idle:
+            logger.debug('Waiting to shutdown, current state: %s',
+                         self.state_description)
+            time.sleep(0.2)
 
     def get_stats(self, signum_unused, stack_frame_unused):
         """Get the queue depth from a passive queue declare and call the
@@ -401,20 +399,17 @@ class Process(multiprocessing.Process, state.State):
                                     queue=self._queue_name,
                                     passive=True)
 
-
-    def on_channel_close(self, reason_code, reason_text):
-        """Callback invoked by Pika when the channel has been closed by
-        RabbitMQ
+    def on_channel_closed(self, reason_code='Unknown', reason_text='Unknown'):
+        """Callback invoked by Pika when the channel has been closed.
 
         :param int reason_code: AMQP close status code
         :param str reason_text: AMQP close message
 
         """
-        logger.critical('Channel closed by remote (%s): %s',
-                        reason_code, reason_text)
-        if not self.is_shutting_down and not self.is_running:
-            self._shutdown()
-        self._channel = None
+        method = logger.debug if reason_code == 0 else logger.warning
+        method('Channel closed (%s): %s', reason_code, reason_text)
+        if self.is_running:
+            self.stop()
 
     def on_channel_open(self, channel):
         """The channel is open so now lets set our QOS prefetch and register
@@ -425,7 +420,7 @@ class Process(multiprocessing.Process, state.State):
         """
         logger.info('Channel #%i to RabbitMQ Opened', channel.channel_number)
         self._channel = channel
-        self._channel.add_on_close_callback(self.on_channel_close)
+        self._channel.add_on_close_callback(self.on_channel_closed)
 
         # Set our QOS Prefetch Count
         self._set_qos_prefetch()
@@ -449,11 +444,10 @@ class Process(multiprocessing.Process, state.State):
         :param str reason_text: AMQP close message
 
         """
-        # We've closed our pika connection so stop
-        # Log that we're done
-        logger.warning('Connection closed (%s): %s', reason_code, reason_text)
-        if not self.is_shutting_down and not self.is_running:
-            self._shutdown()
+        method = logger.debug if reason_code == 0 else logger.warning
+        method('Connection closed (%s): %s', reason_code, reason_text)
+        if self.is_running:
+            self.stop()
 
     def on_connected(self, connection):
         """We have connected to RabbitMQ so setup our connection attribute and
@@ -486,9 +480,6 @@ class Process(multiprocessing.Process, state.State):
             logger.debug('Error threshold exceeded, stopping')
             self.stop()
 
-        # Set our state to consuming
-        self._set_state(self.STATE_IDLE)
-
     def process(self, channel=None, method=None, header=None, body=None):
         """Process a message from Rabbit
 
@@ -496,13 +487,12 @@ class Process(multiprocessing.Process, state.State):
         :param pika.frames.MethodFrame method: The method frame
         :param pika.frames.HeaderFrame header: The header frame
         :param str body: The message body
-        :rtype: bool
 
         """
-        if self.is_shutting_down:
-            logger.critical('Received a message while shutting down')
-            self._reject(method.delivery_tag)
-            return False
+        if not self.is_idle:
+            logger.critical('Received a message while in state: %s',
+                            self.state_description)
+            return self._reject(method.delivery_tag)
 
         # Set our state to processing
         self._set_state(self.STATE_PROCESSING)
@@ -529,9 +519,8 @@ class Process(multiprocessing.Process, state.State):
         # If no_ack was not set when we setup consuming, do so here
         if self._ack:
             self._ack_message(method.delivery_tag)
-
-        # Set the state as idle
-        self._set_state(self.STATE_IDLE)
+        else:
+            self._reset_state()
 
     def run(self):
         """Start the consumer"""
@@ -547,28 +536,73 @@ class Process(multiprocessing.Process, state.State):
                             consumer, error)
             return
 
-        while self.is_connecting or self.is_running:
-            try:
-                ioloop.IOLoop.instance().start()
-            except KeyboardInterrupt:
-                logger.debug('Caught keyboard interrupt')
+        # Run the IOLoop in a thread so it does not get interrupted on a signal
+        ioloop_ = threading.Thread(target=ioloop.IOLoop.instance().start)
+        ioloop_.start()
 
-        logger.debug('Exiting')
+        while not self.is_stopped:
+            try:
+                ioloop_.join(timeout=0.1)
+            except KeyboardInterrupt:
+                pass
+
+        logger.debug('Exiting %s', self.name)
+
+    @property
+    def is_processing(self):
+        """Returns a bool specifying if the consumer is currently processing
+
+        :rtype: bool
+
+        """
+        return self._state == self.STATE_PROCESSING
 
     def stop(self, signum_unused=None, frame_unused=None):
         """Stop the consumer from consuming by calling BasicCancel and setting
         our state.
 
         """
+        logger.debug('Stop called in state: %s', self.state_description)
         if self.is_stopped:
             logger.debug('Stop requested but consumer is already stopped')
             return
         elif self.is_shutting_down:
             logger.debug('Stop requested but consumer is already shutting down')
             return
+        elif self.is_waiting_to_shutdown:
+            logger.debug('Stop requested but already waiting to shut down')
+            return
 
-        # Shutdown the consumer
-        self._shutdown()
+        # Wait until the consumer has finished processing to shutdown
+        if self.is_processing:
+            self._cancel_consumer_with_rabbitmq()
+            self._set_state(self.STATE_STOP_REQUESTED)
+            self._wait_to_shutdown()
+
+        # Set the state to shutting down if it wasn't set as that during loop
+        logger.info('Shutting down')
+        self._set_state(self.STATE_SHUTTING_DOWN)
+
+        # A stop was requested, close the channel and stop the IOLoop
+        if self._channel:
+            logger.debug('Closing channel on RabbitMQ connection')
+            self._channel.close()
+
+        # If the connection is still around, close it
+        if self._connection.is_open:
+            logger.info('Closing connection to RabbitMQ')
+            try:
+                self._connection.close()
+            except KeyError:
+                pass
+
+        # Allow the consumer to gracefully stop and then stop the IOLoop
+        self._stop_consumer()
+        ioloop.IOLoop.instance().stop()
+
+        # Note that shutdown is complete and set the state accordingly
+        logger.info('Shutdown complete')
+        self._set_state(self.STATE_STOPPED)
 
     @property
     def too_many_errors(self):

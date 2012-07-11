@@ -227,7 +227,7 @@ class MasterControlProgram(state.State):
 
     def _log_stats(self):
         """Output the stats to the logger."""
-        logger.info('%i total consumers have processed %i  messages with %i '
+        logger.info('%i total consumer(s) have processed %i  messages with %i '
                     'errors, waiting %.2f seconds and have spent %.2f seconds '
                     'processing messages',
                     self._stats['processes'],
@@ -236,7 +236,7 @@ class MasterControlProgram(state.State):
                     self._stats['counts']['waiting_time'],
                     self._stats['counts']['processing_time'])
         for key in self._stats['consumer_data'].keys():
-            logger.info('%i %s consumers have processed %i  messages with %i '
+            logger.info('%i %s consumer(s) have processed %i  messages with %i '
                         'errors, waiting %.2f seconds and have spent %.2f '
                         'seconds processing messages',
                         self._stats['consumer_data'][key]['processes'],
@@ -246,7 +246,7 @@ class MasterControlProgram(state.State):
                         self._stats['consumer_data'][key]['waiting_time'],
                         self._stats['consumer_data'][key]['processing_time'])
         if self._poll_data['processes']:
-            logger.warning('%i processes did not respond with stats in '
+            logger.warning('%i process(es) did not respond with stats in '
                            'time: %r',
                            len(self._poll_data['processes']),
                            self._poll_data['processes'])

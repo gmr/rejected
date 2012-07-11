@@ -2,10 +2,6 @@
 OS Level controlling class invokes startup, shutdown and handles signals.
 
 """
-__author__ = 'Gavin M. Roy'
-__email__ = 'gmr@myyearbook.com'
-__since__ = '2011-07-22'
-
 import clihelper
 import logging
 import sys

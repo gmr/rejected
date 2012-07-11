@@ -109,9 +109,22 @@ class MasterControlProgram(state.State):
         # Return a data structure that can be used in reporting out the stats
         return {'last_poll': timestamp,
                 'processes': len(self._active_processes),
-                'consumer_data': consumer_stats,
+                'consumers': consumer_stats,
                 'process_data': data,
                 'counts': stats}
+
+    def _calculate_velocity(self, counts):
+        """Calculate the message velocity to determine how many messages are
+        processed per second.
+
+        :param dict counts: The count dictionary to use for calculation
+        :rtype: float
+
+        """
+        total_time = counts['waiting_time'] + counts['processing_time']
+        if total_time == 0 or counts['processes'] == 0:
+            return 0
+        return float(counts['processes']) / float(total_time)
 
     def _check_consumer_process_counts(self):
         """Check for the minimum consumer process levels and start up new
@@ -145,6 +158,15 @@ class MasterControlProgram(state.State):
                 'last_proc_num': 0,
                 'queue': configuration['queue'],
                 'processes': dict()}
+
+    def _consumer_keyword(self, counts):
+        """Return consumer or consumers depending on the process count.
+
+        :param dict counts: The count dictionary to use process count
+        :rtype: str
+
+        """
+        return 'consumer' if counts['processes'] == 1 else 'consumers'
 
     def _consumer_stats_counter(self):
         """Return a new consumer stats counter instance.
@@ -229,24 +251,30 @@ class MasterControlProgram(state.State):
 
     def _log_stats(self):
         """Output the stats to the logger."""
-        logger.info('%i total consumer(s) have processed %i  messages with %i '
+        logger.info('%i total %s have processed %i  messages with %i '
                     'errors, waiting %.2f seconds and have spent %.2f seconds '
-                    'processing messages',
+                    'processing messages with an overall velocity of %.2f '
+                    'messages per second.',
                     self._stats['processes'],
+                    self._consumer_keyword(self._stats['counts']),
                     self._stats['counts']['processed'],
                     self._stats['counts']['failed'],
                     self._stats['counts']['waiting_time'],
-                    self._stats['counts']['processing_time'])
-        for key in self._stats['consumer_data'].keys():
-            logger.info('%i %s consumer(s) have processed %i  messages with %i '
+                    self._stats['counts']['processing_time'],
+                    self._calculate_velocity(self._stats['counts']))
+        for key in self._stats['consumers'].keys():
+            logger.info('%i %s have processed %i  messages with %i '
                         'errors, waiting %.2f seconds and have spent %.2f '
-                        'seconds processing messages',
-                        self._stats['consumer_data'][key]['processes'],
+                        'seconds processing messages with an overall velocity '
+                        'of %.2f messages per second.',
+                        self._stats['consumers'][key]['processes'],
+                        self._consumer_keyword(self._stats['consumers'][key]),
                         key,
-                        self._stats['consumer_data'][key]['processed'],
-                        self._stats['consumer_data'][key]['failed'],
-                        self._stats['consumer_data'][key]['waiting_time'],
-                        self._stats['consumer_data'][key]['processing_time'])
+                        self._stats['consumers'][key]['processed'],
+                        self._stats['consumers'][key]['failed'],
+                        self._stats['consumers'][key]['waiting_time'],
+                        self._stats['consumers'][key]['processing_time'],
+                        self._calculate_velocity(self._stats['consumers'][key]))
         if self._poll_data['processes']:
             logger.warning('%i process(es) did not respond with stats in '
                            'time: %r',

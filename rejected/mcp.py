@@ -122,9 +122,9 @@ class MasterControlProgram(state.State):
 
         """
         total_time = counts['waiting_time'] + counts['processing_time']
-        if total_time == 0 or counts['processes'] == 0:
+        if total_time == 0 or counts['processed'] == 0:
             logger.debug('Returning 0')
-        return float(counts['processes']) / float(total_time)
+        return float(counts['processed']) / float(total_time)
 
     def _check_consumer_process_counts(self):
         """Check for the minimum consumer process levels and start up new

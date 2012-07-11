@@ -83,13 +83,7 @@ class Consumer(object):
 
         """
         # Carry the configuration for use elsewhere
-        self._configuration = configuration
-
-        # Automatically add a config object if the values are present
-        self._config = None
-        if couchconfig and [key for key in self._CONFIG_KEYS
-                            if key in configuration.keys()]:
-            self._config = self._get_configuration_obj(configuration)
+        self._config = configuration
 
         # Each message received will be carried as an attribute
         self._message = None
@@ -267,23 +261,6 @@ class Consumer(object):
 
         """
         return zlib.decompress(value)
-
-    def _get_configuration_obj(self, config):
-        """Return a new instance of couchconfig.Configuration with the service
-        defined in normal, forward DNS notation (service.domain.tld).
-
-        :param dict config: Configuration dictionary
-        :rtype: couchconfig.Configuration
-        :raises: ImportError
-
-        """
-        if not couchconfig:
-            raise ImportError('couchconfig not installed')
-        service = self._get_service(config.get('service'))
-        return couchconfig.Configuration(service,
-                                         config.get('config_host'),
-                                         config.get('config_domain'),
-                                         config.get('config_ttl'))
 
     def _get_pika_properties(self, properties_in):
         """Return a pika.BasicProperties object for a rejected.data.Properties

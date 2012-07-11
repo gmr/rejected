@@ -2,7 +2,6 @@
 """Tests for rejected.consumer"""
 import bs4
 import bz2
-import couchconfig
 import csv
 import datetime
 import mock
@@ -62,26 +61,28 @@ class MockJSONMessage(object):
 
 class LocalConsumer(consumer.Consumer):
 
-    _CONFIG_DOC = {'pgsql': {'host': 'localhost',
-                             'port': 6000,
-                             'user': 'www',
-                             'dbname': 'production'},
-                   'redis': {'host': 'localhost',
-                             'port': 6879,
-                             'db': 0},
-                   'whitelist': False}
+    _CONFIG= {'pgsql': {'host': 'localhost',
+                        'port': 6000,
+                        'user': 'www',
+                        'dbname': 'production'},
+              'redis': {'host': 'localhost',
+                        'port': 6879,
+                        'db': 0},
+              'whitelist': False}
 
     _DROP_INVALID_MESSAGES = True
     _MESSAGE_TYPE = None
 
 
 class TestJSONConsumer(unittest.TestCase):
-
-    _CONFIG = {'service': 'go.messaging.mtmedev.com',
-               'config_host': 'config',
-               'config_domain': 'mtmedev.com',
-               'config_ttl': 300}
-
+    _CONFIG = {'pgsql': {'host': 'localhost',
+                         'port': 6000,
+                         'user': 'www',
+                         'dbname': 'production'},
+               'redis': {'host': 'localhost',
+                         'port': 6879,
+                         'db': 0},
+               'whitelist': False}
     _CSV = '"foo","bar"\r\n1,2\r\n3,4\r\n5,6\r\n'
     _CSV_EXPECTATION = [{"foo": "1", "bar": "2"},
             {"foo": "3", "bar": "4"},
@@ -171,12 +172,6 @@ Logging:
                        'GeoIP","ip_address":"97.78.13.106"}')
         self.assertEqual(self._obj._decode_gzip(value), expectation)
 
-    def test_get_configuration(self):
-        with mock.patch('couchconfig.Configuration', autospec=True, **self._CONFIG):
-            obj = consumer.Consumer(self._CONFIG)
-            self.assertEqual(obj._config._spec_class,
-                             couchconfig.config.Configuration)
-
     def test_get_service(self):
         value = 'foo.bar.baz'
         expectation = 'baz_bar_foo'
@@ -185,30 +180,31 @@ Logging:
     @mock.patch('pgsql_wrapper.PgSQL', autospec=True)
     def test_get_postgresql_cursor_connect(self, mock_pgsql_wrapper):
         with mock.patch('psycopg2.connect') as mock_method:
-            self._obj._get_postgresql_cursor(**self._obj._CONFIG_DOC['pgsql'])
-            mock_method.assertCalledWith(**self._obj._CONFIG_DOC['pgsql'])
+            self._obj._get_postgresql_cursor(**self._obj._CONFIG['pgsql'])
+            mock_method.assertCalledWith(**self._obj._CONFIG['pgsql'])
 
-    @mock.patch('pgsql_wrapper.PgSQL', autospec=True, side_effect=psycopg2.OperationalError)
+    @mock.patch('pgsql_wrapper.PgSQL', autospec=True,
+                side_effect=psycopg2.OperationalError)
     def test_get_postgresql_connection_error(self, mock_pgsql_wrapper):
         self.assertRaises(IOError,
                           self._obj._get_postgresql_cursor,
-                          **self._obj._CONFIG_DOC['pgsql'])
+                          **self._obj._CONFIG['pgsql'])
 
     @mock.patch('pgsql_wrapper.PgSQL', autospec=True)
     def test_get_postgresql_cursor_value(self, mock_pgsql_wrapper):
         with mock.patch('psycopg2.connect'):
-            value = self._obj._get_postgresql_cursor(**self._obj._CONFIG_DOC['pgsql'])
-            self.assertEqual(value._mock_name, 'cursor')
+            val = self._obj._get_postgresql_cursor(**self._obj._CONFIG['pgsql'])
+            self.assertEqual(val._mock_name, 'cursor')
 
     def test_get_postgresql_cursor_with_no_pgsql_wrapper_module(self):
         with mock.patch('rejected.consumer.pgsql_wrapper', new=None):
             self.assertRaises(ImportError,
                               self._obj._get_postgresql_cursor,
-                              **self._obj._CONFIG_DOC['pgsql'])
+                              **self._obj._CONFIG['pgsql'])
 
     @mock.patch.object(redis, 'Redis', spec=redis.Redis)
     def test_get_redis(self, mock_redis):
-        client = self._obj._get_redis_client(**self._obj._CONFIG_DOC['redis'])
+        client = self._obj._get_redis_client(**self._obj._CONFIG['redis'])
         self.assertIsInstance(client, mock.NonCallableMagicMock)
         self.assertEqual(client._spec_class, redis.Redis._spec_class)
 
@@ -225,13 +221,13 @@ Logging:
         result = list(self._obj._load_csv_value(self._CSV))
         self.assertListEqual(result, self._CSV_EXPECTATION)
 
-    def test_load_html_value_return_type(self):
-        self.assertIsInstance(self._obj._load_html_value(self._HTML),
+    def test_load_bs4_value_html_return_type(self):
+        self.assertIsInstance(self._obj._load_bs4_value(self._HTML),
                               bs4.BeautifulSoup)
 
-    def test_load_html_value(self):
+    def test_load_bs4_html_value(self):
         expectation = 'hi'
-        result = self._obj._load_html_value(self._HTML)
+        result = self._obj._load_bs4_value(self._HTML)
         self.assertEqual(result.title.string, expectation)
 
     def test_load_json_value_return_type(self):
@@ -261,12 +257,12 @@ Logging:
                          self._PLIST_EXPECTATION)
 
 
-    def test_load_xml_value_return_type(self):
-        self.assertIsInstance(self._obj._load_xml_value(self._PLIST),
+    def test_load_bs4_xml_value_return_type(self):
+        self.assertIsInstance(self._obj._load_bs4_value(self._PLIST),
                               bs4.BeautifulSoup)
 
-    def test_load_xml_value(self):
-        value = self._obj._load_xml_value(self._PLIST)
+    def test_load_bs4_xml_value(self):
+        value = self._obj._load_bs4_value(self._PLIST)
         self.assertEqual(value.find('key').string, 'Name')
 
     def test_message_app_id(self):
@@ -538,23 +534,7 @@ Logging:
             unused_body_for_first_call = self._obj.message_body
             self.assertEqual(self._obj.message_body, self._PLIST)
 
-    def test__get_configuration_obj_with_no_couchconfig(self):
-        with mock.patch('rejected.consumer.couchconfig', new=None):
-            self.assertRaises(ImportError,
-                              self._obj._get_configuration_obj, self._CONFIG)
-
-    def test__get_service_with_no_couchconfig(self):
-        with mock.patch('rejected.consumer.couchconfig', new=None):
-            self.assertRaises(ImportError,
-                              self._obj._get_service, 'foo.bar.baz')
-
-    def test_load_html_with_no_bs4(self):
+    def test_load_bs4_with_no_bs4(self):
         with mock.patch('rejected.consumer.bs4', new=None):
             self.assertRaises(consumer.ConsumerException,
-                              self._obj._load_html_value, '<html></html>')
-
-    def test_load_xml_with_no_bs4(self):
-        with mock.patch('rejected.consumer.bs4', new=None):
-            self.assertRaises(consumer.ConsumerException,
-                              self._obj._load_xml_value, '<xml></xml>')
-
+                              self._obj._load_bs4_value, '<html></html>')

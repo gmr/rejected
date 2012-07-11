@@ -600,12 +600,11 @@ class Consumer(object):
         :rtype: bool
 
         """
+        # Clear out our previous body values
+        self._message_body = None
+
         logger.debug('Received: %r', message_in)
         self._message = message_in
-
-        # Clear out our previous values
-        self._message_body = None
-        self._message = None
 
         # Validate the message type if the child sets _MESSAGE_TYPE
         if self._MESSAGE_TYPE and self._MESSAGE_TYPE != self.message_type:

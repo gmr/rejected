@@ -68,7 +68,7 @@ class TestProcess(test_state.TestState):
                                 'min': 2,
                                 'max': 5,
                                 'max_errors': 10,
-                                'prefetch_count': 5,
+                                'qos_prefetch': 5,
                                 'ack': True,
                                 'queue': 'mock_queue'},
                        'MockConsumer2':
@@ -348,21 +348,21 @@ class TestProcess(test_state.TestState):
 
     def test_set_qos_prefetch_value(self):
         new_process = self.new_process()
+        new_process._setup(**self.mock_args)
         mock_channel = self.new_mock_channel()
         new_process._channel = mock_channel
         value = 12
         new_process._set_qos_prefetch(value)
-        mock_channel.basic_qos.assert_called_once_with(callback=None,
-                                                       prefetch_count=value)
+        mock_channel.basic_qos.assert_called_once_with(prefetch_count=value)
 
     def test_set_qos_prefetch_no_value(self):
         new_process = self.new_process()
+        new_process._setup(**self.mock_args)
         mock_channel = self.new_mock_channel()
         new_process._channel = mock_channel
         new_process._set_qos_prefetch()
-        value = new_process._prefetch_count
-        mock_channel.basic_qos.assert_called_once_with(callback=None,
-                                                       prefetch_count=value)
+        value = new_process._qos_prefetch
+        mock_channel.basic_qos.assert_called_once_with(prefetch_count=value)
 
     def test_set_state_idle_to_processing_check_time_waited(self):
         new_process = self.new_process()
@@ -456,10 +456,18 @@ class TestProcess(test_state.TestState):
         self.assertEqual(mock_process._max_error_count,
                          self.config['Consumers']['MockConsumer']['max_errors'])
 
-    def test_setup_prefetch_count(self):
+    def test_setup_prefetch_count_no_config(self):
+        args = copy.deepcopy(self.mock_args)
+        del args['config']['Consumers']['MockConsumer']['qos_prefetch']
+        mock_process = self.new_process()
+        mock_process._setup(**args)
+        self.assertEqual(mock_process._base_qos_prefetch,
+                         process.Process._QOS_PREFETCH_COUNT)
+
+    def test_setup_prefetch_count_with_config(self):
         mock_process = self.mock_setup()
-        self.assertEqual(mock_process._prefetch_count,
-                         self.config['Consumers']['MockConsumer']['prefetch_count'])
+        self.assertEqual(mock_process._base_qos_prefetch,
+                         self.config['Consumers']['MockConsumer']['qos_prefetch'])
 
     def test_setup_connection_arguments(self):
         with mock.patch.object(process.Process,

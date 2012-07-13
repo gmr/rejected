@@ -2,10 +2,12 @@
 connection state and collects stats about the consuming process.
 
 """
+import copy
 from tornado import ioloop
 import logging
-import os
+import math
 import multiprocessing
+import os
 import pika
 from pika import exceptions
 from pika.adapters import tornado_connection
@@ -67,6 +69,7 @@ class Process(multiprocessing.Process, state.State):
 
     # Default message pre-allocation value
     _QOS_PREFETCH_COUNT = 1
+    _QOS_PREFETCH_MULTIPLIER = 1.25
     _MAX_ERROR_COUNT = 5
     _MAX_SHUTDOWN_WAIT = 5
 
@@ -76,7 +79,10 @@ class Process(multiprocessing.Process, state.State):
         self._config= None
         self._consumer = None
         self._counts = self._new_counter_dict()
-        self._prefetch_count = self._QOS_PREFETCH_COUNT
+        self._dynamic_qos = True
+        self._last_counts = None
+        self._last_stats_time = None
+        self._qos_prefetch = None
         self._state = self.STATE_INITIALIZING
         self._state_start = time.time()
         self._stats_queue = None
@@ -94,6 +100,63 @@ class Process(multiprocessing.Process, state.State):
         self._channel.basic_ack(delivery_tag=delivery_tag)
         self._reset_state()
 
+    @property
+    def _base_qos_prefetch(self):
+        """Return the base, configured QoS prefetch value.
+
+        :rtype: int
+
+        """
+        return self._config.get('qos_prefetch', self._QOS_PREFETCH_COUNT)
+
+    def _calculate_qos_prefetch(self):
+        """Determine if the channel should use the dynamic QoS value, stay at
+        the same QoS or use the default QoS.
+
+        """
+        qos_prefetch = self._dynamic_qos_pretch
+
+
+        if qos_prefetch == self._qos_prefetch:
+            logger.debug('No change in QoS prefetch calculation of %i',
+                         self._qos_prefetch)
+            return
+
+        if self._count_processed_last_interval < qos_prefetch:
+            logger.error('Processed fewer messages last interval than the '
+                         'qos_prefetch value')
+            return
+
+        if self._base_qos_prefetch > qos_prefetch:
+            logger.debug('QoS calculation is lower than previous: %i < %i',
+                         qos_prefetch, self._qos_prefetch)
+            self._set_qos_prefetch()
+
+        if qos_prefetch > self._qos_prefetch:
+            logger.debug('QoS calculation is higher than previous: %i > %i',
+                         qos_prefetch, self._qos_prefetch)
+            return self._set_qos_prefetch(qos_prefetch)
+
+        # Lower the QoS value based upon the processed qty
+        if qos_prefetch < self._qos_prefetch:
+            return self._set_qos_prefetch(qos_prefetch)
+
+        # Return to the default QoS
+        logger.debug('Setting to default QoS')
+        self._set_qos_prefetch()
+
+    @property
+    def _count_processed_last_interval(self):
+        """Return the number of messages counted in the last interval. If
+        there is no last interval counts, return 0.
+
+        :rtype: int
+
+        """
+        if not self._last_counts:
+            return 0
+        return self._counts[self.PROCESSED] - self._last_counts[self.PROCESSED]
+
     def _cancel_consumer_with_rabbitmq(self):
         """Tell RabbitMQ the process no longer wants to consumer messages."""
         logger.debug('Sending a Basic.Cancel to RabbitMQ')
@@ -107,6 +170,31 @@ class Process(multiprocessing.Process, state.State):
 
         """
         return self._counts.get(stat, 0)
+
+    @property
+    def _dynamic_qos_pretch(self):
+        """Calculate the prefetch count based upon the message velocity * the
+        _QOS_PREFETCH_MULTIPLIER.
+
+        :rtype: int
+
+        """
+        processed = self._count_processed_last_interval
+        duration = time.time() - self._last_stats_time
+        logger.debug('Processed %i messages in %i seconds', processed, duration)
+
+        # If there were no messages, do not calculate, use the base
+        if not processed or not duration:
+            return self._base_qos_prefetch
+
+        # Calculate the velocity as the basis for the calculation
+        velocity = float(processed) / float(duration)
+        logger.debug('Message processing velocity: %.2f', velocity)
+
+        # Round up the velocity * the multiplier
+        value = int(math.ceil(velocity * float(self._QOS_PREFETCH_MULTIPLIER)))
+        logger.debug('Calculated prefetch value: %i', value)
+        return value
 
     def _get_config(self, config, number, name, connection):
         """Initialize a new consumer thread, setting defaults and config values
@@ -253,16 +341,15 @@ class Process(multiprocessing.Process, state.State):
         else:
             logger.critical('Unexepected state: %s', self.state_description)
 
-
     def _set_qos_prefetch(self, value=None):
         """Set the QOS Prefetch count for the channel.
 
         :param int value: The value to set the prefetch to
 
         """
-        value = value or self._prefetch_count
-        logger.info('Setting the QOS Prefetch to %i', value)
-        self._channel.basic_qos(prefetch_count=value, callback=None)
+        self._qos_prefetch = int(value or self._base_qos_prefetch)
+        logger.info('Setting the QOS Prefetch to %i', self._qos_prefetch)
+        self._channel.basic_qos(prefetch_count=self._qos_prefetch)
 
     def _set_state(self, new_state):
         """Assign the specified state to this consumer object.
@@ -308,12 +395,13 @@ class Process(multiprocessing.Process, state.State):
         # Set the routing information
         self._queue_name = self._config['queue']
 
+        # Set the dynamic QoS toggle
+        self._dynamic_qos = self._config.get('dynamic_qos', True)
+
         # Set the various control nobs
         self._ack = self._config.get('ack', True)
         self._max_error_count = self._config.get('max_errors',
                                                  self._MAX_ERROR_COUNT)
-        self._prefetch_count = self._config.get('prefetch_count',
-                                                self._QOS_PREFETCH_COUNT)
 
         # Setup the signal handler for stats
         self._setup_signal_handlers()
@@ -393,11 +481,26 @@ class Process(multiprocessing.Process, state.State):
             # Add the stats to the queue
             self._stats_queue.put(stats, False)
 
+            # Calculate dynamic QOS prefetch
+            if self._dynamic_qos and self._last_counts:
+                self._calculate_qos_prefetch()
+            self._last_counts = copy.deepcopy(self._counts)
+            self._last_stats_time = time.time()
+
         # Perform the passive queue declare
         logger.debug('SIGINFO received, Performing a queue depth check')
         self._channel.queue_declare(callback=on_results,
                                     queue=self._queue_name,
                                     passive=True)
+
+    @property
+    def is_processing(self):
+        """Returns a bool specifying if the consumer is currently processing
+
+        :rtype: bool
+
+        """
+        return self._state == self.STATE_PROCESSING
 
     def on_channel_closed(self, reason_code='Unknown', reason_text='Unknown'):
         """Callback invoked by Pika when the channel has been closed.
@@ -553,15 +656,6 @@ class Process(multiprocessing.Process, state.State):
                 pass
 
         logger.debug('Exiting %s', self.name)
-
-    @property
-    def is_processing(self):
-        """Returns a bool specifying if the consumer is currently processing
-
-        :rtype: bool
-
-        """
-        return self._state == self.STATE_PROCESSING
 
     def stop(self, signum_unused=None, frame_unused=None):
         """Stop the consumer from consuming by calling BasicCancel and setting

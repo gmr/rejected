@@ -116,22 +116,25 @@ class Process(multiprocessing.Process, state.State):
         """
         qos_prefetch = self._dynamic_qos_pretch
 
-
+        # Don't change anything
         if qos_prefetch == self._qos_prefetch:
             logger.debug('No change in QoS prefetch calculation of %i',
                          self._qos_prefetch)
             return
 
+        # Don't change anything
         if self._count_processed_last_interval < qos_prefetch:
             logger.error('Processed fewer messages last interval than the '
                          'qos_prefetch value')
             return
 
+        # Set to base value if QoS calc is < than the base
         if self._base_qos_prefetch > qos_prefetch:
-            logger.debug('QoS calculation is lower than previous: %i < %i',
-                         qos_prefetch, self._qos_prefetch)
-            self._set_qos_prefetch()
+            logger.debug('QoS calculation is lower than base: %i < %i',
+                         qos_prefetch, self._base_qos_prefetch)
+            return self._set_qos_prefetch()
 
+        # Increase the QoS setting
         if qos_prefetch > self._qos_prefetch:
             logger.debug('QoS calculation is higher than previous: %i > %i',
                          qos_prefetch, self._qos_prefetch)
@@ -139,11 +142,9 @@ class Process(multiprocessing.Process, state.State):
 
         # Lower the QoS value based upon the processed qty
         if qos_prefetch < self._qos_prefetch:
+            logger.debug('QoS calculation is lower than previous: %i < %i',
+                         qos_prefetch, self._qos_prefetch)
             return self._set_qos_prefetch(qos_prefetch)
-
-        # Return to the default QoS
-        logger.debug('Setting to default QoS')
-        self._set_qos_prefetch()
 
     @property
     def _count_processed_last_interval(self):

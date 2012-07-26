@@ -11,10 +11,12 @@ import os
 import pika
 from pika import exceptions
 from pika.adapters import tornado_connection
+import platform
 import signal
 import threading
 import time
 import traceback
+import warnings
 
 from rejected import __version__
 from rejected import consumer
@@ -70,6 +72,7 @@ class Process(multiprocessing.Process, state.State):
     # Default message pre-allocation value
     _QOS_PREFETCH_COUNT = 1
     _QOS_PREFETCH_MULTIPLIER = 1.25
+    _QOS_MAX = 10000
     _MAX_ERROR_COUNT = 5
     _MAX_SHUTDOWN_WAIT = 5
 
@@ -128,6 +131,10 @@ class Process(multiprocessing.Process, state.State):
                          'qos_prefetch value')
             return
 
+        # If calculated QoS exceeds max
+        if qos_prefetch > self._QOS_MAX:
+            return self._set_qos_prefetch(self._QOS_MAX)
+
         # Set to base value if QoS calc is < than the base
         if self._base_qos_prefetch > qos_prefetch:
             logger.debug('QoS calculation is lower than base: %i < %i',
@@ -180,22 +187,31 @@ class Process(multiprocessing.Process, state.State):
         :rtype: int
 
         """
+        # Round up the velocity * the multiplier
+        value = int(math.ceil(self._message_velocity *
+                              float(self._QOS_PREFETCH_MULTIPLIER)))
+        logger.debug('Calculated prefetch value: %i', value)
+        return value
+
+    @property
+    def _message_velocity(self):
+        """Return the message consuming velocity for the process.
+
+        :rtype: float
+
+        """
         processed = self._count_processed_last_interval
         duration = time.time() - self._last_stats_time
         logger.debug('Processed %i messages in %i seconds', processed, duration)
 
         # If there were no messages, do not calculate, use the base
         if not processed or not duration:
-            return self._base_qos_prefetch
+            return 0
 
         # Calculate the velocity as the basis for the calculation
         velocity = float(processed) / float(duration)
         logger.debug('Message processing velocity: %.2f', velocity)
-
-        # Round up the velocity * the multiplier
-        value = int(math.ceil(velocity * float(self._QOS_PREFETCH_MULTIPLIER)))
-        logger.debug('Calculated prefetch value: %i', value)
-        return value
+        return velocity
 
     def _get_config(self, config, number, name, connection):
         """Initialize a new consumer thread, setting defaults and config values
@@ -407,6 +423,12 @@ class Process(multiprocessing.Process, state.State):
         # Setup the signal handler for stats
         self._setup_signal_handlers()
 
+        #filename = '/Users/gmr/Desktop/benchmark.csv'
+        #self._stats_file = open(filename, 'a+')
+
+        # Setup a warning filter for Pika
+        warnings.simplefilter("ignore")
+
         # Create the RabbitMQ Connection
         self._connection = self._get_connection(config['Connections'],
                                                 connection_name)
@@ -485,6 +507,17 @@ class Process(multiprocessing.Process, state.State):
             # Calculate dynamic QOS prefetch
             if self._dynamic_qos and self._last_counts:
                 self._calculate_qos_prefetch()
+
+            # Write out the message velocity
+            #if self._last_counts:
+            #    self._stats_file.write('%i,%s,%s,%i,%2.f,%i\n' % (time.time(),
+            #                                                      platform.python_implementation(),
+            #                                                      self._dynamic_qos,
+            #                                                      self._qos_prefetch,
+            #                                                      self._message_velocity,
+            #                                                      frame.method.message_count))
+            #    self._stats_file.flush()
+
             self._last_counts = copy.deepcopy(self._counts)
             self._last_stats_time = time.time()
 

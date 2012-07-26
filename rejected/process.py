@@ -11,8 +11,8 @@ import os
 import pika
 from pika import exceptions
 from pika.adapters import tornado_connection
-import platform
 import signal
+import sys
 import threading
 import time
 import traceback
@@ -281,7 +281,18 @@ class Process(multiprocessing.Process, state.State):
 
         """
         # Try and import the module
-        consumer_, version = import_namespaced_class(config['consumer'])
+        try:
+            consumer_, version = import_namespaced_class(config['consumer'])
+        except Exception as error:
+            logger.error('Error importing the consumer "%s": %s',
+                         config['consumer'], error)
+            exc_type, exc_value, exc_traceback = sys.exc_info()
+            lines = traceback.extract_tb(exc_traceback)
+            for line in lines:
+                logger.error(line)
+            return
+
+
         if version:
             logger.info('Creating consumer %s v%s', config['consumer'], version)
         else:
@@ -292,17 +303,25 @@ class Process(multiprocessing.Process, state.State):
             try:
                 return consumer_(config['config'])
             except Exception as error:
-                logger.critical('Could not create %s: %r',
-                                config['consumer'], error)
-                return None
+                logger.error('Error creating the consumer "%s": %s',
+                             config['consumer'], error)
+                exc_type, exc_value, exc_traceback = sys.exc_info()
+                lines = traceback.extract_tb(exc_traceback)
+                for line in lines:
+                    logger.error(line)
+                return
 
         # No config to pass
         try:
             return consumer_()
         except Exception as error:
-            logger.critical('Could not create %s: %r',
-                            config['consumer'], error)
-            return None
+            logger.error('Error creating the consumer "%s": %s',
+                         config['consumer'], error)
+            exc_type, exc_value, exc_traceback = sys.exc_info()
+            lines = traceback.extract_tb(exc_traceback)
+            for line in lines:
+                logger.error(line)
+            return
 
     def _new_counter_dict(self):
         """Return a dict object for our internal stats keeping.

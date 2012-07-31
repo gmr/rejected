@@ -503,6 +503,15 @@ class Consumer(object):
         return self._message.properties.correlation_id
 
     @property
+    def message_exchange(self):
+        """Return the exchange the message.
+
+        :rtype: str
+
+        """
+        return self._message.exchange
+
+    @property
     def message_expiration(self):
         """Return the expiration as a datetime from the message properties.
 
@@ -561,6 +570,15 @@ class Consumer(object):
 
         """
         return self._message.properties.reply_to
+
+    @property
+    def message_routing_key(self):
+        """Return the routing key the message.
+
+        :rtype: str
+
+        """
+        return self._message.routing_key
 
     @property
     def message_type(self):

@@ -352,7 +352,7 @@ class Process(multiprocessing.Process, state.State):
             logger.critical('Processor threw an uncaught exception %s: %s',
                             type(error), error)
             for line in formatted_lines:
-                logger.debug('%s', line.strip())
+                logger.error('%s', line.strip())
             raise consumer.ConsumerException
 
     def _reject(self, delivery_tag):

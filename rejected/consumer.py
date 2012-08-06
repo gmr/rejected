@@ -87,32 +87,10 @@ class Consumer(object):
 
         # Default channel attribute
         self._channel = None
-        
+
         # Each message received will be carried as an attribute
         self._message = None
         self._message_body = None
-
-        # Call the initialize method
-        self._initialize()
-
-    def _initialize(self):
-        """Extend this method for actions to take in initializing the Consumer
-        instead of extending __init__.
-
-        """
-        pass
-
-    def _process(self):
-        """Extend this method for implementing your Consumer logic.
-
-        If the message can not be processed and the Consumer should stop after
-        n failures to process messages, raise the ConsumerException.
-
-        :raises: ConsumerException
-        :raises: NotImplementedError
-
-        """
-        raise NotImplementedError
 
     def _auto_encode(self, content_encoding, value):
         """Based upon the value of the content_encoding, encode the value.
@@ -416,6 +394,119 @@ class Consumer(object):
         """
         return yaml.load(value)
 
+    def _process(self):
+        """Extend this method for implementing your Consumer logic.
+
+        If the message can not be processed and the Consumer should stop after
+        n failures to process messages, raise the ConsumerException.
+
+        :raises: ConsumerException
+        :raises: NotImplementedError
+
+        """
+        raise NotImplementedError
+
+    def _publish_message(self, exchange, routing_key, properties, body,
+                         no_serialization=False, no_encoding=False):
+        """Publish a message to RabbitMQ on the same channel the original
+        message was received on.
+
+        By default, if you pass a non-string object to the body and the
+        properties have a supported content-type set, the body will be
+        auto-serialized in the specified content-type.
+
+        If the properties do not have a timestamp set, it will be set to the
+        current time.
+
+        If you specify a content-encoding in the properties and the encoding is
+        supported, the body will be auto-encoded.
+
+        Both of these behaviors can be disabled by setting no_serialization or
+        no_encoding to True.
+
+        :param str exchange: The exchange to publish to
+        :param str routing_key: The routing key to publish with
+        :param rejected.data.Properties: The message properties
+        :param no_serialization: Turn off auto-serialization of the body
+        :param no_encoding: Turn off auto-encoding of the body
+
+        """
+        # Convert the rejected.data.Properties object to a pika.BasicProperties
+        logger.debug('Converting properties')
+        properties_out = self._get_pika_properties(properties)
+
+        # Auto-serialize the content if needed
+        if (not no_serialization and not isinstance(body, basestring) and
+            properties.content_type):
+            logger.debug('Auto-serializing message body')
+            body = self._auto_serialize(properties.content_type, body)
+
+        # Auto-encode the message body if needed
+        if not no_encoding and properties.content_encoding:
+            logger.debug('Auto-encoding message body')
+            body = self._auto_encode(properties.content_encoding, body)
+
+        # Publish the message
+        logger.debug('Publishing message to %s:%s', exchange, routing_key)
+        self._channel.basic_publish(exchange=exchange,
+                                    routing_key=routing_key,
+                                    properties=properties_out,
+                                    body=body)
+
+    def _reply(self, response_body, properties, auto_id=True,
+               exchange=None, reply_to=None):
+        """Reply to the received message.
+
+        If auto_id is True, a new uuid4 value will be generated for the
+        message_id and correlation_id will be set to the message_id of the
+        original message. In addition, the timestamp will be assigned the
+        current time of the message. If auto_id is False, neither the message_id
+        or the correlation_id will be changed in the properties.
+
+        If exchange is not set, the exchange the message was received on will
+        be used.
+
+        If reply_to is set in the original properties,
+        it will be used as the routing key. If the reply_to is not set
+        in the properties and it is not passed in, a ValueException will be
+        raised. If reply to is set in the properties, it will be cleared out
+        prior to the message being republished.
+
+        Like with the publish method, if you pass in a non-String object and
+        content-type is set to a supported content type, the content will
+        be auto-serialized. In addition, if the content-encoding is set to a
+        supported encoding, it will be auto-encoded.
+
+        :param any response_body: The message body to send
+        :param rejected.data.Properties properties: Message properties to use
+        :param bool auto_id: Automatically shuffle message_id and correlation_id
+        :param str reply_to: Override the reply_to in the properties
+        :raises: ValueError
+
+        """
+        if not properties.reply_to and not reply_to:
+            raise ValueError('Missing reply_to in properties or as argument')
+
+        if auto_id and properties.message_id:
+            properties.app_id = __name__
+            properties.correlation_id = properties.message_id
+            properties.message_id = str(uuid.uuid4())
+            properties.timestamp = int(time.time())
+            logger.debug('New message_id: %s', properties.message_id)
+            logger.debug('Correlation_id: %s', properties.correlation_id)
+
+        # Redefine the reply to if needed
+        reply_to = reply_to or properties.reply_to
+
+        # Wipe out reply_to if it's set
+        if properties.reply_to:
+            properties.reply_to = None
+
+        self._publish_message(exchange or self._message.exchange,
+                              reply_to,
+                              properties,
+                              response_body)
+
     @property
     def message_app_id(self):
         """Return the app-id from the message properties.
@@ -657,107 +748,6 @@ class Consumer(object):
 
         """
         return copy.copy(self._message.properties)
-
-    def publish_message(self, exchange, routing_key, properties, body,
-                        no_serialization=False, no_encoding=False):
-        """Publish a message to RabbitMQ on the same channel the original
-        message was received on.
-
-        By default, if you pass a non-string object to the body and the
-        properties have a supported content-type set, the body will be
-        auto-serialized in the specified content-type.
-
-        If the properties do not have a timestamp set, it will be set to the
-        current time.
-
-        If you specify a content-encoding in the properties and the encoding is
-        supported, the body will be auto-encoded.
-
-        Both of these behaviors can be disabled by setting no_serialization or
-        no_encoding to True.
-
-        :param str exchange: The exchange to publish to
-        :param str routing_key: The routing key to publish with
-        :param rejected.data.Properties: The message properties
-        :param no_serialization: Turn off auto-serialization of the body
-        :param no_encoding: Turn off auto-encoding of the body
-
-        """
-        # Convert the rejected.data.Properties object to a pika.BasicProperties
-        logger.debug('Converting properties')
-        properties_out = self._get_pika_properties(properties)
-
-        # Auto-serialize the content if needed
-        if (not no_serialization and not isinstance(body, basestring) and
-            properties.content_type):
-            logger.debug('Auto-serializing message body')
-            body = self._auto_serialize(properties.content_type, body)
-
-        # Auto-encode the message body if needed
-        if not no_encoding and properties.content_encoding:
-            logger.debug('Auto-encoding message body')
-            body = self._auto_encode(properties.content_encoding, body)
-
-        # Publish the message
-        logger.debug('Publishing message to %s:%s', exchange, routing_key)
-        self._channel.basic_publish(exchange=exchange,
-                                    routing_key=routing_key,
-                                    properties=properties_out,
-                                    body=body)
-
-    def reply(self, response_body, properties, auto_id=True,
-              exchange=None, reply_to=None):
-        """Reply to the received message.
-
-        If auto_id is True, a new uuid4 value will be generated for the
-        message_id and correlation_id will be set to the message_id of the
-        original message. In addition, the timestamp will be assigned the
-        current time of the message. If auto_id is False, neither the message_id
-        or the correlation_id will be changed in the properties.
-
-        If exchange is not set, the exchange the message was received on will
-        be used.
-
-        If reply_to is set in the original properties,
-        it will be used as the routing key. If the reply_to is not set
-        in the properties and it is not passed in, a ValueException will be
-        raised. If reply to is set in the properties, it will be cleared out
-        prior to the message being republished.
-
-        Like with the publish method, if you pass in a non-String object and
-        content-type is set to a supported content type, the content will
-        be auto-serialized. In addition, if the content-encoding is set to a
-        supported encoding, it will be auto-encoded.
-
-        :param any response_body: The message body to send
-        :param rejected.data.Properties properties: Message properties to use
-        :param bool auto_id: Automatically shuffle message_id and correlation_id
-        :param str reply_to: Override the reply_to in the properties
-        :raises: ValueError
-
-        """
-        if not properties.reply_to and not reply_to:
-            raise ValueError('Missing reply_to in properties or as argument')
-
-        if auto_id and properties.message_id:
-            properties.app_id = __name__
-            properties.correlation_id = properties.message_id
-            properties.message_id = str(uuid.uuid4())
-            properties.timestamp = int(time.time())
-            logger.debug('New message_id: %s', properties.message_id)
-            logger.debug('Correlation_id: %s', properties.correlation_id)
-
-        # Redefine the reply to if needed
-        reply_to = reply_to or properties.reply_to
-
-        # Wipe out reply_to if it's set
-        if properties.reply_to:
-            properties.reply_to = None
-
-        self.publish_message(exchange or self._message.exchange,
-                             reply_to,
-                             properties,
-                             response_body)
 
     def set_channel(self, channel):
         """Assign the _channel attribute to the channel that was passed in.

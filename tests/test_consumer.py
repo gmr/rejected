@@ -1,10 +1,7 @@
 # coding=utf-8
 """Tests for rejected.consumer"""
 import sys
-try:
-    import bs4
-except ImportError:
-    bs4 = None
+import bs4
 import bz2
 import csv
 import datetime
@@ -149,15 +146,9 @@ Logging:
     def tearDown(self):
         del self._obj
 
-    def test_initialize_called(self):
-        @mock.patch.object(consumer.Consumer, '_initialize')
-        def validate_method_called(mock_method=None):
-            obj = consumer.Consumer({})
-            mock_method.assertCalled()
-        validate_method_called()
-
     def test_underscore_process_raises_exception(self):
-        self.assertRaises(NotImplementedError, self._obj._process)
+        consumer_ = consumer.Consumer({'config': True})
+        self.assertRaises(NotImplementedError, consumer_._process)
 
     def test_bz2_decompress(self):
         value = ('BZh91AY&SY\xe7\xdex,\x00\x00E\x9f\x80\x10\x07\x7f\xf0\x00'
@@ -566,5 +557,5 @@ Logging:
             message.body = self._PLIST
             message.properties.content_type = None
             self._obj.process(message)
-            unused_body_for_first_call = self._obj.message_body
+            _first_call = self._obj.message_body
             self.assertEqual(self._obj.message_body, self._PLIST)

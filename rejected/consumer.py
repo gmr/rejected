@@ -85,6 +85,9 @@ class Consumer(object):
         # Carry the configuration for use elsewhere
         self._config = configuration
 
+        # Default channel attribute
+        self._channel = None
+        
         # Each message received will be carried as an attribute
         self._message = None
         self._message_body = None

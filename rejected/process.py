@@ -168,7 +168,8 @@ class Process(multiprocessing.Process, state.State):
     def _cancel_consumer_with_rabbitmq(self):
         """Tell RabbitMQ the process no longer wants to consumer messages."""
         logger.debug('Sending a Basic.Cancel to RabbitMQ')
-        self._channel.basic_cancel(consumer_tag=self.name)
+        if self._channel.is_open:
+            self._channel.basic_cancel(consumer_tag=self.name)
 
     def _count(self, stat):
         """Return the current count quantity for a specific stat.
@@ -727,7 +728,7 @@ class Process(multiprocessing.Process, state.State):
             return
 
         # Wait until the consumer has finished processing to shutdown
-        if self.is_processing:
+        if self.is_processing and self._channel.is_open:
             self._cancel_consumer_with_rabbitmq()
             self._set_state(self.STATE_STOP_REQUESTED)
             self._wait_to_shutdown()
@@ -737,10 +738,13 @@ class Process(multiprocessing.Process, state.State):
         self._set_state(self.STATE_SHUTTING_DOWN)
 
         # A stop was requested, close the channel and stop the IOLoop
-        if self._channel:
+        if self._channel and self._channel.is_open:
             logger.debug('Closing channel on RabbitMQ connection')
-            self._channel.close()
-
+            try:
+                self._channel.close()
+            except exceptions.ChannelClosed:
+                pass
+            
         # If the connection is still around, close it
         if self._connection.is_open:
             logger.info('Closing connection to RabbitMQ')

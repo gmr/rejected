@@ -16,14 +16,13 @@ import sys
 import threading
 import time
 import traceback
-import warnings
 
 from rejected import __version__
 from rejected import consumer
 from rejected import data
 from rejected import state
 
-logger = logging.getLogger(__name__)
+LOGGER = logging.getLogger(__name__)
 
 
 def import_namespaced_class(namespaced_class):
@@ -34,7 +33,7 @@ def import_namespaced_class(namespaced_class):
     :return: tuple(Class, str)
 
     """
-    logger.debug('Importing %s', namespaced_class)
+    LOGGER.debug('Importing %s', namespaced_class)
     # Split up our string containing the import and class
     parts = namespaced_class.split('.')
 
@@ -66,8 +65,11 @@ class Process(multiprocessing.Process, state.State):
     ERROR = 'failed'
     PROCESSED = 'processed'
     REDELIVERED = 'redelivered_messages'
+    REJECTED = 'rejected_messages'
     TIME_SPENT = 'processing_time'
     TIME_WAITED = 'waiting_time'
+
+    _HBINTERVAL = 10
 
     # Default message pre-allocation value
     _QOS_PREFETCH_COUNT = 1
@@ -78,13 +80,16 @@ class Process(multiprocessing.Process, state.State):
 
     def __init__(self, group=None, target=None, name=None, args=(), kwargs={}):
         super(Process, self).__init__(group, target, name, args, kwargs)
+        self._ack = True
         self._channel = None
         self._config= None
         self._consumer = None
         self._counts = self._new_counter_dict()
         self._dynamic_qos = True
+        self._hbinterval = self._HBINTERVAL
         self._last_counts = None
         self._last_stats_time = None
+        self._max_framesize = pika.spec.FRAME_MAX_SIZE
         self._qos_prefetch = None
         self._state = self.STATE_INITIALIZING
         self._state_start = time.time()
@@ -99,7 +104,7 @@ class Process(multiprocessing.Process, state.State):
         :param str delivery_tag: Delivery tag to acknowledge
 
         """
-        logger.debug('Acking %s', delivery_tag)
+        LOGGER.debug('Acking %s', delivery_tag)
         self._channel.basic_ack(delivery_tag=delivery_tag)
         self._reset_state()
 
@@ -121,13 +126,13 @@ class Process(multiprocessing.Process, state.State):
 
         # Don't change anything
         if qos_prefetch == self._qos_prefetch:
-            logger.debug('No change in QoS prefetch calculation of %i',
+            LOGGER.debug('No change in QoS prefetch calculation of %i',
                          self._qos_prefetch)
             return
 
         # Don't change anything
         if self._count_processed_last_interval < qos_prefetch:
-            logger.error('Processed fewer messages last interval than the '
+            LOGGER.error('Processed fewer messages last interval than the '
                          'qos_prefetch value')
             return
 
@@ -137,19 +142,19 @@ class Process(multiprocessing.Process, state.State):
 
         # Set to base value if QoS calc is < than the base
         if self._base_qos_prefetch > qos_prefetch:
-            logger.debug('QoS calculation is lower than base: %i < %i',
+            LOGGER.debug('QoS calculation is lower than base: %i < %i',
                          qos_prefetch, self._base_qos_prefetch)
             return self._set_qos_prefetch()
 
         # Increase the QoS setting
         if qos_prefetch > self._qos_prefetch:
-            logger.debug('QoS calculation is higher than previous: %i > %i',
+            LOGGER.debug('QoS calculation is higher than previous: %i > %i',
                          qos_prefetch, self._qos_prefetch)
             return self._set_qos_prefetch(qos_prefetch)
 
         # Lower the QoS value based upon the processed qty
         if qos_prefetch < self._qos_prefetch:
-            logger.debug('QoS calculation is lower than previous: %i < %i',
+            LOGGER.debug('QoS calculation is lower than previous: %i < %i',
                          qos_prefetch, self._qos_prefetch)
             return self._set_qos_prefetch(qos_prefetch)
 
@@ -167,8 +172,8 @@ class Process(multiprocessing.Process, state.State):
 
     def _cancel_consumer_with_rabbitmq(self):
         """Tell RabbitMQ the process no longer wants to consumer messages."""
-        logger.debug('Sending a Basic.Cancel to RabbitMQ')
-        if self._channel.is_open:
+        LOGGER.debug('Sending a Basic.Cancel to RabbitMQ')
+        if self._channel and self._channel.is_open:
             self._channel.basic_cancel(consumer_tag=self.name)
 
     def _count(self, stat):
@@ -191,7 +196,7 @@ class Process(multiprocessing.Process, state.State):
         # Round up the velocity * the multiplier
         value = int(math.ceil(self._message_velocity *
                               float(self._QOS_PREFETCH_MULTIPLIER)))
-        logger.debug('Calculated prefetch value: %i', value)
+        LOGGER.debug('Calculated prefetch value: %i', value)
         return value
 
     @property
@@ -203,7 +208,7 @@ class Process(multiprocessing.Process, state.State):
         """
         processed = self._count_processed_last_interval
         duration = time.time() - self._last_stats_time
-        logger.debug('Processed %i messages in %i seconds', processed, duration)
+        LOGGER.debug('Processed %i messages in %i seconds', processed, duration)
 
         # If there were no messages, do not calculate, use the base
         if not processed or not duration:
@@ -211,7 +216,7 @@ class Process(multiprocessing.Process, state.State):
 
         # Calculate the velocity as the basis for the calculation
         velocity = float(processed) / float(duration)
-        logger.debug('Message processing velocity: %.2f', velocity)
+        LOGGER.debug('Message processing velocity: %.2f', velocity)
         return velocity
 
     def _get_config(self, config, number, name, connection):
@@ -241,7 +246,7 @@ class Process(multiprocessing.Process, state.State):
         # Process is initially idle
         self._set_state(self.STATE_CONNECTING)
 
-        logger.debug('Connecting to %s:%i:%s as %s',
+        LOGGER.debug('Connecting to %s:%i:%s as %s',
                      config[name]['host'], config[name]['port'],
                      config[name]['vhost'], config[name]['user'])
         parameters = self._get_connection_parameters(config[name]['host'],
@@ -252,9 +257,10 @@ class Process(multiprocessing.Process, state.State):
         # Get the configuration for convenience
         try:
             tornado_connection.TornadoConnection(parameters,
-                                                 self.on_connected)
+                                                 self.on_connected,
+                                                 stop_ioloop_on_close=True)
         except pika.exceptions.AMQPConnectionError as error:
-            logger.critical('Could not connect to %s:%s:%s %r',
+            LOGGER.critical('Could not connect to %s:%s:%s %r',
                             config[name]['host'], config[name]['port'],
                             config[name]['vhost'], error)
             self._set_state(self.STATE_STOPPED)
@@ -271,7 +277,9 @@ class Process(multiprocessing.Process, state.State):
 
         """
         credentials = pika.PlainCredentials(username, password)
-        return pika.ConnectionParameters(host, port, vhost, credentials)
+        return pika.ConnectionParameters(host, port, vhost, credentials,
+                                         frame_max=self._max_framesize,
+                                         heartbeat_interval=self._hbinterval)
 
     def _get_consumer(self, config):
         """Import and create a new instance of the configured message consumer.
@@ -285,44 +293,54 @@ class Process(multiprocessing.Process, state.State):
         try:
             consumer_, version = import_namespaced_class(config['consumer'])
         except Exception as error:
-            logger.error('Error importing the consumer "%s": %s',
+            LOGGER.error('Error importing the consumer "%s": %s',
                          config['consumer'], error)
             exc_type, exc_value, exc_traceback = sys.exc_info()
             lines = traceback.extract_tb(exc_traceback)
             for line in lines:
-                logger.error(line)
+                LOGGER.error(line)
             return
 
 
         if version:
-            logger.info('Creating consumer %s v%s', config['consumer'], version)
+            LOGGER.info('Creating consumer %s v%s', config['consumer'], version)
         else:
-            logger.info('Creating consumer %s', config['consumer'])
+            LOGGER.info('Creating consumer %s', config['consumer'])
 
         # If we have a config, pass it in to the constructor
         if 'config' in config:
             try:
                 return consumer_(config['config'])
             except Exception as error:
-                logger.error('Error creating the consumer "%s": %s',
+                LOGGER.error('Error creating the consumer "%s": %s',
                              config['consumer'], error)
                 exc_type, exc_value, exc_traceback = sys.exc_info()
                 lines = traceback.extract_tb(exc_traceback)
                 for line in lines:
-                    logger.error(line)
+                    LOGGER.error(line)
                 return
 
         # No config to pass
         try:
             return consumer_()
         except Exception as error:
-            logger.error('Error creating the consumer "%s": %s',
+            LOGGER.error('Error creating the consumer "%s": %s',
                          config['consumer'], error)
             exc_type, exc_value, exc_traceback = sys.exc_info()
             lines = traceback.extract_tb(exc_traceback)
             for line in lines:
-                logger.error(line)
+                LOGGER.error(line)
             return
+
+    def _increment_error_count(self):
+        """Increment the error count checking to see if the process should stop
+        due to the number of errors.
+
+        """
+        self._counts[self.ERROR] += 1
+        if self.too_many_errors:
+            LOGGER.debug('Error threshold exceeded, stopping')
+            self.stop()
 
     def _new_counter_dict(self):
         """Return a dict object for our internal stats keeping.
@@ -333,8 +351,43 @@ class Process(multiprocessing.Process, state.State):
         return {self.ERROR: 0,
                 self.PROCESSED: 0,
                 self.REDELIVERED: 0,
+                self.REJECTED: 0,
                 self.TIME_SPENT: 0,
                 self.TIME_WAITED: 0}
+
+    def _on_error(self, method, exception):
+        """Called when a runtime error encountered.
+
+        :param pika.frames.MethodFrame method: The method frame with an error
+        :param Exception exception: The error that occurred
+
+        """
+        LOGGER.error('Runtime exception raised: %s', exception)
+
+        # If we do not have no_ack set, then reject the message
+        if self._ack:
+            self._reject(method.delivery_tag)
+
+        self._increment_error_count()
+
+    def _on_message_exception(self, method, exception):
+        """Called when a consumer.MessageException is raised, will reject the
+        message, not requeueing it.
+
+        :param pika.frames.MethodFrame method: The method frame with an error
+        :param Exception exception: The error that occurred
+        :raises: RuntimeError
+
+        """
+        LOGGER.error('Message was rejected: %s', exception)
+
+        # Raise an exception if no_ack = True since the msg can't be rejected
+        if not self._ack:
+            raise RuntimeError('Can not rejected messages when ack is False')
+
+        # Reject the message and do not requeue it
+        self._reject(method.delivery_tag, False)
+        self._counts[self.REJECTED] += 1
 
     def _process(self, message):
         """Wrap the actual processor processing bits
@@ -348,22 +401,25 @@ class Process(multiprocessing.Process, state.State):
             self._consumer.process(message)
         except consumer.ConsumerException as exception:
             raise exception
+        except consumer.MessageException as exception:
+            raise exception
         except Exception as error:
             formatted_lines = traceback.format_exc().splitlines()
-            logger.critical('Processor threw an uncaught exception %s: %s',
+            LOGGER.critical('Processor threw an uncaught exception %s: %s',
                             type(error), error)
             for line in formatted_lines:
-                logger.error('%s', line.strip())
+                LOGGER.error('%s', line.strip())
             raise consumer.ConsumerException
 
-    def _reject(self, delivery_tag):
+    def _reject(self, delivery_tag, requeue=True):
         """Reject the message on the broker and log it. We should move this to
          use to nack when Pika supports it in a released version.
 
         :param str delivery_tag: Delivery tag to reject
+        :param bool requeue: Specify if the message should be requeued or not
 
         """
-        self._channel.basic_reject(delivery_tag=delivery_tag)
+        self._channel.basic_reject(delivery_tag=delivery_tag, requeue=requeue)
         self._reset_state()
 
     def _reset_state(self):
@@ -376,7 +432,7 @@ class Process(multiprocessing.Process, state.State):
         elif self.is_waiting_to_shutdown:
             self._set_state(self.STATE_SHUTTING_DOWN)
         else:
-            logger.critical('Unexepected state: %s', self.state_description)
+            LOGGER.critical('Unexepected state: %s', self.state_description)
 
     def _set_qos_prefetch(self, value=None):
         """Set the QOS Prefetch count for the channel.
@@ -385,7 +441,7 @@ class Process(multiprocessing.Process, state.State):
 
         """
         self._qos_prefetch = int(value or self._base_qos_prefetch)
-        logger.info('Setting the QOS Prefetch to %i', self._qos_prefetch)
+        LOGGER.info('Setting the QOS Prefetch to %i', self._qos_prefetch)
         self._channel.basic_qos(prefetch_count=self._qos_prefetch)
 
     def _set_state(self, new_state):
@@ -417,8 +473,8 @@ class Process(multiprocessing.Process, state.State):
         :raises: ImportError
 
         """
-        logger.info('Initializing for %s on %s', self.name, connection_name)
-        self._stats_queue = stats_queue
+        LOGGER.info('Initializing for %s on %s', self.name, connection_name)
+        #self._stats_queue = stats_queue
 
         # Hold the consumer config
         self._consumer_name = consumer_name
@@ -437,17 +493,21 @@ class Process(multiprocessing.Process, state.State):
 
         # Set the various control nobs
         self._ack = self._config.get('ack', True)
+
+        # How many errors until the process stops
         self._max_error_count = self._config.get('max_errors',
                                                  self._MAX_ERROR_COUNT)
 
+        # Get the heartbeat interval
+        self._hbinterval = self._config.get('heartbeat_interval',
+                                            self._HBINTERVAL)
+
+        # Get the framesize
+        self._max_framesize = self._config.get('max_frame_size',
+                                               pika.spec.FRAME_MAX_SIZE)
+
         # Setup the signal handler for stats
         self._setup_signal_handlers()
-
-        #filename = '/Users/gmr/Desktop/benchmark.csv'
-        #self._stats_file = open(filename, 'a+')
-
-        # Setup a warning filter for Pika
-        warnings.simplefilter("ignore")
 
         # Create the RabbitMQ Connection
         self._connection = self._get_connection(config['Connections'],
@@ -467,10 +527,10 @@ class Process(multiprocessing.Process, state.State):
 
         """
         try:
-            logger.info('Shutting down the consumer')
+            LOGGER.info('Shutting down the consumer')
             self._consumer.shutdown()
         except AttributeError:
-            logger.debug('Consumer does not have a shutdown method')
+            LOGGER.debug('Consumer does not have a shutdown method')
 
     @property
     def _time_in_state(self):
@@ -489,7 +549,7 @@ class Process(multiprocessing.Process, state.State):
         """
         # It's possible to go from waiting to shutdown to idle
         while self.is_waiting_to_shutdown and not self.is_idle:
-            logger.debug('Waiting to shutdown, current state: %s',
+            LOGGER.debug('Waiting to shutdown, current state: %s',
                          self.state_description)
             time.sleep(0.2)
 
@@ -504,7 +564,7 @@ class Process(multiprocessing.Process, state.State):
         """
         def on_results(frame):
             """Handle the callback from Pika with the queue depth information"""
-            logger.debug('Received queue depth info from RabbitMQ')
+            LOGGER.debug('Received queue depth info from RabbitMQ')
 
             # Count the idle time thus far if the consumer is just waiting
             if self.is_idle:
@@ -522,27 +582,18 @@ class Process(multiprocessing.Process, state.State):
                                'description': self.state_description}}
 
             # Add the stats to the queue
-            self._stats_queue.put(stats, False)
+            if self._stats_queue:
+                self._stats_queue.put(stats, False)
 
             # Calculate dynamic QOS prefetch
             if self._dynamic_qos and self._last_counts:
                 self._calculate_qos_prefetch()
 
-            # Write out the message velocity
-            #if self._last_counts:
-            #    self._stats_file.write('%i,%s,%s,%i,%2.f,%i\n' % (time.time(),
-            #                                                      platform.python_implementation(),
-            #                                                      self._dynamic_qos,
-            #                                                      self._qos_prefetch,
-            #                                                      self._message_velocity,
-            #                                                      frame.method.message_count))
-            #    self._stats_file.flush()
-
             self._last_counts = copy.deepcopy(self._counts)
             self._last_stats_time = time.time()
 
         # Perform the passive queue declare
-        logger.debug('SIGINFO received, Performing a queue depth check')
+        LOGGER.debug('SIGINFO received, Performing a queue depth check')
         self._channel.queue_declare(callback=on_results,
                                     queue=self._queue_name,
                                     passive=True)
@@ -563,7 +614,7 @@ class Process(multiprocessing.Process, state.State):
         :param str reason_text: AMQP close message
 
         """
-        method = logger.debug if reason_code == 0 else logger.warning
+        method = LOGGER.debug if reason_code == 0 else LOGGER.warning
         method('Channel closed (%s): %s', reason_code, reason_text)
         if self.is_running:
             self.stop()
@@ -575,7 +626,7 @@ class Process(multiprocessing.Process, state.State):
         :param pika.channel.Channel channel: The open channel
 
         """
-        logger.info('Channel #%i to RabbitMQ Opened', channel.channel_number)
+        LOGGER.info('Channel #%i to RabbitMQ Opened', channel.channel_number)
         self._channel = channel
         self._channel.add_on_close_callback(self.on_channel_closed)
 
@@ -583,7 +634,7 @@ class Process(multiprocessing.Process, state.State):
         try:
             self._consumer.set_channel(channel)
         except AttributeError:
-            logger.warning('Consumer does not support channel assignment')
+            LOGGER.warning('Consumer does not support channel assignment')
 
             # Set our QOS Prefetch Count
         self._set_qos_prefetch()
@@ -607,7 +658,7 @@ class Process(multiprocessing.Process, state.State):
         :param str reason_text: AMQP close message
 
         """
-        method = logger.debug if reason_code == 0 else logger.warning
+        method = LOGGER.debug if reason_code == 0 else LOGGER.warning
         method('Connection closed (%s): %s', reason_code, reason_text)
         if self.is_running:
             self.stop()
@@ -619,29 +670,10 @@ class Process(multiprocessing.Process, state.State):
         :param pika.connection.Connection connection: RabbitMQ Connection
 
         """
-        logger.debug('Connected to RabbitMQ')
+        LOGGER.debug('Connected to RabbitMQ')
         self._connection = connection
         self._connection.add_on_close_callback(self.on_closed)
         self._channel = self._connection.channel(self.on_channel_open)
-
-    def on_error(self, method, exception):
-        """Called when a runtime error encountered.
-
-        :param pika.frames.MethodFrame method: The method frame with an error
-        :param Exception exception: The error that occurred
-
-        """
-        logger.error('Runtime exception raised: %s', exception)
-        self._counts[self.ERROR] += 1
-
-        # If we do not have no_ack set, then reject the message
-        if self._ack:
-            self._reject(method.delivery_tag)
-
-        # Check our error count
-        if self.too_many_errors:
-            logger.debug('Error threshold exceeded, stopping')
-            self.stop()
 
     def process(self, channel=None, method=None, header=None, body=None):
         """Process a message from Rabbit
@@ -653,13 +685,13 @@ class Process(multiprocessing.Process, state.State):
 
         """
         if not self.is_idle:
-            logger.critical('Received a message while in state: %s',
+            LOGGER.critical('Received a message while in state: %s',
                             self.state_description)
             return self._reject(method.delivery_tag)
 
         # Set our state to processing
         self._set_state(self.STATE_PROCESSING)
-        logger.debug('Received message #%s', method.delivery_tag)
+        LOGGER.debug('Received message #%s', method.delivery_tag)
 
         # Build the message wrapper object for all the parts
         message = data.Message(channel, method, header, body)
@@ -673,8 +705,11 @@ class Process(multiprocessing.Process, state.State):
         try:
             self._process(message)
         except consumer.ConsumerException as error:
-            return self.on_error(method, error)
-        logger.debug('Message processed')
+            return self._on_error(method, error)
+        except consumer.MessageException as error:
+            return self._on_message_exception(method, error)
+
+        LOGGER.debug('Message processed')
 
         # Message was processed
         self._counts[self.PROCESSED] += 1
@@ -684,6 +719,10 @@ class Process(multiprocessing.Process, state.State):
             self._ack_message(method.delivery_tag)
         else:
             self._reset_state()
+
+        # Hack to see if a overly busy consumer can be interrupted enough to
+        # properly stop when signals are raised
+        time.sleep(0.01)
 
     def run(self):
         """Start the consumer"""
@@ -695,7 +734,7 @@ class Process(multiprocessing.Process, state.State):
         except ImportError as error:
             name = self._kwargs['consumer_name']
             consumer = self._kwargs['config']['Consumers'][name]['consumer']
-            logger.critical('Could not import %s, stopping process: %r',
+            LOGGER.critical('Could not import %s, stopping process: %r',
                             consumer, error)
             return
 
@@ -709,45 +748,37 @@ class Process(multiprocessing.Process, state.State):
             except KeyboardInterrupt:
                 pass
 
-        logger.debug('Exiting %s', self.name)
+        LOGGER.debug('Exiting %s', self.name)
 
     def stop(self, signum_unused=None, frame_unused=None):
         """Stop the consumer from consuming by calling BasicCancel and setting
         our state.
 
         """
-        logger.debug('Stop called in state: %s', self.state_description)
+        LOGGER.debug('Stop called in state: %s', self.state_description)
         if self.is_stopped:
-            logger.debug('Stop requested but consumer is already stopped')
+            LOGGER.debug('Stop requested but consumer is already stopped')
             return
         elif self.is_shutting_down:
-            logger.debug('Stop requested but consumer is already shutting down')
+            LOGGER.debug('Stop requested but consumer is already shutting down')
             return
         elif self.is_waiting_to_shutdown:
-            logger.debug('Stop requested but already waiting to shut down')
+            LOGGER.debug('Stop requested but already waiting to shut down')
             return
 
         # Wait until the consumer has finished processing to shutdown
-        if self.is_processing and self._channel.is_open:
+        if self.is_processing and self._channel and self._channel.is_open:
             self._cancel_consumer_with_rabbitmq()
             self._set_state(self.STATE_STOP_REQUESTED)
             self._wait_to_shutdown()
 
         # Set the state to shutting down if it wasn't set as that during loop
-        logger.info('Shutting down')
+        LOGGER.info('Shutting down')
         self._set_state(self.STATE_SHUTTING_DOWN)
 
-        # A stop was requested, close the channel and stop the IOLoop
-        if self._channel and self._channel.is_open:
-            logger.debug('Closing channel on RabbitMQ connection')
-            try:
-                self._channel.close()
-            except exceptions.ChannelClosed:
-                pass
-            
         # If the connection is still around, close it
         if self._connection.is_open:
-            logger.info('Closing connection to RabbitMQ')
+            LOGGER.info('Closing connection to RabbitMQ')
             try:
                 self._connection.close()
             except KeyError:
@@ -755,10 +786,9 @@ class Process(multiprocessing.Process, state.State):
 
         # Allow the consumer to gracefully stop and then stop the IOLoop
         self._stop_consumer()
-        ioloop.IOLoop.instance().stop()
 
         # Note that shutdown is complete and set the state accordingly
-        logger.info('Shutdown complete')
+        LOGGER.info('Shutdown complete')
         self._set_state(self.STATE_STOPPED)
 
     @property

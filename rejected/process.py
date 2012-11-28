@@ -791,6 +791,9 @@ class Process(multiprocessing.Process, state.State):
         LOGGER.info('Shutdown complete')
         self._set_state(self.STATE_STOPPED)
 
+        # Force the IOLoop to stop
+        ioloop.IOLoop.instance().stop()
+
     @property
     def too_many_errors(self):
         """Return a bool if too many errors have occurred.

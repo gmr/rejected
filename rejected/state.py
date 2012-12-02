@@ -2,7 +2,7 @@
 import logging
 import time
 
-logger = logging.getLogger(__name__)
+LOGGER = logging.getLogger(__name__)
 
 
 class State(object):
@@ -45,7 +45,7 @@ class State(object):
             raise ValueError('Invalid state value: %r' % new_state)
 
         # Set the state
-        logger.debug('State changing from %s to %s',
+        LOGGER.debug('State changing from %s to %s',
                      self._STATES[self._state], self._STATES[new_state])
         self._state = new_state
         self._state_start = time.time()

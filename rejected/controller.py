@@ -4,13 +4,13 @@ OS Level controlling class invokes startup, shutdown and handles signals.
 """
 import clihelper
 import logging
+import signal
 import sys
-import time
 
 from rejected import mcp
 from rejected import __version__
 
-logger = logging.getLogger(__name__)
+LOGGER = logging.getLogger(__name__)
 
 
 class Controller(clihelper.Controller):
@@ -33,7 +33,7 @@ class Controller(clihelper.Controller):
         :param str path: The path to append
 
         """
-        logger.debug('Prepending "%s" to the python path.', path)
+        LOGGER.debug('Prepending "%s" to the python path.', path)
         sys.path.insert(0, path)
 
     def _setup(self):
@@ -42,23 +42,32 @@ class Controller(clihelper.Controller):
         if self._options.prepend_path:
             self._prepend_python_path(self._options.prepend_path)
 
+    def _shutdown(self):
+        """Shutdown the MCP and child processes cleanly"""
+        self._set_state(self._STATE_SHUTTING_DOWN)
+        signal.setitimer(signal.ITIMER_PROF, 0, 0)
+        self._mcp.stop_processes()
+        if self._mcp.is_running:
+            LOGGER.debug('Waiting up to 3 seconds for MCP to shut things down')
+            signal.setitimer(signal.ITIMER_REAL, 3, 0)
+            signal.pause()
+
+        # Force MCP to stop
+        if self._mcp.is_running:
+            LOGGER.warning('MCP is taking too long, requesting process kills')
+            self._mcp.stop_processes()
+            del self._mcp
+        else:
+            LOGGER.info('MCP exited cleanly')
+
+        # Change our state
+        self._shutdown_complete()
+
     def run(self):
         """Run the rejected Application"""
         self._setup()
-
-        # Setup the master control program
         self._mcp = self._master_control_program()
-
-        # Block on the MCP run
         self._mcp.run()
-
-    def _cleanup(self):
-        """Stop the child processes and threads"""
-        logger.info('Shutdown cleanup request received')
-        if hasattr(self, '_mcp') and self._mcp.is_running:
-            self._mcp.stop_processes()
-            time.sleep(1)
-            del self._mcp
 
 
 def _cli_options(parser):
@@ -77,6 +86,7 @@ def _cli_options(parser):
                       default=None,
                       dest='prepend_path',
                       help='Prepend the python path with the value.')
+
 
 def main():
     """Called when invoking the command line script."""

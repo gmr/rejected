@@ -92,6 +92,265 @@ class Consumer(object):
         self._message = None
         self._message_body = None
 
+
+    @property
+    def message_app_id(self):
+        """Return the app-id from the message properties.
+
+        :rtype: str
+
+        """
+        return self._message.properties.app_id
+
+    @property
+    def message_body(self):
+        """Return the message body, unencoded if needed,
+        deserialized if possible.
+
+        :rtype: any
+
+        """
+        # Return a materialized view of the body if it has been previously set
+        if self._message_body:
+            return self._message_body
+
+        # Sanitize a improperly set content-encoding from mybPublish
+        if self.message_content_encoding == 'utf-8':
+            self._message.properties.content_encoding = None
+            self._message_body = self._message.body
+            logger.debug('Coerced an incorrect content-encoding of UTF-8 to '
+                         'None')
+
+        # Handle bzip2 compressed content
+        elif self.message_content_encoding == 'bzip2':
+            self._message_body = self._decode_bz2(self._message.body)
+
+        # Handle zlib compressed content
+        elif self.message_content_encoding == 'gzip':
+            self._message_body = self._decode_gzip(self._message.body)
+
+        # Else we want to assign self._message.body to self._message_body
+        else:
+            self._message_body = self._message.body
+
+        # Handle the auto-deserialization
+        if self.message_content_type == 'application/json':
+            self._message_body = self._load_json_value(self._message_body)
+
+        elif self.message_content_type in self._PICKLE_MIME_TYPES:
+            self._message_body = self._load_pickle_value(self._message_body)
+
+        elif self.message_content_type == 'application/x-plist':
+            self._message_body = self._load_plist_value(self._message_body)
+
+        elif self.message_content_type == 'text/csv':
+            self._message_body = self._load_csv_value(self._message_body)
+
+        elif bs4 and self.message_content_type in ('text/html', 'text/xml'):
+            self._message_body = self._load_bs4_value(self._message_body)
+
+        elif self.message_content_type in self._YAML_MIME_TYPES:
+            self._message_body = self._load_yaml_value(self._message_body)
+
+        # Return the message body
+        return self._message_body
+
+    @property
+    def message_content_encoding(self):
+        """Return the content-encoding from the message properties.
+
+        :rtype: str
+
+        """
+        return (self._message.properties.content_encoding or '').lower() or None
+
+    @property
+    def message_content_type(self):
+        """Return the content-type from the message properties.
+
+        :rtype: str
+
+        """
+        return (self._message.properties.content_type or '').lower() or None
+
+    @property
+    def message_correlation_id(self):
+        """Return the correlation-id from the message properties.
+
+        :rtype: str
+
+        """
+        return self._message.properties.correlation_id
+
+    @property
+    def message_exchange(self):
+        """Return the exchange the message.
+
+        :rtype: str
+
+        """
+        return self._message.exchange
+
+    @property
+    def message_expiration(self):
+        """Return the expiration as a datetime from the message properties.
+
+        :rtype: datetime.datetime
+
+        """
+        if not self._message.properties.expiration:
+            return None
+        float_value = float(self._message.properties.expiration)
+        return datetime.datetime.fromtimestamp(float_value)
+
+    @property
+    def message_headers(self):
+        """Return the headers from the message properties.
+
+        :rtype: dict
+
+        """
+        return self._message.properties.headers
+
+    @property
+    def message_has_expired(self):
+        """Return a boolean evaluation of if the message has expired. If
+        expiration is not set, always return False
+
+        :rtype: bool
+
+        """
+        if not self._message.properties.expiration:
+            return False
+        return time.time() >= self._message.properties.expiration
+
+    @property
+    def message_id(self):
+        """Return the message-id from the message properties.
+
+        :rtype: str
+
+        """
+        return self._message.properties.message_id
+
+    @property
+    def message_priority(self):
+        """Return the priority from the message properties.
+
+        :rtype: int
+
+        """
+        return self._message.properties.priority
+
+    @property
+    def message_reply_to(self):
+        """Return the priority from the message properties.
+
+        :rtype: str
+
+        """
+        return self._message.properties.reply_to
+
+    @property
+    def message_routing_key(self):
+        """Return the routing key the message.
+
+        :rtype: str
+
+        """
+        return self._message.routing_key
+
+    @property
+    def message_type(self):
+        """Return the type from the message properties.
+
+        :rtype: str
+
+        """
+        return self._message.properties.type
+
+    @property
+    def message_time(self):
+        """Return the time of the message from the properties.
+
+        :rtype: datetime.datetime
+
+        """
+        if not self._message.properties.timestamp:
+            return None
+        float_value = float(self._message.properties.timestamp)
+        return datetime.datetime.fromtimestamp(float_value)
+
+    @property
+    def message_user_id(self):
+        """Return the user-id from the message properties.
+
+        :rtype: str
+
+        """
+        return self._message.properties.user_id
+
+    def name(self, *args, **kwargs):
+        """Return the consumer class name.
+
+        :rtype: str
+
+        """
+        return self.__class__.__name__
+
+    def process(self, message_in):
+        """Process the message from RabbitMQ. To implement logic for processing
+        a message, extend Consumer._process, not this method.
+
+        :param rejected.Consumer.Message message_in: The message to process
+        :rtype: bool
+
+        """
+        # Clear out our previous body values
+        self._message_body = None
+
+        logger.debug('Received: %r', message_in)
+        self._message = message_in
+
+        # Validate the message type if the child sets _MESSAGE_TYPE
+        if self._MESSAGE_TYPE and self._MESSAGE_TYPE != self.message_type:
+            logger.error('Received a non-supported message type: %s',
+                         self.message_type)
+
+            # Should the message be dropped or returned to the broker?
+            if self._DROP_INVALID_MESSAGES:
+                logger.debug('Dropping the invalid message')
+                return
+            else:
+                raise ConsumerException('Invalid message type')
+
+        # Drop expired messages if desired
+        if self._DROP_EXPIRED_MESSAGES and self.message_has_expired:
+            logger.debug('Message expired %i seconds ago, dropping.',
+                         time.time() - self.message_expiration)
+            return
+
+        # Let the child object process the message
+        self._process()
+
+    @property
+    def properties(self):
+        """Return the properties for the message as a rejected.data.Properties
+        object.
+
+        :rtype: rejected.data.Properties
+
+        """
+        return copy.copy(self._message.properties)
+
+    def set_channel(self, channel):
+        """Assign the _channel attribute to the channel that was passed in.
+
+        :param pika.channel.Channel channel: The channel to assign
+
+        """
+        self._channel = channel
+
     def _auto_encode(self, content_encoding, value):
         """Based upon the value of the content_encoding, encode the value.
 
@@ -507,255 +766,6 @@ class Consumer(object):
                               properties,
                               response_body)
 
-    @property
-    def message_app_id(self):
-        """Return the app-id from the message properties.
-
-        :rtype: str
-
-        """
-        return self._message.properties.app_id
-
-    @property
-    def message_body(self):
-        """Return the message body, unencoded if needed,
-        deserialized if possible.
-
-        :rtype: any
-
-        """
-        # Return a materialized view of the body if it has been previously set
-        if self._message_body:
-            return self._message_body
-
-        # Sanitize a improperly set content-encoding from mybPublish
-        if self.message_content_encoding == 'utf-8':
-            self._message.properties.content_encoding = None
-            self._message_body = self._message.body
-            logger.debug('Coerced an incorrect content-encoding of UTF-8 to '
-                         'None')
-
-        # Handle bzip2 compressed content
-        elif self.message_content_encoding == 'bzip2':
-            self._message_body = self._decode_bz2(self._message.body)
-
-        # Handle zlib compressed content
-        elif self.message_content_encoding == 'gzip':
-            self._message_body = self._decode_gzip(self._message.body)
-
-        # Else we want to assign self._message.body to self._message_body
-        else:
-            self._message_body = self._message.body
-
-        # Handle the auto-deserialization
-        if self.message_content_type == 'application/json':
-            self._message_body = self._load_json_value(self._message_body)
-
-        elif self.message_content_type in self._PICKLE_MIME_TYPES:
-            self._message_body = self._load_pickle_value(self._message_body)
-
-        elif self.message_content_type == 'application/x-plist':
-            self._message_body = self._load_plist_value(self._message_body)
-
-        elif self.message_content_type == 'text/csv':
-            self._message_body = self._load_csv_value(self._message_body)
-
-        elif bs4 and self.message_content_type in ('text/html', 'text/xml'):
-            self._message_body = self._load_bs4_value(self._message_body)
-
-        elif self.message_content_type in self._YAML_MIME_TYPES:
-            self._message_body = self._load_yaml_value(self._message_body)
-
-        # Return the message body
-        return self._message_body
-
-    @property
-    def message_content_encoding(self):
-        """Return the content-encoding from the message properties.
-
-        :rtype: str
-
-        """
-        return (self._message.properties.content_encoding or '').lower() or None
-
-    @property
-    def message_content_type(self):
-        """Return the content-type from the message properties.
-
-        :rtype: str
-
-        """
-        return (self._message.properties.content_type or '').lower() or None
-
-    @property
-    def message_correlation_id(self):
-        """Return the correlation-id from the message properties.
-
-        :rtype: str
-
-        """
-        return self._message.properties.correlation_id
-
-    @property
-    def message_exchange(self):
-        """Return the exchange the message.
-
-        :rtype: str
-
-        """
-        return self._message.exchange
-
-    @property
-    def message_expiration(self):
-        """Return the expiration as a datetime from the message properties.
-
-        :rtype: datetime.datetime
-
-        """
-        if not self._message.properties.expiration:
-            return None
-        float_value = float(self._message.properties.expiration)
-        return datetime.datetime.fromtimestamp(float_value)
-
-    @property
-    def message_headers(self):
-        """Return the headers from the message properties.
-
-        :rtype: dict
-
-        """
-        return self._message.properties.headers
-
-    @property
-    def message_has_expired(self):
-        """Return a boolean evaluation of if the message has expired. If
-        expiration is not set, always return False
-
-        :rtype: bool
-
-        """
-        if not self._message.properties.expiration:
-            return False
-        return time.time() >= self._message.properties.expiration
-
-    @property
-    def message_id(self):
-        """Return the message-id from the message properties.
-
-        :rtype: str
-
-        """
-        return self._message.properties.message_id
-
-    @property
-    def message_priority(self):
-        """Return the priority from the message properties.
-
-        :rtype: int
-
-        """
-        return self._message.properties.priority
-
-    @property
-    def message_reply_to(self):
-        """Return the priority from the message properties.
-
-        :rtype: str
-
-        """
-        return self._message.properties.reply_to
-
-    @property
-    def message_routing_key(self):
-        """Return the routing key the message.
-
-        :rtype: str
-
-        """
-        return self._message.routing_key
-
-    @property
-    def message_type(self):
-        """Return the type from the message properties.
-
-        :rtype: str
-
-        """
-        return self._message.properties.type
-
-    @property
-    def message_time(self):
-        """Return the time of the message from the properties.
-
-        :rtype: datetime.datetime
-
-        """
-        if not self._message.properties.timestamp:
-            return None
-        float_value = float(self._message.properties.timestamp)
-        return datetime.datetime.fromtimestamp(float_value)
-
-    @property
-    def message_user_id(self):
-        """Return the user-id from the message properties.
-
-        :rtype: str
-
-        """
-        return self._message.properties.user_id
-
-    def process(self, message_in):
-        """Process the message from RabbitMQ. To implement logic for processing
-        a message, extend Consumer._process, not this method.
-
-        :param rejected.Consumer.Message message_in: The message to process
-        :rtype: bool
-
-        """
-        # Clear out our previous body values
-        self._message_body = None
-
-        logger.debug('Received: %r', message_in)
-        self._message = message_in
-
-        # Validate the message type if the child sets _MESSAGE_TYPE
-        if self._MESSAGE_TYPE and self._MESSAGE_TYPE != self.message_type:
-            logger.error('Received a non-supported message type: %s',
-                         self.message_type)
-
-            # Should the message be dropped or returned to the broker?
-            if self._DROP_INVALID_MESSAGES:
-                logger.debug('Dropping the invalid message')
-                return
-            else:
-                raise ConsumerException('Invalid message type')
-
-        # Drop expired messages if desired
-        if self._DROP_EXPIRED_MESSAGES and self.message_has_expired:
-            logger.debug('Message expired %i seconds ago, dropping.',
-                         time.time() - self.message_expiration)
-            return
-
-        # Let the child object process the message
-        self._process()
-
-    @property
-    def properties(self):
-        """Return the properties for the message as a rejected.data.Properties
-        object.
-
-        :rtype: rejected.data.Properties
-
-        """
-        return copy.copy(self._message.properties)
-
-    def set_channel(self, channel):
-        """Assign the _channel attribute to the channel that was passed in.
-
-        :param pika.channel.Channel channel: The channel to assign
-
-        """
-        self._channel = channel
 
 class ConsumerException(Exception):
     """May be called when processing a message to indicate a problem that the

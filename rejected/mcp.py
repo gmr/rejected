@@ -50,7 +50,7 @@ class MasterControlProgram(state.State):
         self._stats_queue = multiprocessing.Queue()
 
         # Carry for logging internal stats collection data
-        self._log_stats_enabled = config.get('log_stats', True)
+        self._log_stats_enabled = config.get('log_stats', False)
         LOGGER.debug('Stats logging enabled: %s', self._log_stats_enabled)
 
         # Setup the poller related threads
@@ -307,12 +307,10 @@ class MasterControlProgram(state.State):
         processing, note it with a warning.
 
         """
-        LOGGER.debug('Starting polling process')
-
         # Check to see if we have outstanding things to poll
-        if self._poll_data['processes']:
-            LOGGER.warn('Poll interval failure for consumer(s): %r',
-                         ', '.join(self._poll_data['processes']))
+        #if self._poll_data['processes']:
+        #    LOGGER.warn('Poll interval failure for consumer(s): %r',
+        #                 ', '.join(self._poll_data['processes']))
 
         # Keep track of running consumers
         dead_processes = list()
@@ -331,16 +329,16 @@ class MasterControlProgram(state.State):
             if not process.is_alive():
                 LOGGER.warning('Found dead consumer %s', process.name)
                 dead_processes.append(process.name)
-            else:
-                LOGGER.debug('Asking %s for stats', process.name)
-                self._poll_data['processes'].append(process.name)
-                os.kill(process.pid, signal.SIGPROF)
+            #else:
+            #    LOGGER.debug('Asking %s for stats', process.name)
+            #    self._poll_data['processes'].append(process.name)
+            #    os.kill(process.pid, signal.SIGPROF)
 
         # Remove the objects if we have them
         for process_name in dead_processes:
             self._remove_process(process_name)
 
-        # Check if we need to start more messages
+        # Check if we need to start more processes
         self._check_consumer_process_counts()
 
         # If we don't have any active consumers, shutdown
@@ -349,7 +347,7 @@ class MasterControlProgram(state.State):
             return self._set_state(self.STATE_STOPPED)
 
         # Check to see if any consumers reported back and start timer if not
-        self._poll_results_check()
+        #self._poll_results_check()
 
         # Start the timer again
         self._start_poll_timer()

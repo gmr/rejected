@@ -554,8 +554,11 @@ class Process(multiprocessing.Process, state.State):
         :param frame stack_frame_unused: The current stack frame
 
         """
+        # @TODO something is a bit wonky on the passive queue declare
+        # disable for now
+        if True:
+            return
         signal.siginterrupt(signal.SIGPROF, False)
-        gc.collect()
         LOGGER.debug('Getting stats from RabbitMQ')
 
         # Count the idle time thus far if the consumer is just waiting

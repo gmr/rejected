@@ -2,27 +2,17 @@
 connection state and collects stats about the consuming process.
 
 """
-import copy
 from pika import exceptions
-import gc
 import logging
 import math
 import multiprocessing
 import os
-from os import path
 import pika
 from pika.adapters import tornado_connection
 import signal
 import sys
 import time
 import traceback
-
-try:
-    from newrelic import agent
-    from newrelic.api import background_task as nr_btask
-except ImportError:
-    agent = None
-    background_task = None
 
 from rejected import __version__
 from rejected import consumer
@@ -96,6 +86,7 @@ class Process(multiprocessing.Process, state.State):
             kwargs = {}
         super(Process, self).__init__(group, target, name, args, kwargs)
         self._ack = True
+        self._application = None
         self._channel = None
         self._config= None
         self._consumer = None
@@ -348,40 +339,6 @@ class Process(multiprocessing.Process, state.State):
             LOGGER.debug('Error threshold exceeded, stopping')
             self.stop()
 
-    def initialize_newrelic(self):
-        """Initialize newrelic iterating through the paths looking for an ini
-        file.
-
-        :raises: EnvironmentError
-
-        """
-        if not agent:
-            return
-
-        if 'newrelic' in self._kwargs['config']:
-            if not self._kwargs['config']['newrelic']:
-                return
-            LOGGER.debug('New Relic: %r', self._kwargs['config']['newrelic'])
-
-        for ini_dir in self.INI_DIRS:
-            ini_path = path.join(path.normpath(ini_dir), self.INI_FILE)
-            if path.exists(ini_path) and path.isfile(ini_path):
-                LOGGER.debug('Initializing NewRelic with %s', ini_path)
-                self.instrument_consumer_with_newrelic()
-                agent.initialize(ini_path)
-                return
-
-        # Since an ini was not found, disable a found agent
-        global agent
-        agent = None
-
-    def instrument_consumer_with_newrelic(self):
-        """Wrap the consumer process method with the BackgroundTaskWrapper."""
-        task = nr_btask.BackgroundTaskWrapper(consumer.Consumer.process,
-                                              name=consumer.Consumer.name,
-                                              group='Rejected')
-        consumer.Consumer.process = task
-
     @property
     def is_processing(self):
         """Returns a bool specifying if the consumer is currently processing
@@ -425,7 +382,7 @@ class Process(multiprocessing.Process, state.State):
                 self.TIME_SPENT: 0,
                 self.TIME_WAITED: 0}
 
-    def on_connection_closed(self, method_frame):
+    def on_connection_closed(self, connection, method_frame):
         """This method is invoked by pika when the connection to RabbitMQ is
         closed unexpectedly. Since it is unexpected, we will reconnect to
         RabbitMQ if it disconnects.
@@ -452,7 +409,7 @@ class Process(multiprocessing.Process, state.State):
         self.add_on_connection_close_callback()
         self._connection.channel(self.on_channel_open)
 
-    def on_channel_closed(self, method_frame):
+    def on_channel_closed(self, channel, method_frame):
         """Invoked by pika when RabbitMQ unexpectedly closes the channel.
         Channels are usually closed if you attempt to do something that
         violates the protocol, such as redeclare an exchange or queue with
@@ -485,93 +442,6 @@ class Process(multiprocessing.Process, state.State):
                                     no_ack=not self._ack,
                                     consumer_tag=self.name)
 
-    def on_error(self, method, exception):
-        """Called when a runtime error encountered.
-
-        :param pika.frames.MethodFrame method: The method frame with an error
-        :param consumer.ConsumerException exception: The error that occurred
-
-        """
-        self.reset_state()
-        self.increment_error_count()
-        if self._ack:
-            self.reject(method.delivery_tag)
-
-    def on_message_exception(self, method, exception):
-        """Called when a consumer.MessageException is raised, will reject the
-        message, not requeueing it.
-
-        :param pika.frames.MethodFrame method: The method frame with an error
-        :param consumer.MessageException exception: The error that occurred
-        :raises: RuntimeError
-
-        """
-        LOGGER.error('Message was rejected: %s', exception)
-        self.reset_state()
-        self._counts[self.REJECTED] += 1
-
-        # Raise an exception if no_ack = True since the msg can't be rejected
-        if not self._ack:
-            raise RuntimeError('Can not rejected messages when ack is False')
-
-        # Reject the message and do not requeue it
-        self.reject(method.delivery_tag, False)
-
-    def on_passive_declare(self, queue_declare):
-        """Called by pika when the Queue.DeclareOk is returned from RabbitMQ.
-
-        :param pika.frame.MethodFrame queue_declare: Queue.DeclareOk frame
-
-        """
-        stats = {'consumer_name': self._consumer_name,
-                 'name': self.name,
-                 'counts': self._counts,
-                 'queue': {'name': self._queue_name,
-                           'pending': queue_declare.method.message_count,
-                           'consumers': queue_declare.method.consumer_count},
-                 'state': {'value': self._state,
-                           'description': self.state_description}}
-
-        LOGGER.info('Stats: %r', stats)
-
-        # Add the stats to the queue
-        if self._stats_queue:
-            self._stats_queue.put(stats, False)
-
-        # Calculate dynamic QOS prefetch
-        if self._dynamic_qos and self._last_counts:
-            self.calculate_qos_prefetch()
-
-        self._last_counts = copy.deepcopy(self._counts)
-        self._last_stats_time = time.time()
-
-    def on_sigprof(self, signum_unused, stack_frame_unused):
-        """Get the queue depth from a passive queue declare and call the
-        callback specified in the invocation with a dictionary of our current
-        running state.
-
-        :param int signum_unused: The signal received
-        :param frame stack_frame_unused: The current stack frame
-
-        """
-        # @TODO something is a bit wonky on the passive queue declare
-        # disable for now
-        if True:
-            return
-        signal.siginterrupt(signal.SIGPROF, False)
-        LOGGER.debug('Getting stats from RabbitMQ')
-
-        # Count the idle time thus far if the consumer is just waiting
-        if self.is_idle:
-            self._counts[self.TIME_WAITED] += self.time_in_state
-            self._state_start = time.time()
-
-
-        # Perform the passive queue declare
-        self._channel.queue_declare(queue=self._queue_name,
-                                    passive=True,
-                                    callback=self.on_passive_declare)
-
     def process(self, channel=None, method=None, header=None, body=None):
         """Process a message from Rabbit
 
@@ -585,47 +455,18 @@ class Process(multiprocessing.Process, state.State):
             LOGGER.critical('Received a message while in state: %s',
                             self.state_description)
             return self.reject(method.delivery_tag)
-
-        # Set our state to processing
         self.set_state(self.STATE_PROCESSING)
         LOGGER.debug('Received message #%s', method.delivery_tag)
-
-        # Build the message wrapper object for all the parts
         message = data.Message(channel, method, header, body)
         if method.redelivered:
             self._counts[self.REDELIVERED] += 1
-
-        # Set our start time
         self._state_start = time.time()
-
-        # Process the message, evaluating the success
-        try:
-            self._process(message)
-        except KeyboardInterrupt:
-            return self.stop()
-        except exceptions.ChannelClosed as exception:
-            self.record_exception(message.routing_key, exception, False)
-            return self.stop()
-        except exceptions.ConnectionClosed as exception:
-            self.record_exception(message.routing_key, exception, False)
-            return self.stop()
-        except consumer.ConsumerException as exception:
-            self.record_custom_metric('Requeued', message.routing_key)
-            return self.on_error(method, exception)
-        except consumer.MessageException as exception:
-            self.record_custom_metric('Rejected', message.routing_key)
-            return self.on_message_exception(method, exception)
-
-        LOGGER.debug('Message processed')
-
-        # Message was processed
+        if not self._process(message):
+            return
         self._counts[self.PROCESSED] += 1
-
-        self.reset_state()
-
-        # If no_ack was not set when we setup consuming, do so here
         if self._ack:
             self.ack_message(method.delivery_tag)
+        self.reset_state()
 
     def _process(self, message):
         """Wrap the actual processor processing bits
@@ -637,31 +478,59 @@ class Process(multiprocessing.Process, state.State):
         # Try and process the message
         try:
             self._consumer.process(message)
+
+        except KeyboardInterrupt as exception:
+            self.record_exception(exception, True)
+            self.on_error(message.method)
+            self.stop()
+            return False
+
+        except exceptions.ChannelClosed as exception:
+            self.record_exception(exception, False)
+            self.stop()
+            return False
+
+        except exceptions.ConnectionClosed as exception:
+            self.record_exception(exception, False)
+            self.stop()
+            return False
+
         except consumer.ConsumerException as exception:
-            self.record_exception(message.routing_key, exception, True)
-            raise exception
+            self.record_exception(exception, True)
+            self.on_error(message.method)
+            return False
+
         except consumer.MessageException as exception:
-            self.record_custom_metric('BadMessage', message.routing_key)
-            raise exception
-        except Exception as exception:
-            self.record_exception(message.routing_key, exception)
-            raise consumer.ConsumerException(exception.__class__.__name__)
+            self.record_exception(exception, True)
+            self.on_error(message.method)
+            return False
 
-    def record_custom_metric(self, metric_name, routing_key):
-        if agent:
-            agent.record_custom_metric('Rejected/%s/%s' % (metric_name,
-                                                           routing_key), 1)
+        return True
 
-    def record_exception(self, routing_key, exception, handled=False):
-        if agent:
-            exc_type, value, tb = sys.exc_info()
-            agent.record_exception(exception, value, tb)
-            if handled:
-                metric = 'Handled Exception %s' % type(exception)
-            else:
-                metric = str(exception.__class__.__name__)
-            self.record_custom_metric(metric, routing_key)
+    def on_error(self, method=None):
+        """Called when a runtime error encountered.
 
+        :param pika.frames.MethodFrame method: The method frame with an error
+
+        """
+        self.increment_error_count()
+        self.reject_message(method)
+
+    def reject_message(self, method):
+        """Called when a consumer.MessageException is raised, will reject the
+        message, not requeueing it.
+
+        :param pika.frames.MethodFrame method: The method frame with an error
+        :raises: RuntimeError
+
+        """
+        self._counts[self.REJECTED] += 1
+        if not self._ack:
+            raise RuntimeError('Can not rejected messages when ack is False')
+        self.reject(method.delivery_tag, False)
+        self.reset_state()
+
+    def record_exception(self, exception, handled=False):
         if not handled:
             formatted_lines = traceback.format_exc().splitlines()
             LOGGER.critical('Processor threw an uncaught exception %s: %s',
@@ -679,27 +548,26 @@ class Process(multiprocessing.Process, state.State):
         :param bool requeue: Specify if the message should be requeued or not
 
         """
-        self._channel.basic_reject(delivery_tag=delivery_tag, requeue=requeue)
+        LOGGER.warning('Rejecting message %s', delivery_tag)
+        self._channel.basic_nack(delivery_tag=delivery_tag, requeue=requeue)
 
     def reset_state(self):
         """Reset the runtime state after processing a message to either idle
         or shutting down based upon the current state.
 
         """
-        if agent:
-            agent.end_of_transaction()
-
         if self.is_waiting_to_shutdown:
             self.set_state(self.STATE_SHUTTING_DOWN)
             self.on_ready_to_stop()
         elif self.is_processing:
             self.set_state(self.STATE_IDLE)
+        elif self.is_idle:
+            pass
         else:
             LOGGER.critical('Unexepected state: %s', self.state_description)
 
     def run(self):
         """Start the consumer"""
-        self.initialize_newrelic()
         try:
             self.setup(self._kwargs['config'],
                        self._kwargs['connection_name'],
@@ -711,13 +579,11 @@ class Process(multiprocessing.Process, state.State):
             LOGGER.critical('Could not import %s, stopping process: %r',
                             consumer, error)
             return
-
         try:
             self._connection.ioloop.start()
         except KeyboardInterrupt:
             self.stop()
             self._connection.ioloop.start()
-
         LOGGER.debug('Exiting %s', self.name)
 
     def set_qos_prefetch(self, value=None):
@@ -830,10 +696,8 @@ class Process(multiprocessing.Process, state.State):
         SIGTERM due to the multiprocessing's behavior with SIGTERM.
 
         """
-        signal.signal(signal.SIGPROF, self.on_sigprof)
         signal.signal(signal.SIGABRT, self.stop)
         signal.siginterrupt(signal.SIGABRT, False)
-        signal.siginterrupt(signal.SIGPROF, False)
 
     def stop(self, signum=None, frame_unused=None):
         """Stop the consumer from consuming by calling BasicCancel and setting
@@ -859,8 +723,8 @@ class Process(multiprocessing.Process, state.State):
         # Wait until the consumer has finished processing to shutdown
         if self.is_processing:
             self.set_state(self.STATE_STOP_REQUESTED)
-            #if signum == signal.SIGABRT:
-            #    signal.siginterrupt(signal.SIGABRT, False)
+            if signum == signal.SIGABRT:
+                signal.siginterrupt(signal.SIGABRT, False)
             return
 
         self.on_ready_to_stop()

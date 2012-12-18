@@ -30,6 +30,5 @@ setup(name='rejected',
                         'redis',
                         'tornado'],
       tests_require=['mock', 'nose', 'unittest2'],
-      extras_require={'NewRelic': 'newrelic'},
       entry_points=dict(console_scripts=['rejected=rejected.controller:main']),
       zip_safe=True)

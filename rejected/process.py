@@ -12,6 +12,7 @@ from pika.adapters import tornado_connection
 import signal
 import sys
 import time
+from tornado import ioloop
 import traceback
 
 from rejected import __version__
@@ -79,6 +80,7 @@ class Process(multiprocessing.Process, state.State):
     _QOS_MAX = 10000
     _MAX_ERROR_COUNT = 5
     _MAX_SHUTDOWN_WAIT = 5
+    _RECONNECT_DELAY = 10
 
     def __init__(self, group=None, target=None, name=None, args=(),
                  kwargs=None):
@@ -89,6 +91,8 @@ class Process(multiprocessing.Process, state.State):
         self._application = None
         self._channel = None
         self._config= None
+        self._connection_name = None
+        self._connections = None
         self._consumer = None
         self._counts = self.new_counter_dict()
         self._dynamic_qos = True
@@ -336,8 +340,8 @@ class Process(multiprocessing.Process, state.State):
         """
         self._counts[self.ERROR] += 1
         if self.too_many_errors:
-            LOGGER.debug('Error threshold exceeded, stopping')
-            self.stop()
+            LOGGER.debug('Error threshold exceeded, reconnecting')
+            self.reconnect()
 
     @property
     def is_processing(self):
@@ -382,20 +386,17 @@ class Process(multiprocessing.Process, state.State):
                 self.TIME_SPENT: 0,
                 self.TIME_WAITED: 0}
 
-    def on_connection_closed(self, connection, method_frame):
+    def on_connection_closed(self, unused):
         """This method is invoked by pika when the connection to RabbitMQ is
         closed unexpectedly. Since it is unexpected, we will reconnect to
         RabbitMQ if it disconnects.
 
-        :param pika.frame.Method method_frame: The method frame from RabbitMQ
+        :param pika.connection.Connection unused: The closed connection
 
         """
-        LOGGER.warning('Server closed connection, reopening: (%s) %s',
-                       method_frame.method.reply_code,
-                       method_frame.method.reply_text)
-        self.set_state(self.STATE_STOPPED)
         self._channel = None
-        self.stop()
+        if not self.is_shutting_down:
+            self.reconnect()
 
     def on_connection_open(self, unused):
         """This method is called by pika once the connection to RabbitMQ has
@@ -409,7 +410,7 @@ class Process(multiprocessing.Process, state.State):
         self.add_on_connection_close_callback()
         self._connection.channel(self.on_channel_open)
 
-    def on_channel_closed(self, channel, method_frame):
+    def on_channel_closed(self, method_frame):
         """Invoked by pika when RabbitMQ unexpectedly closes the channel.
         Channels are usually closed if you attempt to do something that
         violates the protocol, such as redeclare an exchange or queue with
@@ -419,10 +420,11 @@ class Process(multiprocessing.Process, state.State):
         :param pika.frame.Method method_frame: The Channel.Close method frame
 
         """
-        LOGGER.warning('Channel was closed: (%s) %s',
-                       method_frame.method.reply_code,
-                       method_frame.method.reply_text)
-        self._connection.close()
+        LOGGER.critical('Channel was closed: (%s) %s',
+                        method_frame.method.reply_code,
+                        method_frame.method.reply_text)
+        del self._channel
+        raise ReconnectConnection
 
     def on_channel_open(self, channel):
         """This method is invoked by pika when the channel has been opened.
@@ -437,10 +439,32 @@ class Process(multiprocessing.Process, state.State):
         self._channel = channel
         self.add_on_channel_close_callback()
         self.setup_channel()
+
+
+        # Set our runtime state to idle now that it is connect
+        self.set_state(self.STATE_IDLE)
+
         self._channel.basic_consume(consumer_callback=self.process,
                                     queue=self._queue_name,
                                     no_ack=not self._ack,
                                     consumer_tag=self.name)
+
+    def on_ready_to_stop(self):
+
+        # Set the state to shutting down if it wasn't set as that during loop
+        self.set_state(self.STATE_SHUTTING_DOWN)
+
+        # If the connection is still around, close it
+        if self._connection.is_open:
+            LOGGER.debug('Closing connection to RabbitMQ')
+            self._connection.close()
+
+        # Allow the consumer to gracefully stop and then stop the IOLoop
+        self.stop_consumer()
+
+        # Note that shutdown is complete and set the state accordingly
+        LOGGER.info('Shutdown complete')
+        self.set_state(self.STATE_STOPPED)
 
     def process(self, channel=None, method=None, header=None, body=None):
         """Process a message from Rabbit
@@ -462,50 +486,12 @@ class Process(multiprocessing.Process, state.State):
             self._counts[self.REDELIVERED] += 1
         self._state_start = time.time()
         if not self._process(message):
+            LOGGER.debug('Bypassing ack due to negative return from _process')
             return
         self._counts[self.PROCESSED] += 1
         if self._ack:
             self.ack_message(method.delivery_tag)
         self.reset_state()
-
-    def _process(self, message):
-        """Wrap the actual processor processing bits
-
-        :param Message message: Message to process
-        :raises: consumer.ConsumerException
-
-        """
-        # Try and process the message
-        try:
-            self._consumer.process(message)
-
-        except KeyboardInterrupt as exception:
-            self.record_exception(exception, True)
-            self.on_error(message.method)
-            self.stop()
-            return False
-
-        except exceptions.ChannelClosed as exception:
-            self.record_exception(exception, False)
-            self.stop()
-            return False
-
-        except exceptions.ConnectionClosed as exception:
-            self.record_exception(exception, False)
-            self.stop()
-            return False
-
-        except consumer.ConsumerException as exception:
-            self.record_exception(exception, True)
-            self.on_error(message.method)
-            return False
-
-        except consumer.MessageException as exception:
-            self.record_exception(exception, True)
-            self.on_error(message.method)
-            return False
-
-        return True
 
     def on_error(self, method=None):
         """Called when a runtime error encountered.
@@ -513,8 +499,8 @@ class Process(multiprocessing.Process, state.State):
         :param pika.frames.MethodFrame method: The method frame with an error
 
         """
-        self.increment_error_count()
         self.reject_message(method)
+        self.increment_error_count()
 
     def reject_message(self, method):
         """Called when a consumer.MessageException is raised, will reject the
@@ -529,6 +515,24 @@ class Process(multiprocessing.Process, state.State):
             raise RuntimeError('Can not rejected messages when ack is False')
         self.reject(method.delivery_tag, False)
         self.reset_state()
+
+    def reconnect(self):
+        """Reconnect to RabbitMQ after sleeping for _RECONNECT_DELAY"""
+        LOGGER.info('Disconnected from RabbitMQ, reconnecting in %i seconds',
+                    self._RECONNECT_DELAY)
+        self.set_state(self.STATE_INITIALIZING)
+        if self._connection:
+            if self._connection.socket:
+                fd = self._connection.socket.fileno()
+                self._connection.ioloop.remove_handler(fd)
+            self._connection.ioloop.stop()
+            del self._connection
+        else:
+            _ioloop = ioloop.IOLoop.instance()
+            _ioloop.stop()
+        time.sleep(self._RECONNECT_DELAY)
+        self._connection = self.connect_to_rabbitmq(self._connections,
+                                                    self._connection_name)
 
     def record_exception(self, exception, handled=False):
         if not handled:
@@ -579,11 +583,15 @@ class Process(multiprocessing.Process, state.State):
             LOGGER.critical('Could not import %s, stopping process: %r',
                             consumer, error)
             return
-        try:
-            self._connection.ioloop.start()
-        except KeyboardInterrupt:
-            self.stop()
-            self._connection.ioloop.start()
+
+        while not self.is_waiting_to_shutdown:
+            try:
+                self._connection.ioloop.start()
+            except KeyboardInterrupt:
+                self.stop()
+                self._connection.ioloop.start()
+            while not self._connection and self.is_connecting:
+                time.sleep(0.1)
         LOGGER.debug('Exiting %s', self.name)
 
     def set_qos_prefetch(self, value=None):
@@ -634,8 +642,10 @@ class Process(multiprocessing.Process, state.State):
         self._stats_queue = stats_queue
 
         # Hold the consumer config
+        self._connection_name = connection_name
         self._consumer_name = consumer_name
         self._config = config['Consumers'][consumer_name]
+        self._connections = config['Connections']
 
         # Setup the consumer
         self._consumer = self.get_consumer(self._config)
@@ -667,11 +677,8 @@ class Process(multiprocessing.Process, state.State):
         self.setup_signal_handlers()
 
         # Create the RabbitMQ Connection
-        self._connection = self.connect_to_rabbitmq(config['Connections'],
-                                                    connection_name)
-
-        # Set our runtime state to idle now that it is connect
-        self.set_state(self.STATE_IDLE)
+        self._connection = self.connect_to_rabbitmq(self._connections,
+                                                    self._connection_name)
 
     def setup_channel(self):
         """Setup the channel that will be used to communicate with RabbitMQ and
@@ -697,7 +704,9 @@ class Process(multiprocessing.Process, state.State):
 
         """
         signal.signal(signal.SIGABRT, self.stop)
+        signal.signal(signal.SIGUSR2, self.reconnect)
         signal.siginterrupt(signal.SIGABRT, False)
+        signal.siginterrupt(signal.SIGUSR2, False)
 
     def stop(self, signum=None, frame_unused=None):
         """Stop the consumer from consuming by calling BasicCancel and setting
@@ -729,22 +738,6 @@ class Process(multiprocessing.Process, state.State):
 
         self.on_ready_to_stop()
 
-    def on_ready_to_stop(self):
-
-        # Set the state to shutting down if it wasn't set as that during loop
-        self.set_state(self.STATE_SHUTTING_DOWN)
-
-        # If the connection is still around, close it
-        if self._connection.is_open:
-            LOGGER.debug('Closing connection to RabbitMQ')
-            self._connection.close()
-
-        # Allow the consumer to gracefully stop and then stop the IOLoop
-        self.stop_consumer()
-
-        # Note that shutdown is complete and set the state accordingly
-        LOGGER.info('Shutdown complete')
-        self.set_state(self.STATE_STOPPED)
 
     def stop_consumer(self):
         """Stop the consumer object and allow it to do a clean shutdown if it
@@ -774,3 +767,52 @@ class Process(multiprocessing.Process, state.State):
 
         """
         return self.count(self.ERROR) >= self._max_error_count
+
+    def _process(self, message):
+        """Wrap the actual processor processing bits
+
+        :param Message message: Message to process
+        :raises: consumer.ConsumerException
+
+        """
+        # Try and process the message
+        try:
+            self._consumer.process(message)
+
+        except KeyboardInterrupt as exception:
+            self.record_exception(exception, True)
+            self.on_error(message.method)
+            self.stop()
+            return False
+
+        except exceptions.ChannelClosed as exception:
+            self.record_exception(exception, False)
+            self.close_connection()
+            self.reconnect()
+            return False
+
+        except exceptions.ConnectionClosed as exception:
+            self.record_exception(exception, False)
+            self.reconnect()
+            return False
+
+        except consumer.ConsumerException as exception:
+            self.record_exception(exception, True)
+            self.on_error(message.method)
+            return False
+
+        except consumer.MessageException as exception:
+            self.record_exception(exception, True)
+            self.on_error(message.method)
+            return False
+
+        except Exception as exception:
+            self.record_exception(exception, False)
+            self.on_error(message.method)
+            return False
+
+        return True
+
+
+class ReconnectConnection(Exception):
+    pass

@@ -193,7 +193,7 @@ class Process(multiprocessing.Process, state.State):
 
     def cancel_consumer_with_rabbitmq(self):
         """Tell RabbitMQ the process no longer wants to consumer messages."""
-        LOGGER.debug('Sending a Basic.Cancel to RabbitMQ')
+        LOGGER.info('Sending a Basic.Cancel to RabbitMQ')
         if self._channel and self._channel.is_open:
             self._channel.basic_cancel(consumer_tag=self.name)
 
@@ -534,6 +534,8 @@ class Process(multiprocessing.Process, state.State):
         if self._counts[self.FAILURES] == 0:
             LOGGER.critical('Error threshold exceeded (%i), reconnecting',
                             self._counts[self.ERROR])
+            self.cancel_consumer_with_rabbitmq()
+            self.close_connection()
             self.reconnect()
 
     def reconnect(self):
@@ -589,7 +591,8 @@ class Process(multiprocessing.Process, state.State):
                        'with' if requeue else 'without')
         self._channel.basic_nack(delivery_tag=delivery_tag, requeue=requeue)
         self.increment_count(self.REJECTED)
-        self.reset_state()
+        if self.is_processing:
+            self.reset_state()
 
     def reset_failure_counter(self):
         """Reset the failure counter to the max error count"""
@@ -607,7 +610,7 @@ class Process(multiprocessing.Process, state.State):
             self.on_ready_to_stop()
         elif self.is_processing:
             self.set_state(self.STATE_IDLE)
-        elif self.is_idle:
+        elif self.is_idle or self.is_connecting:
             pass
         else:
             LOGGER.critical('Unexepected state: %s', self.state_description)

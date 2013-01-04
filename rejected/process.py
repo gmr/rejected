@@ -67,6 +67,7 @@ class Process(multiprocessing.Process, state.State):
     RECONNECTED = 'reconnected'
     REDELIVERED = 'redelivered_messages'
     REJECTED = 'rejected_messages'
+    REQUEUED = 'requeued_messages'
     TIME_SPENT = 'processing_time'
     TIME_WAITED = 'idle_time'
     UNHANDLED_EXCEPTIONS = 'unhandled_exceptions'
@@ -402,6 +403,7 @@ class Process(multiprocessing.Process, state.State):
                 self.RECONNECTED: 0,
                 self.REDELIVERED: 0,
                 self.REJECTED: 0,
+                self.REQUEUED: 0,
                 self.TIME_SPENT: 0,
                 self.TIME_WAITED: 0}
 
@@ -590,7 +592,7 @@ class Process(multiprocessing.Process, state.State):
         LOGGER.warning('Rejecting message %s %s requeue', delivery_tag,
                        'with' if requeue else 'without')
         self._channel.basic_nack(delivery_tag=delivery_tag, requeue=requeue)
-        self.increment_count(self.REJECTED)
+        self.increment_count(self.REQUEUED if requeue else self.REJECTED)
         if self.is_processing:
             self.reset_state()
 

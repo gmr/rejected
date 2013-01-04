@@ -60,8 +60,11 @@ class Process(multiprocessing.Process, state.State):
     STATE_PROCESSING = 0x04
 
     # Counter constants
+    ACKED = 'acked'
     ERROR = 'failed'
+    FAILURES = 'failures_until_stop'
     PROCESSED = 'processed'
+    RECONNECTED = 'reconnected'
     REDELIVERED = 'redelivered_messages'
     REJECTED = 'rejected_messages'
     TIME_SPENT = 'processing_time'
@@ -79,6 +82,7 @@ class Process(multiprocessing.Process, state.State):
     _QOS_PREFETCH_MULTIPLIER = 1.25
     _QOS_MAX = 10000
     _MAX_ERROR_COUNT = 5
+    _MAX_ERROR_WINDOW = 60
     _MAX_SHUTDOWN_WAIT = 5
     _RECONNECT_DELAY = 10
 
@@ -90,7 +94,7 @@ class Process(multiprocessing.Process, state.State):
         self._ack = True
         self._application = None
         self._channel = None
-        self._config= None
+        self._config = None
         self._connection_name = None
         self._connections = None
         self._consumer = None
@@ -98,6 +102,7 @@ class Process(multiprocessing.Process, state.State):
         self._dynamic_qos = True
         self._hbinterval = self._HBINTERVAL
         self._last_counts = None
+        self._last_failure = 0
         self._last_stats_time = None
         self._max_framesize = pika.spec.FRAME_MAX_SIZE
         self._qos_prefetch = None
@@ -116,6 +121,7 @@ class Process(multiprocessing.Process, state.State):
         """
         LOGGER.debug('Acking %s', delivery_tag)
         self._channel.basic_ack(delivery_tag=delivery_tag)
+        self.increment_count(self.ACKED)
 
     def add_on_channel_close_callback(self):
         """This method tells pika to call the on_channel_closed method if
@@ -333,15 +339,25 @@ class Process(multiprocessing.Process, state.State):
                 LOGGER.error(line)
             return
 
-    def increment_error_count(self):
-        """Increment the error count checking to see if the process should stop
-        due to the number of errors.
+    def increment_count(self, counter, value=1):
+        """Increment the specified counter, checking to see if the counter is
+        the error counter. if it is, check to see if there have been too many
+        errors and if it needs to reconnect.
+
+        :param str counter: The counter name passed in from the constant
+        :param int|float value: The amount to increment by
 
         """
-        self._counts[self.ERROR] += 1
-        if self.too_many_errors:
-            LOGGER.debug('Error threshold exceeded, reconnecting')
-            self.reconnect()
+        self._counts[counter] += value
+
+    @property
+    def is_idle(self):
+        """Is the system idle
+
+        :rtype: bool
+
+        """
+        return self._state == self.STATE_IDLE
 
     @property
     def is_processing(self):
@@ -378,13 +394,46 @@ class Process(multiprocessing.Process, state.State):
         :rtype: dict
 
         """
-        return {self.ERROR: 0,
+        return {self.ACKED: 0,
+                self.ERROR: 0,
+                self.FAILURES: 0,
                 self.UNHANDLED_EXCEPTIONS: 0,
                 self.PROCESSED: 0,
+                self.RECONNECTED: 0,
                 self.REDELIVERED: 0,
                 self.REJECTED: 0,
                 self.TIME_SPENT: 0,
                 self.TIME_WAITED: 0}
+
+    def on_channel_closed(self, method_frame):
+        """Invoked by pika when RabbitMQ unexpectedly closes the channel.
+        Channels are usually closed if you attempt to do something that
+        violates the protocol, such as re-declare an exchange or queue with
+        different parameters. In this case, we'll close the connection
+        to shutdown the object.
+
+        :param pika.frame.Method method_frame: The Channel.Close method frame
+
+        """
+        LOGGER.critical('Channel was closed: (%s) %s',
+                        method_frame.method.reply_code,
+                        method_frame.method.reply_text)
+        del self._channel
+        raise ReconnectConnection
+
+    def on_channel_open(self, channel):
+        """This method is invoked by pika when the channel has been opened. It
+        will change the state to IDLE, add the callbacks and setup the channel
+        to start consuming.
+
+        :param pika.channel.Channel channel: The channel object
+
+        """
+        LOGGER.info('Channel opened')
+        self._channel = channel
+        self.add_on_channel_close_callback()
+        self.set_state(self.STATE_IDLE)
+        self.setup_channel()
 
     def on_connection_closed(self, unused):
         """This method is invoked by pika when the connection to RabbitMQ is
@@ -394,6 +443,7 @@ class Process(multiprocessing.Process, state.State):
         :param pika.connection.Connection unused: The closed connection
 
         """
+        LOGGER.critical('Connection from RabbitMQ closed: %r', unused)
         self._channel = None
         if not self.is_shutting_down:
             self.reconnect()
@@ -408,46 +458,7 @@ class Process(multiprocessing.Process, state.State):
         """
         LOGGER.info('Connection opened')
         self.add_on_connection_close_callback()
-        self._connection.channel(self.on_channel_open)
-
-    def on_channel_closed(self, method_frame):
-        """Invoked by pika when RabbitMQ unexpectedly closes the channel.
-        Channels are usually closed if you attempt to do something that
-        violates the protocol, such as redeclare an exchange or queue with
-        different paramters. In this case, we'll close the connection
-        to shutdown the object.
-
-        :param pika.frame.Method method_frame: The Channel.Close method frame
-
-        """
-        LOGGER.critical('Channel was closed: (%s) %s',
-                        method_frame.method.reply_code,
-                        method_frame.method.reply_text)
-        del self._channel
-        raise ReconnectConnection
-
-    def on_channel_open(self, channel):
-        """This method is invoked by pika when the channel has been opened.
-        The channel object is passed in so we can make use of it.
-
-        Since the channel is now open, we'll declare the exchange to use.
-
-        :param pika.channel.Channel channel: The channel object
-
-        """
-        LOGGER.info('Channel opened')
-        self._channel = channel
-        self.add_on_channel_close_callback()
-        self.setup_channel()
-
-
-        # Set our runtime state to idle now that it is connect
-        self.set_state(self.STATE_IDLE)
-
-        self._channel.basic_consume(consumer_callback=self.process,
-                                    queue=self._queue_name,
-                                    no_ack=not self._ack,
-                                    consumer_tag=self.name)
+        self.open_channel()
 
     def on_ready_to_stop(self):
 
@@ -466,6 +477,21 @@ class Process(multiprocessing.Process, state.State):
         LOGGER.info('Shutdown complete')
         self.set_state(self.STATE_STOPPED)
 
+    def on_sigprof(self, unused_signum, unused_frame):
+        """Called when SIGPROF is sent to the process, will dump the stats, in
+        future versions, queue them for the master process to get data.
+
+        :param int unused_signum: The signal number
+        :param frame unused_frame: The python frame the signal was received at
+
+        """
+        LOGGER.info('Currently %s: %r', self.state_description, self._counts)
+
+    def open_channel(self):
+        """Open a channel on the existing open connection to RabbitMQ"""
+        LOGGER.info('Opening a channel on %r', self._connection)
+        self._connection.channel(self.on_channel_open)
+
     def process(self, channel=None, method=None, header=None, body=None):
         """Process a message from Rabbit
 
@@ -478,48 +504,43 @@ class Process(multiprocessing.Process, state.State):
         if not self.is_idle:
             LOGGER.critical('Received a message while in state: %s',
                             self.state_description)
-            return self.reject(method.delivery_tag)
+            return self.reject(method.delivery_tag, True)
         self.set_state(self.STATE_PROCESSING)
         LOGGER.debug('Received message #%s', method.delivery_tag)
         message = data.Message(channel, method, header, body)
         if method.redelivered:
-            self._counts[self.REDELIVERED] += 1
+            self.increment_count(self.REDELIVERED)
         self._state_start = time.time()
         if not self._process(message):
-            LOGGER.debug('Bypassing ack due to negative return from _process')
+            LOGGER.debug('Bypassing ack due to False return from _process')
             return
-        self._counts[self.PROCESSED] += 1
+        self.increment_count(self.PROCESSED)
         if self._ack:
             self.ack_message(method.delivery_tag)
         self.reset_state()
 
-    def on_error(self, method=None):
-        """Called when a runtime error encountered.
-
-        :param pika.frames.MethodFrame method: The method frame with an error
-
-        """
-        self.reject_message(method)
-        self.increment_error_count()
-
-    def reject_message(self, method):
-        """Called when a consumer.MessageException is raised, will reject the
-        message, not requeueing it.
-
-        :param pika.frames.MethodFrame method: The method frame with an error
-        :raises: RuntimeError
+    def processing_failure(self):
+        """Called when message processing failure happens due to a
+        ConsumerException or an unhandled exception.
 
         """
-        self._counts[self.REJECTED] += 1
-        if not self._ack:
-            raise RuntimeError('Can not rejected messages when ack is False')
-        self.reject(method.delivery_tag, False)
-        self.reset_state()
+        duration = time.time() - self._last_failure
+        if duration > self._MAX_ERROR_WINDOW:
+            LOGGER.info('Resetting failure window, %i seconds since last',
+                        duration)
+            self._counter[self.FAILURES] = self._max_error_count
+        self.increment_count(self.FAILURES, -1)
+        self._last_failure = time.time()
+        if self._counts[self.FAILURES] == 0:
+            LOGGER.critical('Error threshold exceeded (%i), reconnecting',
+                            self._counts[self.ERROR])
+            self.reconnect()
 
     def reconnect(self):
         """Reconnect to RabbitMQ after sleeping for _RECONNECT_DELAY"""
-        LOGGER.info('Disconnected from RabbitMQ, reconnecting in %i seconds',
+        LOGGER.info('Reconnecting to RabbitMQ in %i seconds',
                     self._RECONNECT_DELAY)
+        self.increment_count(self.RECONNECTED)
         self.set_state(self.STATE_INITIALIZING)
         if self._connection:
             if self._connection.socket:
@@ -534,26 +555,41 @@ class Process(multiprocessing.Process, state.State):
         self._connection = self.connect_to_rabbitmq(self._connections,
                                                     self._connection_name)
 
-    def record_exception(self, exception, handled=False):
-        if not handled:
-            formatted_lines = traceback.format_exc().splitlines()
+    def record_exception(self, error, handled=False):
+        """Record an exception
+
+        :param exception error: The exception to record
+        :param bool handled: Was the exception handled
+
+        """
+        formatted_lines = traceback.format_exc().splitlines()
+        self.increment_count(self.ERROR)
+        if handled:
+            LOGGER.warning('Processor handled %s: %s',
+                           error.__class__.__name__, error)
+        else:
             LOGGER.critical('Processor threw an uncaught exception %s: %s',
-                            type(exception), exception)
-            for offset, line in enumerate(formatted_lines):
-                LOGGER.info('(%s) %i: %s', type(exception), offset,
-                            line.strip())
-            self._counts[self.UNHANDLED_EXCEPTIONS] += 1
+                            error.__class__.__name__, error)
+            self.increment_count(self.UNHANDLED_EXCEPTIONS)
+        for offset, line in enumerate(formatted_lines):
+            LOGGER.debug('(%s) %i: %s', error.__class__.__name__,
+                         offset, line.strip())
 
     def reject(self, delivery_tag, requeue=True):
         """Reject the message on the broker and log it. We should move this to
          use to nack when Pika supports it in a released version.
 
         :param str delivery_tag: Delivery tag to reject
-        :param bool requeue: Specify if the message should be requeued or not
+        :param bool requeue: Specify if the message should be re-queued or not
 
         """
-        LOGGER.warning('Rejecting message %s', delivery_tag)
+        if not self._ack:
+            raise RuntimeError('Can not rejected messages when ack is False')
+        LOGGER.warning('Rejecting message %s %s requeue', delivery_tag,
+                       'with' if requeue else 'without')
         self._channel.basic_nack(delivery_tag=delivery_tag, requeue=requeue)
+        self.increment_count(self.REJECTED)
+        self.reset_state()
 
     def reset_state(self):
         """Reset the runtime state after processing a message to either idle
@@ -614,13 +650,11 @@ class Process(multiprocessing.Process, state.State):
 
         """
         # Keep track of how much time we're spending waiting and processing
-        if (new_state == self.STATE_PROCESSING and
-            self._state == self.STATE_IDLE):
-            self._counts[self.TIME_WAITED] += self.time_in_state
+        if new_state == self.STATE_PROCESSING and self.is_idle:
+            self.increment_count(self.TIME_WAITED, self.time_in_state)
 
-        elif (new_state == self.STATE_IDLE and
-              self._state == self.STATE_PROCESSING):
-            self._counts[self.TIME_SPENT] += self.time_in_state
+        elif new_state == self.STATE_IDLE and self.is_processing:
+            self.increment_count(self.TIME_SPENT, self.time_in_state)
 
         # Use the parent object to set the state
         super(Process, self)._set_state(new_state)
@@ -664,6 +698,7 @@ class Process(multiprocessing.Process, state.State):
         # How many errors until the process stops
         self._max_error_count = self._config.get('max_errors',
                                                  self._MAX_ERROR_COUNT)
+        self._counts[self.FAILURES] = self._max_error_count
 
         # Get the heartbeat interval
         self._hbinterval = self._config.get('heartbeat_interval',
@@ -690,13 +725,15 @@ class Process(multiprocessing.Process, state.State):
         try:
             self._consumer.set_channel(self._channel)
         except AttributeError:
-            LOGGER.warning('Consumer does not support channel assignment')
+            LOGGER.debug('Consumer does not support channel assignment')
 
-        # Set QoS  to the default value
+        # Setup QoS, Send a Basic.Recover and then Basic.Consume
         self.set_qos_prefetch()
-
-        # Ask for stuck messages
         self._channel.basic_recover(requeue=True)
+        self._channel.basic_consume(consumer_callback=self.process,
+                                    queue=self._queue_name,
+                                    no_ack=not self._ack,
+                                    consumer_tag=self.name)
 
     def setup_signal_handlers(self):
         """Setup the stats and stop signal handlers. Use SIGABRT instead of
@@ -704,9 +741,9 @@ class Process(multiprocessing.Process, state.State):
 
         """
         signal.signal(signal.SIGABRT, self.stop)
-        signal.signal(signal.SIGUSR2, self.reconnect)
+        signal.signal(signal.SIGPROF, self.on_sigprof)
         signal.siginterrupt(signal.SIGABRT, False)
-        signal.siginterrupt(signal.SIGUSR2, False)
+        signal.siginterrupt(signal.SIGPROF, False)
 
     def stop(self, signum=None, frame_unused=None):
         """Stop the consumer from consuming by calling BasicCancel and setting
@@ -737,7 +774,6 @@ class Process(multiprocessing.Process, state.State):
             return
 
         self.on_ready_to_stop()
-
 
     def stop_consumer(self):
         """Stop the consumer object and allow it to do a clean shutdown if it
@@ -779,36 +815,36 @@ class Process(multiprocessing.Process, state.State):
         try:
             self._consumer.process(message)
 
-        except KeyboardInterrupt as exception:
-            self.record_exception(exception, True)
-            self.on_error(message.method)
+        except KeyboardInterrupt:
+            self.reject(message.delivery_tag, True)
             self.stop()
             return False
 
-        except exceptions.ChannelClosed as exception:
-            self.record_exception(exception, False)
-            self.close_connection()
+        except exceptions.ChannelClosed as error:
+            LOGGER.critical('RabbitMQ closed the channel: %r', error)
             self.reconnect()
             return False
 
-        except exceptions.ConnectionClosed as exception:
-            self.record_exception(exception, False)
+        except exceptions.ConnectionClosed as error:
+            LOGGER.critical('RabbitMQ closed the connection: %r', error)
             self.reconnect()
             return False
 
-        except consumer.ConsumerException as exception:
-            self.record_exception(exception, True)
-            self.on_error(message.method)
+        except consumer.ConsumerException as error:
+            self.record_exception(error, True)
+            self.reject(message.delivery_tag, True)
+            self.processing_failure()
             return False
 
-        except consumer.MessageException as exception:
-            self.record_exception(exception, True)
-            self.on_error(message.method)
+        except consumer.MessageException as error:
+            self.record_exception(error, True)
+            self.reject(message.delivery_tag, False)
             return False
 
-        except Exception as exception:
-            self.record_exception(exception, False)
-            self.on_error(message.method)
+        except Exception as error:
+            self.record_exception(error, False)
+            self.reject(message.delivery_tag, True)
+            self.processing_failure()
             return False
 
         return True

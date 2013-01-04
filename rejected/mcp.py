@@ -327,12 +327,12 @@ class MasterControlProgram(state.State):
                 continue
 
             if not process.is_alive():
-                LOGGER.warning('Found dead consumer %s', process.name)
+                LOGGER.critical('Found dead consumer %s', process.name)
                 dead_processes.append(process.name)
-            #else:
-            #    LOGGER.debug('Asking %s for stats', process.name)
-            #    self._poll_data['processes'].append(process.name)
-            #    os.kill(process.pid, signal.SIGPROF)
+            else:
+                LOGGER.debug('Asking %s for stats', process.name)
+                #self._poll_data['processes'].append(process.name)
+                os.kill(process.pid, signal.SIGPROF)
 
         # Remove the objects if we have them
         for process_name in dead_processes:

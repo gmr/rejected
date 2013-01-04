@@ -528,7 +528,7 @@ class Process(multiprocessing.Process, state.State):
         if duration > self._MAX_ERROR_WINDOW:
             LOGGER.info('Resetting failure window, %i seconds since last',
                         duration)
-            self._counter[self.FAILURES] = self._max_error_count
+            self.reset_failure_counter()
         self.increment_count(self.FAILURES, -1)
         self._last_failure = time.time()
         if self._counts[self.FAILURES] == 0:
@@ -590,6 +590,12 @@ class Process(multiprocessing.Process, state.State):
         self._channel.basic_nack(delivery_tag=delivery_tag, requeue=requeue)
         self.increment_count(self.REJECTED)
         self.reset_state()
+
+    def reset_failure_counter(self):
+        """Reset the failure counter to the max error count"""
+        LOGGER.debug('Resetting the failure counter to %i',
+                     self._max_error_count)
+        self._counts[self.FAILURES] = self._max_error_count
 
     def reset_state(self):
         """Reset the runtime state after processing a message to either idle
@@ -696,9 +702,9 @@ class Process(multiprocessing.Process, state.State):
         self._ack = self._config.get('ack', True)
 
         # How many errors until the process stops
-        self._max_error_count = self._config.get('max_errors',
-                                                 self._MAX_ERROR_COUNT)
-        self._counts[self.FAILURES] = self._max_error_count
+        self._max_error_count = int(self._config.get('max_errors',
+                                                     self._MAX_ERROR_COUNT))
+        self.reset_failure_counter()
 
         # Get the heartbeat interval
         self._hbinterval = self._config.get('heartbeat_interval',

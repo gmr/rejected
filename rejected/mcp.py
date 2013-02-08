@@ -607,7 +607,10 @@ class MasterControlProgram(state.State):
             self._stop_process(process)
 
         # Wait for them to shutdown cleanly
-        time.sleep(2)
+        try:
+            time.sleep(2)
+        except KeyboardInterrupt:
+            pass
 
         iterations = 0
         while multiprocessing.active_children():

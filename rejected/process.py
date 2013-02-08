@@ -559,14 +559,13 @@ class Process(multiprocessing.Process, state.State):
         self._connection = self.connect_to_rabbitmq(self._connections,
                                                     self._connection_name)
 
-    def record_exception(self, error, handled=False):
+    def record_exception(self, error, handled=False, exc_info=None):
         """Record an exception
 
         :param exception error: The exception to record
         :param bool handled: Was the exception handled
 
         """
-        formatted_lines = traceback.format_exc().splitlines()
         self.increment_count(self.ERROR)
         if handled:
             LOGGER.warning('Processor handled %s: %s',
@@ -575,9 +574,11 @@ class Process(multiprocessing.Process, state.State):
             LOGGER.critical('Processor threw an uncaught exception %s: %s',
                             error.__class__.__name__, error)
             self.increment_count(self.UNHANDLED_EXCEPTIONS)
-        for offset, line in enumerate(formatted_lines):
-            LOGGER.debug('(%s) %i: %s', error.__class__.__name__,
-                         offset, line.strip())
+        if exc_info:
+            formatted_lines = traceback.format_exception(*exc_info)
+            for offset, line in enumerate(formatted_lines):
+                LOGGER.debug('(%s) %i: %s', error.__class__.__name__,
+                             offset, line.strip())
 
     def reject(self, delivery_tag, requeue=True):
         """Reject the message on the broker and log it. We should move this to
@@ -636,7 +637,10 @@ class Process(multiprocessing.Process, state.State):
                 self._connection.ioloop.start()
             except KeyboardInterrupt:
                 self.stop()
-                self._connection.ioloop.start()
+                try:
+                    self._connection.ioloop.start()
+                except KeyboardInterrupt:
+                    LOGGER.warning('CTRL-C while waiting for clean shutdown')
             while not self._connection and self.is_connecting:
                 time.sleep(0.1)
         LOGGER.debug('Exiting %s', self.name)
@@ -842,18 +846,18 @@ class Process(multiprocessing.Process, state.State):
             return False
 
         except consumer.ConsumerException as error:
-            self.record_exception(error, True)
+            self.record_exception(error, True, sys.exc_info())
             self.reject(message.delivery_tag, True)
             self.processing_failure()
             return False
 
         except consumer.MessageException as error:
-            self.record_exception(error, True)
+            self.record_exception(error, True, sys.exc_info())
             self.reject(message.delivery_tag, False)
             return False
 
         except Exception as error:
-            self.record_exception(error, False)
+            self.record_exception(error, True, sys.exc_info())
             self.reject(message.delivery_tag, True)
             self.processing_failure()
             return False

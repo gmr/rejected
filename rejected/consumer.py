@@ -7,14 +7,11 @@ import bz2
 import copy
 import csv
 import datetime
-try:
-    import simplejson as json
-except ImportError:
-    import json
 import logging
 import pickle
 import pika
 import plistlib
+import simplejson as json
 import StringIO as stringio
 import time
 import uuid
@@ -92,6 +89,12 @@ class Consumer(object):
         self._message = None
         self._message_body = None
 
+        # Run any child object specified initialization
+        self._initialize()
+
+    def _initialize(self):
+        """Extend this method for any initialization tasks"""
+        pass
 
     @property
     def message_app_id(self):
@@ -455,7 +458,7 @@ class Consumer(object):
         :rtype: str
 
         """
-        return json.dumps(value)
+        return json.dumps(value, ensure_ascii=False)
 
     def _dump_pickle_value(self, value):
         """Serialize a value into the pickle format
@@ -621,7 +624,7 @@ class Consumer(object):
         :rtype: object
 
         """
-        return json.loads(value, use_decimal=True)
+        return json.loads(value, ensure_ascii=False, use_decimal=True)
 
     def _load_pickle_value(self, value):
         """Deserialize a pickle string returning the native Python data type

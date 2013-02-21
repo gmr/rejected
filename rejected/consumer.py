@@ -11,7 +11,7 @@ import logging
 import pickle
 import pika
 import plistlib
-import simplejson as json
+import simplejson
 import StringIO as stringio
 import time
 import uuid
@@ -458,7 +458,7 @@ class Consumer(object):
         :rtype: str
 
         """
-        return json.dumps(value, ensure_ascii=False)
+        return simplejson.dumps(value, ensure_ascii=False)
 
     def _dump_pickle_value(self, value):
         """Serialize a value into the pickle format
@@ -624,7 +624,7 @@ class Consumer(object):
         :rtype: object
 
         """
-        return json.loads(value, ensure_ascii=False, use_decimal=True)
+        return simplejson.loads(value, use_decimal=True)
 
     def _load_pickle_value(self, value):
         """Deserialize a pickle string returning the native Python data type

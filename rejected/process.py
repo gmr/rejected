@@ -124,6 +124,7 @@ class Process(multiprocessing.Process, state.State):
 
         """
         if not self.can_respond:
+            LOGGER.warning('Can not ack message, disconnected from RabbitMQ')
             self.increment_count(self.CLOSED_ON_COMPLETE)
             return
         LOGGER.debug('Acking %s', delivery_tag)
@@ -661,6 +662,7 @@ class Process(multiprocessing.Process, state.State):
         if not self._ack:
             raise RuntimeError('Can not rejected messages when ack is False')
         if not self.can_respond:
+            LOGGER.warning('Can not reject message, disconnected from RabbitMQ')
             self.increment_count(self.CLOSED_ON_COMPLETE)
             if self.is_processing:
                 self.reset_state()

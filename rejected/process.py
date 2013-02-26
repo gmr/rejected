@@ -73,7 +73,7 @@ class Process(multiprocessing.Process, state.State):
     TIME_WAITED = 'idle_time'
     UNHANDLED_EXCEPTIONS = 'unhandled_exceptions'
 
-    _HBINTERVAL = 30
+    _HBINTERVAL = 120
 
     # Locations to search for newrelic ini files
     INI_DIRS = ['.', '/etc/', '/etc/newrelic']
@@ -505,7 +505,7 @@ class Process(multiprocessing.Process, state.State):
         self.set_state(self.STATE_IDLE)
         self.setup_channel()
 
-    def on_connection_closed(self, unused):
+    def on_connection_closed(self, unused, code, text):
         """This method is invoked by pika when the connection to RabbitMQ is
         closed unexpectedly. Since it is unexpected, we will reconnect to
         RabbitMQ if it disconnects.
@@ -513,7 +513,8 @@ class Process(multiprocessing.Process, state.State):
         :param pika.connection.Connection unused: The closed connection
 
         """
-        LOGGER.critical('Connection from RabbitMQ closed (%r)', self._state)
+        LOGGER.critical('Connection from RabbitMQ closed in state %i (%s, %s)',
+                        self.state_description, code, text)
         self._channel = None
         if not self.is_shutting_down:
             self.reconnect()

@@ -606,17 +606,18 @@ class MasterControlProgram(state.State):
         for process in active_processes:
             self._stop_process(process)
 
-        # Wait for them to shutdown cleanly
-        try:
-            time.sleep(2)
-        except KeyboardInterrupt:
-            pass
-
         iterations = 0
         while multiprocessing.active_children():
             LOGGER.debug('Waiting on %i active processes to shut down',
                          self.total_process_count)
-            time.sleep(1)
+            try:
+                time.sleep(1)
+            except KeyboardInterrupt:
+                LOGGER.info('Caught CTRL-C, Killing Children')
+                self._kill_processes()
+                self._set_state(self.STATE_STOPPED)
+                return
+
             iterations += 1
 
             # If the shutdown process waited long enough, kill the consumers

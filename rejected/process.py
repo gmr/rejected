@@ -61,6 +61,7 @@ class Process(multiprocessing.Process, state.State):
 
     # Counter constants
     ACKED = 'acked'
+    CLOSED_ON_COMPLETE = 'closed_on_complete'
     ERROR = 'failed'
     FAILURES = 'failures_until_stop'
     PROCESSED = 'processed'
@@ -96,6 +97,7 @@ class Process(multiprocessing.Process, state.State):
         self._application = None
         self._channel = None
         self._config = None
+        self._connection_id = 0
         self._connection_name = None
         self._connections = None
         self._consumer = None
@@ -105,6 +107,7 @@ class Process(multiprocessing.Process, state.State):
         self._last_counts = None
         self._last_failure = 0
         self._last_stats_time = None
+        self._message_connection_id = None
         self._max_framesize = pika.spec.FRAME_MAX_SIZE
         self._qos_prefetch = None
         self._state = self.STATE_INITIALIZING
@@ -120,6 +123,9 @@ class Process(multiprocessing.Process, state.State):
         :param str delivery_tag: Delivery tag to acknowledge
 
         """
+        if not self.can_respond:
+            self.increment_count(self.CLOSED_ON_COMPLETE)
+            return
         LOGGER.debug('Acking %s', delivery_tag)
         self._channel.basic_ack(delivery_tag=delivery_tag)
         self.increment_count(self.ACKED)
@@ -192,6 +198,18 @@ class Process(multiprocessing.Process, state.State):
                          qos_prefetch, self._qos_prefetch)
             return self.set_qos_prefetch(qos_prefetch)
 
+    @property
+    def can_respond(self):
+        """Indicates if the process can still respond to RabbitMQ when the
+        processing of a message has completed.
+
+        :return: bool
+
+        """
+        if not self._channel:
+            return False
+        return self._message_connection_id == self._connection_id
+
     def cancel_consumer_with_rabbitmq(self):
         """Tell RabbitMQ the process no longer wants to consumer messages."""
         LOGGER.info('Sending a Basic.Cancel to RabbitMQ')
@@ -215,6 +233,7 @@ class Process(multiprocessing.Process, state.State):
                      config[name]['host'], config[name]['port'],
                      config[name]['vhost'], config[name]['user'])
         self.set_state(self.STATE_CONNECTING)
+        self._connection_id += 1
         parameters = self.get_connection_parameters(config[name]['host'],
                                                     config[name]['port'],
                                                     config[name]['vhost'],
@@ -351,6 +370,53 @@ class Process(multiprocessing.Process, state.State):
         """
         self._counts[counter] += value
 
+    def invoke_consumer(self, message):
+        """Wrap the actual processor processing bits
+
+        :param Message message: Message to process
+        :raises: consumer.ConsumerException
+
+        """
+        self.start_message_processing()
+        # Try and process the message
+        try:
+            self._consumer.process(message)
+
+        except KeyboardInterrupt:
+
+            self.reject(message.delivery_tag, True)
+            self.stop()
+            return False
+
+        except exceptions.ChannelClosed as error:
+            LOGGER.critical('RabbitMQ closed the channel: %r', error)
+            self.reconnect()
+            return False
+
+        except exceptions.ConnectionClosed as error:
+            LOGGER.critical('RabbitMQ closed the connection: %r', error)
+            self.reconnect()
+            return False
+
+        except consumer.ConsumerException as error:
+            self.record_exception(error, True, sys.exc_info())
+            self.reject(message.delivery_tag, True)
+            self.processing_failure()
+            return False
+
+        except consumer.MessageException as error:
+            self.record_exception(error, True, sys.exc_info())
+            self.reject(message.delivery_tag, False)
+            return False
+
+        except Exception as error:
+            self.record_exception(error, True, sys.exc_info())
+            self.reject(message.delivery_tag, True)
+            self.processing_failure()
+            return False
+
+        return True
+
     @property
     def is_idle(self):
         """Is the system idle
@@ -396,6 +462,7 @@ class Process(multiprocessing.Process, state.State):
 
         """
         return {self.ACKED: 0,
+                self.CLOSED_ON_COMPLETE: 0,
                 self.ERROR: 0,
                 self.FAILURES: 0,
                 self.UNHANDLED_EXCEPTIONS: 0,
@@ -445,7 +512,7 @@ class Process(multiprocessing.Process, state.State):
         :param pika.connection.Connection unused: The closed connection
 
         """
-        LOGGER.critical('Connection from RabbitMQ closed: %r', unused)
+        LOGGER.critical('Connection from RabbitMQ closed (%r)', self._state)
         self._channel = None
         if not self.is_shutting_down:
             self.reconnect()
@@ -474,6 +541,9 @@ class Process(multiprocessing.Process, state.State):
 
         # Allow the consumer to gracefully stop and then stop the IOLoop
         self.stop_consumer()
+
+        # Stop the IOLoop
+        self._connection.ioloop.stop()
 
         # Note that shutdown is complete and set the state accordingly
         LOGGER.info('Shutdown complete')
@@ -513,7 +583,7 @@ class Process(multiprocessing.Process, state.State):
         if method.redelivered:
             self.increment_count(self.REDELIVERED)
         self._state_start = time.time()
-        if not self._process(message):
+        if not self.invoke_consumer(message):
             LOGGER.debug('Bypassing ack due to False return from _process')
             return
         self.increment_count(self.PROCESSED)
@@ -590,6 +660,11 @@ class Process(multiprocessing.Process, state.State):
         """
         if not self._ack:
             raise RuntimeError('Can not rejected messages when ack is False')
+        if not self.can_respond:
+            self.increment_count(self.CLOSED_ON_COMPLETE)
+            if self.is_processing:
+                self.reset_state()
+            return
         LOGGER.warning('Rejecting message %s %s requeue', delivery_tag,
                        'with' if requeue else 'without')
         self._channel.basic_nack(delivery_tag=delivery_tag, requeue=requeue)
@@ -632,7 +707,7 @@ class Process(multiprocessing.Process, state.State):
                             consumer, error)
             return
 
-        while not self.is_waiting_to_shutdown:
+        while not self.is_waiting_to_shutdown and not self.is_stopped:
             try:
                 self._connection.ioloop.start()
             except KeyboardInterrupt:
@@ -641,9 +716,11 @@ class Process(multiprocessing.Process, state.State):
                     self._connection.ioloop.start()
                 except KeyboardInterrupt:
                     LOGGER.warning('CTRL-C while waiting for clean shutdown')
-            while not self._connection and self.is_connecting:
-                time.sleep(0.1)
-        LOGGER.debug('Exiting %s', self.name)
+            if not self.is_stopped:
+                while not self._connection and self.is_connecting:
+                    time.sleep(0.1)
+
+        LOGGER.info('Exiting %s', self.name)
 
     def set_qos_prefetch(self, value=None):
         """Set the QOS Prefetch count for the channel.
@@ -760,6 +837,13 @@ class Process(multiprocessing.Process, state.State):
         signal.siginterrupt(signal.SIGABRT, False)
         signal.siginterrupt(signal.SIGPROF, False)
 
+    def start_message_processing(self):
+        """Keep track of the connection in case RabbitMQ disconnects while the
+        message is processing.
+
+        """
+        self._message_connection_id = self._connection_id
+
     def stop(self, signum=None, frame_unused=None):
         """Stop the consumer from consuming by calling BasicCancel and setting
         our state.
@@ -776,9 +860,8 @@ class Process(multiprocessing.Process, state.State):
             LOGGER.debug('Stop requested but already waiting to shut down')
             return
 
-        LOGGER.info('Shutting down')
-
         # Stop consuming
+        LOGGER.info('Shutting down')
         self.cancel_consumer_with_rabbitmq()
 
         # Wait until the consumer has finished processing to shutdown
@@ -818,51 +901,6 @@ class Process(multiprocessing.Process, state.State):
 
         """
         return self.count(self.ERROR) >= self._max_error_count
-
-    def _process(self, message):
-        """Wrap the actual processor processing bits
-
-        :param Message message: Message to process
-        :raises: consumer.ConsumerException
-
-        """
-        # Try and process the message
-        try:
-            self._consumer.process(message)
-
-        except KeyboardInterrupt:
-            self.reject(message.delivery_tag, True)
-            self.stop()
-            return False
-
-        except exceptions.ChannelClosed as error:
-            LOGGER.critical('RabbitMQ closed the channel: %r', error)
-            self.reconnect()
-            return False
-
-        except exceptions.ConnectionClosed as error:
-            LOGGER.critical('RabbitMQ closed the connection: %r', error)
-            self.reconnect()
-            return False
-
-        except consumer.ConsumerException as error:
-            self.record_exception(error, True, sys.exc_info())
-            self.reject(message.delivery_tag, True)
-            self.processing_failure()
-            return False
-
-        except consumer.MessageException as error:
-            self.record_exception(error, True, sys.exc_info())
-            self.reject(message.delivery_tag, False)
-            return False
-
-        except Exception as error:
-            self.record_exception(error, True, sys.exc_info())
-            self.reject(message.delivery_tag, True)
-            self.processing_failure()
-            return False
-
-        return True
 
 
 class ReconnectConnection(Exception):

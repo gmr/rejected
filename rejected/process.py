@@ -8,6 +8,10 @@ import math
 import multiprocessing
 import os
 import pika
+try:
+    import cProfile as profile
+except ImportError:
+    import profile
 from pika.adapters import tornado_connection
 import signal
 import sys
@@ -593,6 +597,18 @@ class Process(multiprocessing.Process, state.State):
             self.ack_message(method.delivery_tag)
         self.reset_state()
 
+    @property
+    def profile_file(self):
+        if not self._kwargs['profile']:
+            return None
+
+        if os.path.exists(self._kwargs['profile']) and \
+                os.path.isdir(self._kwargs['profile']):
+            return '%s/%s-%s.prof' % (os.path.normpath(self._kwargs['profile']),
+                                      os.getpid(),
+                                      self._kwargs['consumer_name'])
+        return None
+
     def processing_failure(self):
         """Called when message processing failure happens due to a
         ConsumerException or an unhandled exception.
@@ -698,6 +714,15 @@ class Process(multiprocessing.Process, state.State):
 
     def run(self):
         """Start the consumer"""
+        if self.profile_file:
+            LOGGER.info('Profiling to %s', self.profile_file)
+            profile.runctx('self._run()', globals(), locals(),
+                           self.profile_file)
+        else:
+            self._run()
+
+    def _run(self):
+        """Run method that can be profiled"""
         try:
             self.setup(self._kwargs['config'],
                        self._kwargs['connection_name'],

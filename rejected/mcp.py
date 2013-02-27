@@ -27,11 +27,13 @@ class MasterControlProgram(state.State):
     _POLL_RESULTS_INTERVAL = 3.0
     _SHUTDOWN_WAIT = 1
 
-    def __init__(self, config, consumer=None):
+    def __init__(self, config, consumer=None, profile=None):
         """Initialize the Master Control Program
 
         :param dict config: The full content from the YAML config file
         :param str consumer: If specified, only run processes for this consumer
+        :param str profile: Optional profile output directory to
+                            enable profiling
 
         """
         self._set_process_name()
@@ -45,6 +47,7 @@ class MasterControlProgram(state.State):
         self._last_poll_results = dict()
         self._poll_data = {'time': 0, 'processes': list()}
         self._poll_timer = None
+        self._profile = profile
         self._results_timer = None
         self._stats = dict()
         self._stats_queue = multiprocessing.Queue()
@@ -129,7 +132,6 @@ class MasterControlProgram(state.State):
         LOGGER.debug('Checking minimum consumer process levels')
         for name in self._consumers:
             for connection in self._consumers[name]['connections']:
-
                 processes_needed = self._process_spawn_qty(name, connection)
                 if processes_needed:
                     LOGGER.debug('Need to spawn %i processes for %s on %s',
@@ -287,6 +289,7 @@ class MasterControlProgram(state.State):
         kwargs = {'config': self._config,
                   'connection_name': connection_name,
                   'consumer_name': consumer_name,
+                  'profile': self._profile,
                   'stats_queue': self._stats_queue}
         return process_name, process.Process(name=process_name, kwargs=kwargs)
 

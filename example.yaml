@@ -38,10 +38,10 @@ Logging:
   version: 1
   formatters:
     verbose:
-      format: '%(levelname) -10s %(asctime)s %(process)-6d %(processName) -35s %(name) -35s %(funcName) -30s: %(message)s'
-      datefmt: '%Y-%m-%d %H:%M:%S'
+      format: "%(levelname) -10s %(asctime)s %(process)-6d %(processName) -35s %(name) -35s %(funcName) -30s: %(message)s"
+      datefmt: "%Y-%m-%d %H:%M:%S"
     syslog:
-      format: " %(levelname)s <PID %(process)d:%(processName)s> %(name)s.%(funcName)s(): %(message)s"
+      format: "%(levelname)s <PID %(process)d:%(processName)s> %(name)s.%(funcName)s(): %(message)s"
   filters: []
   handlers:
     console:

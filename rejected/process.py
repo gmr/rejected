@@ -3,6 +3,7 @@ connection state and collects stats about the consuming process.
 
 """
 from pika import exceptions
+import importlib
 import logging
 import math
 import multiprocessing
@@ -27,30 +28,25 @@ from rejected import state
 LOGGER = logging.getLogger(__name__)
 
 
-def import_namespaced_class(namespaced_class):
+def import_consumer(consumer):
     """Pass in a string in the format of foo.Bar, foo.bar.Baz, foo.bar.baz.Qux
     and it will return a handle to the class
 
-    :param str namespaced_class: The namespaced class
+    :param str consumer: The consumer class in module.Consumer format
     :return: tuple(Class, str)
 
     """
-    LOGGER.debug('Importing %s', namespaced_class)
-    # Split up our string containing the import and class
-    parts = namespaced_class.split('.')
 
-    # Build our strings for the import name and the class name
+    parts = consumer.split('.')
     import_name = '.'.join(parts[0:-1])
-    class_name = parts[-1]
-
-    import_handle = __import__(import_name, fromlist=class_name)
+    import_handle = importlib.import_module(import_name)
     if hasattr(import_handle, '__version__'):
         version = import_handle.__version__
     else:
         version = None
 
     # Return the class handle
-    return getattr(import_handle, class_name), version
+    return getattr(import_handle, parts[-1]), version
 
 
 class Process(multiprocessing.Process, state.State):
@@ -114,6 +110,7 @@ class Process(multiprocessing.Process, state.State):
         self._message_connection_id = None
         self._max_framesize = pika.spec.FRAME_MAX_SIZE
         self._qos_prefetch = None
+        self._prepend_path = None
         self._state = self.STATE_INITIALIZING
         self._state_start = time.time()
         self._stats_queue = None
@@ -322,12 +319,11 @@ class Process(multiprocessing.Process, state.State):
         :raises: ImportError
 
         """
-        # Try and import the module
         try:
-            consumer_, version = import_namespaced_class(config['consumer'])
-        except Exception as error:
-            LOGGER.error('Error importing the consumer "%s": %s',
-                         config['consumer'], error)
+            consumer_, version = import_consumer(config['consumer'])
+        except ImportError as error:
+            LOGGER.exception('Error importing the consumer %s: %s',
+                             config['consumer'], error)
             exc_type, exc_value, exc_traceback = sys.exc_info()
             lines = traceback.extract_tb(exc_traceback)
             for line in lines:

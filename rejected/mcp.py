@@ -286,7 +286,7 @@ class MasterControlProgram(state.State):
                                   self._new_process_number(consumer_name))
         LOGGER.debug('Creating a new process for %s: %s',
                      connection_name, process_name)
-        kwargs = {'config': self._config,
+        kwargs = {'config': self._config['Application'],
                   'connection_name': connection_name,
                   'consumer_name': consumer_name,
                   'profile': self._profile,
@@ -361,8 +361,8 @@ class MasterControlProgram(state.State):
         :rtype: bool
 
         """
-        return  (time.time() -
-                 self._poll_data['timestamp']) >= self._poll_interval
+        return (time.time() -
+                self._poll_data['timestamp']) >= self._poll_interval
 
     def _poll_results_check(self):
         """Check the polling results by checking to see if the stats queue is
@@ -481,6 +481,7 @@ class MasterControlProgram(state.State):
     def _start_poll_results_timer(self):
         """Start the poll results timer to see if there are results from the
         last poll yet.
+
         """
         self._results_timer = self._start_timer(self._results_timer,
                                                 'poll_results_timer',
@@ -527,11 +528,11 @@ class MasterControlProgram(state.State):
     def _start_timer(self, timer, name, duration, callback):
         """Start a timer for the given object, name, duration and callback.
 
-        :param threading.Timer timer: The previous timer instance
+        :param threading._Timer timer: The previous timer instance
         :param str name: The timer name
         :param int or float duration: The timer duration
         :param method callback: The method to call when timer fires
-        :rtype: threading.Timer
+        :rtype: threading._Timer
 
         """
         if timer and timer.is_alive():
@@ -550,10 +551,10 @@ class MasterControlProgram(state.State):
         minimal amount of processes, setting up the runtime data as well.
 
         """
-        for name in self._config['Consumers']:
+        for name in self._config['Application']['Consumers']:
 
             # Hold the config as a shortcut
-            config = self._config['Consumers'][name]
+            config = self._config['Application']['Consumers'][name]
 
             # If queue is not configured, report the error but skip processes
             if 'queue' not in config:
@@ -640,19 +641,19 @@ class MasterControlProgram(state.State):
         self._set_state(self.STATE_ACTIVE)
 
         # Get the consumer section from the config
-        if 'Consumers' not in self._config:
+        if 'Consumers' not in self._config['Application']:
             LOGGER.error('Missing Consumers section of configuration, '
-                         'aborting: %r', self._config)
+                         'aborting: %r', self._config['Application'])
             return self._set_state(self.STATE_STOPPED)
 
         # Strip consumers if a consumer is specified
         if self._consumer:
-            consumers = self._config['Consumers'].keys()
+            consumers = self._config['Application']['Consumers'].keys()
             for consumer in consumers:
                 if consumer != self._consumer:
                     LOGGER.debug('Removing %s for %s only processing',
                                  consumer, self._consumer)
-                    del self._config['Consumers'][consumer]
+                    del self._config['Application']['Consumers'][consumer]
 
         # Setup consumers and start the processes
         self._setup_consumers()
@@ -661,7 +662,7 @@ class MasterControlProgram(state.State):
         self._start_poll_timer()
 
         # Loop for the lifetime of the app, sleeping 0.2 seconds at a time
-        while self.is_running:
+        while self.is_running and multiprocessing.active_children():
             time.sleep(0.2)
 
         # Note we're exiting run

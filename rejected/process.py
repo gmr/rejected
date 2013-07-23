@@ -804,7 +804,9 @@ class Process(multiprocessing.Process, state.State):
         # Setup the consumer
         self._consumer = self.get_consumer(self._config)
         if not self._consumer:
-            raise ImportError('Could not import and start processor')
+            LOGGER.critical('Could not import and start processor')
+            self._set_state(self.STATE_STOPPED)
+            return
 
         # Set the routing information
         self._queue_name = self._config['queue']

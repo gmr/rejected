@@ -24,7 +24,7 @@ class Controller(clihelper.Controller):
         :rtype: rejected.mcp.MasterControlProgram
 
         """
-        return mcp.MasterControlProgram(self._get_application_config(),
+        return mcp.MasterControlProgram(self._config,
                                         consumer=self._options.consumer,
                                         profile=self._options.profile)
 
@@ -45,7 +45,7 @@ class Controller(clihelper.Controller):
 
     def _shutdown(self):
         """Shutdown the MCP and child processes cleanly"""
-        self._set_state(self._STATE_SHUTTING_DOWN)
+        self.set_state(self.STATE_STOP_REQUESTED)
         signal.setitimer(signal.ITIMER_PROF, 0, 0)
         self._mcp.stop_processes()
         if self._mcp.is_running:
@@ -62,13 +62,15 @@ class Controller(clihelper.Controller):
             LOGGER.info('MCP exited cleanly')
 
         # Change our state
-        self._shutdown_complete()
+        self._stopped()
 
     def run(self):
         """Run the rejected Application"""
         self._setup()
         self._mcp = self._master_control_program()
         self._mcp.run()
+        if self.is_running:
+            self._shutdown()
 
 
 def _cli_options(parser):

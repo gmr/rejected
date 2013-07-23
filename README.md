@@ -15,7 +15,7 @@ Example Processor
     import logging
 
     LOGGER = logging.getLogger(__name__)
-    
+
 
     class Test(consumer.Consumer):
         def process(self, message):

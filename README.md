@@ -12,10 +12,14 @@ data from the consumer processes and report on it.
 Example Processor
 -----------------
     from rejected import consumer
+    import logging
 
-    class Test(consumer.COnsumer):
+    LOGGER = logging.getLogger(__name__)
+    
+
+    class Test(consumer.Consumer):
         def process(self, message):
-            self._logger.debug('In Test.process: %s' % message.body)
+            LOGGER.debug('In Test.process: %s' % message.body)
 
 Example Configuration
 ---------------------
@@ -49,10 +53,10 @@ Example Configuration
          version: 1
          formatters:
              verbose:
-               format: '%(levelname) -10s %(asctime)s %(process)-6d %(processName) -15s %(name) -25s %(funcName) -20s: %(message)s'
-               datefmt: '%Y-%m-%d %H:%M:%S'
+               format: "%(levelname) -10s %(asctime)s %(process)-6d %(processName) -15s %(name) -25s %(funcName) -20s: %(message)s"
+               datefmt: "%Y-%m-%d %H:%M:%S"
              syslog:
-               format: " %(levelname)s <PID %(process)d:%(processName)s> %(name)s.%(funcName)s(): %(message)s"
+               format: "%(levelname)s <PID %(process)d:%(processName)s> %(name)s.%(funcName)s(): %(message)s"
          filters: []
          handlers:
              console:

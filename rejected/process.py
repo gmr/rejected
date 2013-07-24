@@ -229,7 +229,7 @@ class Process(multiprocessing.Process, state.State):
 
         :param dict config: The Connections section of the configuration
         :param str name: The name of the connection
-        :rtype: pika.adapters.tornado_conneciton.TornadoConnection
+        :rtype: pika.adapters.tornado_connection.TornadoConnection
 
         """
         LOGGER.debug('Connecting to %s:%i:%s as %s',
@@ -341,8 +341,8 @@ class Process(multiprocessing.Process, state.State):
         if 'config' in config:
             kwargs['configuration'] = config['config']
 
-        if consumer_.SUPPORTS_PROCESS_ARG:
-            kwargs['process'] = self
+        if consumer_.WANTS_CONNECTION_CONFIG:
+            kwargs['connections'] = self._connections
 
         try:
             return consumer_(**kwargs)
@@ -497,7 +497,6 @@ class Process(multiprocessing.Process, state.State):
         LOGGER.info('Channel opened')
         self._channel = channel
         self.add_on_channel_close_callback()
-        self.set_state(self.STATE_IDLE)
         self.setup_channel()
 
     def on_connection_closed(self, unused, code, text):
@@ -842,6 +841,8 @@ class Process(multiprocessing.Process, state.State):
         consumer object.
 
         """
+        self.set_state(self.STATE_IDLE)
+
         # Set the channel in the consumer
         try:
             self._consumer.set_channel(self._channel)

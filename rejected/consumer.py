@@ -14,35 +14,36 @@ import plistlib
 import simplejson
 import StringIO as stringio
 import time
+from pika.adapters import tornado_connection
 import uuid
 import yaml
 import zlib
 
-logger = logging.getLogger(__name__)
+LOGGER = logging.getLogger(__name__)
 
 # Optional imports
 try:
     import bs4
 except ImportError:
-    logger.warning('BeautifulSoup not found, disabling html and xml support')
+    LOGGER.warning('BeautifulSoup not found, disabling html and xml support')
     bs4 = None
 
 try:
     import couchconfig
 except ImportError:
-    logger.warning('couchconfig not found, disabling configuration support')
+    LOGGER.warning('couchconfig not found, disabling configuration support')
     couchconfig = None
 
 try:
     import pgsql_wrapper
 except ImportError:
-    logger.warning('pgsql_wrapper not found, disabling PostgreSQL support')
+    LOGGER.warning('pgsql_wrapper not found, disabling PostgreSQL support')
     pgsql_wrapper = None
 
 try:
     import redis
 except ImportError:
-    logger.warning('redis-py not found, disabling Redis support')
+    LOGGER.warning('redis-py not found, disabling Redis support')
     redis = None
 
 
@@ -72,14 +73,15 @@ class Consumer(object):
                           'application/vnd.python.pickle']
     _YAML_MIME_TYPES = ['text/yaml', 'text/x-yaml']
 
-    SUPPORTS_PROCESS_ARG = False
+    # Default to know for any consumers that may have overwritten __init__
+    WANTS_CONNECTION_CONFIG = False
 
-    def __init__(self, configuration, process=None):
+    def __init__(self, configuration, connections=None):
         """Creates a new instance of a Consumer class. To perform
         initialization tasks, extend Consumer._initialize
 
         :param dict configuration: The configuration from rejected
-        :param object process: The process that started the consumer
+        :param dict connections: All connection configuration
 
         """
         # Carry the configuration for use elsewhere
@@ -87,7 +89,9 @@ class Consumer(object):
 
         # Default channel attribute
         self._channel = None
-        self._process = None
+
+        # Assign the parent process object
+        self._connections = connections
 
         # Each message received will be carried as an attribute
         self._message = None
@@ -99,6 +103,42 @@ class Consumer(object):
     def _initialize(self):
         """Extend this method for any initialization tasks"""
         pass
+
+    def connect_to_rabbitmq(self, name, callback):
+        """Connect to RabbitMQ returning the connection handle.
+
+        :param str name: The name of the connection
+        :param method callback: The callback method in the consumer
+        :rtype: pika.adapters.tornado_connection.TornadoConnection
+
+        """
+        config = self._connections
+        LOGGER.debug('Consumer connecting to %s:%i:%s as %s',
+                     config[name]['host'], config[name]['port'],
+                     config[name]['vhost'], config[name]['user'])
+        parameters = self.get_connection_parameters(config[name]['host'],
+                                                    config[name]['port'],
+                                                    config[name]['vhost'],
+                                                    config[name]['user'],
+                                                    config[name]['pass'])
+        return tornado_connection.TornadoConnection(parameters,
+                                                    callback,
+                                                    stop_ioloop_on_close=False)
+
+    def get_connection_parameters(self, host, port, vhost, username, password):
+        """Return connection parameters for a pika connection.
+
+        :param str host: The RabbitMQ host to connect to
+        :param int port: The port to connect on
+        :param str vhost: The virtual host
+        :param str username: The username to use
+        :param str password: The password to use
+        :rtype: pika.ConnectionParameters
+
+        """
+        credentials = pika.PlainCredentials(username, password)
+        return pika.ConnectionParameters(host, port, vhost, credentials,
+                                         socket_timeout=10)
 
     @property
     def message_app_id(self):
@@ -125,7 +165,7 @@ class Consumer(object):
         if self.message_content_encoding == 'utf-8':
             self._message.properties.content_encoding = None
             self._message_body = self._message.body
-            logger.debug('Coerced an incorrect content-encoding of UTF-8 to '
+            LOGGER.debug('Coerced an incorrect content-encoding of UTF-8 to '
                          'None')
 
         # Handle bzip2 compressed content
@@ -316,24 +356,24 @@ class Consumer(object):
         # Clear out our previous body values
         self._message_body = None
 
-        logger.debug('Received: %r', message_in)
+        LOGGER.debug('Received: %r', message_in)
         self._message = message_in
 
         # Validate the message type if the child sets _MESSAGE_TYPE
         if self._MESSAGE_TYPE and self._MESSAGE_TYPE != self.message_type:
-            logger.error('Received a non-supported message type: %s',
+            LOGGER.error('Received a non-supported message type: %s',
                          self.message_type)
 
             # Should the message be dropped or returned to the broker?
             if self._DROP_INVALID_MESSAGES:
-                logger.debug('Dropping the invalid message')
+                LOGGER.debug('Dropping the invalid message')
                 return
             else:
                 raise ConsumerException('Invalid message type')
 
         # Drop expired messages if desired
         if self._DROP_EXPIRED_MESSAGES and self.message_has_expired:
-            logger.debug('Message expired %i seconds ago, dropping.',
+            LOGGER.debug('Message expired %i seconds ago, dropping.',
                          time.time() - self.message_expiration)
             return
 
@@ -372,7 +412,7 @@ class Consumer(object):
         if content_encoding == 'bzip2':
             return self._encode_bz2(value)
 
-        logger.warning('Invalid content-encoding specified for auto-encoding')
+        LOGGER.warning('Invalid content-encoding specified for auto-encoding')
         return value
 
     def _auto_serialize(self, content_type, value):
@@ -384,33 +424,33 @@ class Consumer(object):
 
         """
         if content_type == 'application/json':
-            logger.debug('Auto-serializing content as JSON')
+            LOGGER.debug('Auto-serializing content as JSON')
             return self._dump_json_value(value)
 
         if content_type  in self._PICKLE_MIME_TYPES:
-            logger.debug('Auto-serializing content as Pickle')
+            LOGGER.debug('Auto-serializing content as Pickle')
             return self._dump_pickle_value(value)
 
         if content_type  == 'application/x-plist':
-            logger.debug('Auto-serializing content as plist')
+            LOGGER.debug('Auto-serializing content as plist')
             return self._dump_plist_value(value)
 
         if content_type  == 'text/csv':
-            logger.debug('Auto-serializing content as csv')
+            LOGGER.debug('Auto-serializing content as csv')
             return self._dump_csv_value(value)
 
         # If it's XML or HTML auto
         if (bs4 and isinstance(value, bs4.BeautifulSoup) and
             content_type in ('text/html', 'text/xml')):
-            logger.debug('Dumping BS4 object into HTML or XML')
+            LOGGER.debug('Dumping BS4 object into HTML or XML')
             return self._dump_bs4_value(value)
 
         # If it's YAML, load the content via pyyaml into a dict
         if self.message_content_type in self._YAML_MIME_TYPES:
-            logger.debug('Auto-serializing content as YAML')
+            LOGGER.debug('Auto-serializing content as YAML')
             return self._dump_yaml_value(value)
 
-        logger.warning('Invalid content-type specified for auto-serialization')
+        LOGGER.warning('Invalid content-type specified for auto-serialization')
         return value
 
     def _decode_bz2(self, value):
@@ -698,22 +738,22 @@ class Consumer(object):
 
         """
         # Convert the rejected.data.Properties object to a pika.BasicProperties
-        logger.debug('Converting properties')
+        LOGGER.debug('Converting properties')
         properties_out = self._get_pika_properties(properties)
 
         # Auto-serialize the content if needed
         if (not no_serialization and not isinstance(body, basestring) and
             properties.content_type):
-            logger.debug('Auto-serializing message body')
+            LOGGER.debug('Auto-serializing message body')
             body = self._auto_serialize(properties.content_type, body)
 
         # Auto-encode the message body if needed
         if not no_encoding and properties.content_encoding:
-            logger.debug('Auto-encoding message body')
+            LOGGER.debug('Auto-encoding message body')
             body = self._auto_encode(properties.content_encoding, body)
 
         # Publish the message
-        logger.debug('Publishing message to %s:%s', exchange, routing_key)
+        LOGGER.debug('Publishing message to %s:%s', exchange, routing_key)
         self._channel.basic_publish(exchange=exchange,
                                     routing_key=routing_key,
                                     properties=properties_out,
@@ -758,8 +798,8 @@ class Consumer(object):
             properties.correlation_id = properties.message_id
             properties.message_id = str(uuid.uuid4())
             properties.timestamp = int(time.time())
-            logger.debug('New message_id: %s', properties.message_id)
-            logger.debug('Correlation_id: %s', properties.correlation_id)
+            LOGGER.debug('New message_id: %s', properties.message_id)
+            LOGGER.debug('Correlation_id: %s', properties.correlation_id)
 
         # Redefine the reply to if needed
         reply_to = reply_to or properties.reply_to

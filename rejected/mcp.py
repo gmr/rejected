@@ -79,19 +79,21 @@ class MasterControlProgram(state.State):
                     continue
 
                 if process.status in [psutil.STATUS_DEAD, psutil.STATUS_ZOMBIE]:
-                    LOGGER.info('Found dead or zombie with %s fds',
-                                process.get_num_fds())
+                    try:
+                        LOGGER.info('Found dead or zombie process with %s fds',
+                                    process.get_num_fds())
+                    except psutil.NoSuchProcess:
+                        LOGGER.info('Found dead or zombie process')
+
                     dead_processes.append((consumer, name))
                 else:
                     active_processes.append(child)
 
         if dead_processes:
-            LOGGER.debug('Found %i dead processes to remove',
-                         len(dead_processes))
+            LOGGER.debug('Removing %i dead process(es)', len(dead_processes))
             for process in dead_processes:
                 self.remove_consumer_process(*process)
 
-        LOGGER.debug('%i active processes', len(active_processes))
         return active_processes
 
     def get_consumer_process(self, consumer, name):

@@ -20,6 +20,7 @@ import time
 from tornado import ioloop
 import traceback
 
+
 from rejected import __version__
 from rejected import consumer
 from rejected import data
@@ -243,7 +244,7 @@ class Process(multiprocessing.Process, state.State):
                                                     config[name]['pass'])
         return tornado_connection.TornadoConnection(parameters,
                                                     self.on_connection_open,
-                                                    True)
+                                                    stop_ioloop_on_close=True)
 
     def count(self, stat):
         """Return the current count quantity for a specific stat.
@@ -309,6 +310,7 @@ class Process(multiprocessing.Process, state.State):
         credentials = pika.PlainCredentials(username, password)
         return pika.ConnectionParameters(host, port, vhost, credentials,
                                          frame_max=self._max_framesize,
+                                         socket_timeout=10,
                                          heartbeat_interval=self._hbinterval)
 
     def get_consumer(self, config):
@@ -335,22 +337,15 @@ class Process(multiprocessing.Process, state.State):
         else:
             LOGGER.info('Creating consumer %s', config['consumer'])
 
-        # If we have a config, pass it in to the constructor
+        kwargs = {}
         if 'config' in config:
-            try:
-                return consumer_(config['config'])
-            except Exception as error:
-                LOGGER.error('Error creating the consumer "%s": %s',
-                             config['consumer'], error)
-                exc_type, exc_value, exc_traceback = sys.exc_info()
-                lines = traceback.extract_tb(exc_traceback)
-                for line in lines:
-                    LOGGER.error(line)
-                return
+            kwargs['configuration'] = config['config']
 
-        # No config to pass
+        if consumer_.SUPPORTS_PROCESS_ARG:
+            kwargs['process'] = self
+
         try:
-            return consumer_()
+            return consumer_(**kwargs)
         except Exception as error:
             LOGGER.error('Error creating the consumer "%s": %s',
                          config['consumer'], error)
@@ -516,7 +511,7 @@ class Process(multiprocessing.Process, state.State):
         LOGGER.critical('Connection from RabbitMQ closed in state %i (%s, %s)',
                         self.state_description, code, text)
         self._channel = None
-        if not self.is_shutting_down:
+        if not self.is_shutting_down and not self.is_waiting_to_shutdown:
             self.reconnect()
 
     def on_connection_open(self, unused):
@@ -527,6 +522,11 @@ class Process(multiprocessing.Process, state.State):
         :type unused: pika.adapters.tornado_connection.TornadoConnection
 
         """
+        # Hack due to Tornado adding to the root logger
+        rootLogger = logging.getLogger()
+        for handler in rootLogger.handlers:
+            rootLogger.removeHandler(handler)
+
         LOGGER.info('Connection opened')
         self.add_on_connection_close_callback()
         self.open_channel()
@@ -535,6 +535,12 @@ class Process(multiprocessing.Process, state.State):
 
         # Set the state to shutting down if it wasn't set as that during loop
         self.set_state(self.STATE_SHUTTING_DOWN)
+
+        # Reset any signal handlers
+        signal.signal(signal.SIGABRT, signal.SIG_IGN)
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+        signal.signal(signal.SIGPROF, signal.SIG_IGN)
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
 
         # If the connection is still around, close it
         if self._connection.is_open:
@@ -545,11 +551,13 @@ class Process(multiprocessing.Process, state.State):
         self.stop_consumer()
 
         # Stop the IOLoop
+        LOGGER.info('Stopping IOLoop')
         self._connection.ioloop.stop()
 
         # Note that shutdown is complete and set the state accordingly
-        LOGGER.info('Shutdown complete')
         self.set_state(self.STATE_STOPPED)
+        LOGGER.info('Shutdown complete')
+        os._exit(0)
 
     def on_sigprof(self, unused_signum, unused_frame):
         """Called when SIGPROF is sent to the process, will dump the stats, in
@@ -560,6 +568,7 @@ class Process(multiprocessing.Process, state.State):
 
         """
         LOGGER.info('Currently %s: %r', self.state_description, self._counts)
+        signal.siginterrupt(signal.SIGPROF, False)
 
     def open_channel(self):
         """Open a channel on the existing open connection to RabbitMQ"""
@@ -591,6 +600,8 @@ class Process(multiprocessing.Process, state.State):
         self.increment_count(self.PROCESSED)
         if self._ack:
             self.ack_message(method.delivery_tag)
+        if self.is_waiting_to_shutdown:
+            return self.on_ready_to_stop()
         self.reset_state()
 
     @property
@@ -716,6 +727,7 @@ class Process(multiprocessing.Process, state.State):
                            self.profile_file)
         else:
             self._run()
+        LOGGER.info('Exiting %s (%i, %i)', self.name, os.getpid(), os.getppid())
 
     def _run(self):
         """Run method that can be profiled"""
@@ -731,20 +743,11 @@ class Process(multiprocessing.Process, state.State):
                             consumer, error)
             return
 
-        while not self.is_waiting_to_shutdown and not self.is_stopped:
+        if not self.is_stopped:
             try:
                 self._connection.ioloop.start()
             except KeyboardInterrupt:
-                self.stop()
-                try:
-                    self._connection.ioloop.start()
-                except KeyboardInterrupt:
-                    LOGGER.warning('CTRL-C while waiting for clean shutdown')
-            if not self.is_stopped:
-                while not self._connection and self.is_connecting:
-                    time.sleep(0.1)
-
-        LOGGER.info('Exiting %s', self.name)
+                LOGGER.warning('CTRL-C while waiting for clean shutdown')
 
     def set_qos_prefetch(self, value=None):
         """Set the QOS Prefetch count for the channel.
@@ -775,15 +778,15 @@ class Process(multiprocessing.Process, state.State):
         # Use the parent object to set the state
         super(Process, self)._set_state(new_state)
 
-    def setup(self, config, connection_name, consumer_name, stats_queue):
+    def setup(self, config, connection_name,
+              consumer_name, stats_queue):
         """Initialize the consumer, setting up needed attributes and connecting
         to RabbitMQ.
 
         :param dict config: Consumer config section
-        :param str connection_name: The name of the connection
+\        :param str connection_name: The name of the connection
         :param str consumer_name: Consumer name for config
         :param multiprocessing.Queue stats_queue: The queue to append stats in
-        :raises: ImportError
 
         """
         LOGGER.info('Initializing for %s on %s', self.name, connection_name)
@@ -801,8 +804,8 @@ class Process(multiprocessing.Process, state.State):
         self._consumer = self.get_consumer(self._config)
         if not self._consumer:
             LOGGER.critical('Could not import and start processor')
-            self._set_state(self.STATE_STOPPED)
-            return
+            self.set_state(self.STATE_STOPPED)
+            os._exit(1)
 
         # Set the routing information
         self._queue_name = self._config['queue']
@@ -854,14 +857,16 @@ class Process(multiprocessing.Process, state.State):
                                     consumer_tag=self.name)
 
     def setup_signal_handlers(self):
-        """Setup the stats and stop signal handlers. Use SIGABRT instead of
-        SIGTERM due to the multiprocessing's behavior with SIGTERM.
-
+        """Setup the stats and stop signal handlers.
         """
-        signal.signal(signal.SIGABRT, self.stop)
+        signal.signal(signal.SIGABRT, signal.SIG_IGN)
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
         signal.signal(signal.SIGPROF, self.on_sigprof)
+        signal.signal(signal.SIGTERM, self.stop)
         signal.siginterrupt(signal.SIGABRT, False)
+        signal.siginterrupt(signal.SIGINT, False)
         signal.siginterrupt(signal.SIGPROF, False)
+        signal.siginterrupt(signal.SIGTERM, False)
 
     def start_message_processing(self):
         """Keep track of the connection in case RabbitMQ disconnects while the
@@ -887,14 +892,14 @@ class Process(multiprocessing.Process, state.State):
             return
 
         # Stop consuming
-        LOGGER.info('Shutting down')
         self.cancel_consumer_with_rabbitmq()
 
         # Wait until the consumer has finished processing to shutdown
         if self.is_processing:
+            LOGGER.info('Waiting for consumer to finish processing')
             self.set_state(self.STATE_STOP_REQUESTED)
-            if signum == signal.SIGABRT:
-                signal.siginterrupt(signal.SIGABRT, False)
+            if signum == signal.SIGTERM:
+                signal.siginterrupt(signal.SIGTERM, False)
             return
 
         self.on_ready_to_stop()

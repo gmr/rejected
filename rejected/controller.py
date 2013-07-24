@@ -45,7 +45,7 @@ class Controller(clihelper.Controller):
 
     def _shutdown(self):
         """Shutdown the MCP and child processes cleanly"""
-        self.set_state(self.STATE_STOP_REQUESTED)
+        self.set_state(self.STATE_STOPPING)
         signal.setitimer(signal.ITIMER_PROF, 0, 0)
         self._mcp.stop_processes()
         if self._mcp.is_running:
@@ -68,7 +68,11 @@ class Controller(clihelper.Controller):
         """Run the rejected Application"""
         self._setup()
         self._mcp = self._master_control_program()
-        self._mcp.run()
+        try:
+            self._mcp.run()
+        except KeyboardInterrupt:
+            LOGGER.info('Caught CTRL-C, shutting down')
+            clihelper.setup_logging(self._debug)
         if self.is_running:
             self._shutdown()
 

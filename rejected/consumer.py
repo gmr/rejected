@@ -72,11 +72,14 @@ class Consumer(object):
                           'application/vnd.python.pickle']
     _YAML_MIME_TYPES = ['text/yaml', 'text/x-yaml']
 
-    def __init__(self, configuration):
+    SUPPORTS_PROCESS_ARG = False
+
+    def __init__(self, configuration, process=None):
         """Creates a new instance of a Consumer class. To perform
         initialization tasks, extend Consumer._initialize
 
         :param dict configuration: The configuration from rejected
+        :param object process: The process that started the consumer
 
         """
         # Carry the configuration for use elsewhere
@@ -84,6 +87,7 @@ class Consumer(object):
 
         # Default channel attribute
         self._channel = None
+        self._process = None
 
         # Each message received will be carried as an attribute
         self._message = None

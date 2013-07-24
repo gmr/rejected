@@ -309,7 +309,6 @@ class MasterControlProgram(state.State):
         kwargs = {'config': self._config['Application'],
                   'connection_name': connection_name,
                   'consumer_name': consumer_name,
-                  'logging_config': self._config['Logging'],
                   'profile': self._profile,
                   'daemon': True,
                   'stats_queue': self._stats_queue}

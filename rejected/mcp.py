@@ -312,7 +312,7 @@ class MasterControlProgram(state.State):
                   'connection_name': connection_name,
                   'consumer_name': consumer_name,
                   'profile': self._profile,
-                  'daemon': True,
+                  'daemon': False,
                   'stats_queue': self._stats_queue}
         return process_name, process.Process(name=process_name, kwargs=kwargs)
 
@@ -613,7 +613,7 @@ class MasterControlProgram(state.State):
                     del self._config['Application']['Consumers'][consumer]
 
         # Setup the SIGCHLD handler
-        self.setup_signal_handler()
+        #self.setup_signal_handler()
 
         # Setup consumers and start the processes
         self._setup_consumers()
@@ -637,13 +637,13 @@ class MasterControlProgram(state.State):
         """
         return len(self._active_processes)
 
-    def on_sigchld(self, signum, frame):
-        LOGGER.info('Received %s', signum)
+    def on_sigalrt(self, signum, frame):
+        LOGGER.debug('Received %s', signum)
         if self.is_running and self._active_processes:
             self._poll()
         self.setup_signal_handler()
 
     def setup_signal_handler(self):
-        LOGGER.info('Setting up signal handler for SIGCHLD')
-        signal.signal(signal.SIGCHLD, self.on_sigchld)
-        signal.siginterrupt(signal.SIGCHLD, False)
+        LOGGER.debug('Setting up signal handler for SIGALRT')
+        signal.signal(signal.SIGALRT, self.on_sigalrt)
+        signal.siginterrupt(signal.SIGALRT, False)

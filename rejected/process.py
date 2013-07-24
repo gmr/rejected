@@ -556,6 +556,7 @@ class Process(multiprocessing.Process, state.State):
         # Note that shutdown is complete and set the state accordingly
         self.set_state(self.STATE_STOPPED)
         LOGGER.info('Shutdown complete')
+        os.kill(os.getppid(), signal.SIGALRM)
         os._exit(0)
 
     def on_sigprof(self, unused_signum, unused_frame):
@@ -861,6 +862,7 @@ class Process(multiprocessing.Process, state.State):
         """Setup the stats and stop signal handlers.
         """
         signal.signal(signal.SIGABRT, signal.SIG_IGN)
+        signal.signal(signal.SIGCHLD, signal.SIG_IGN)
         signal.signal(signal.SIGINT, signal.SIG_IGN)
         signal.signal(signal.SIGPROF, self.on_sigprof)
         signal.signal(signal.SIGTERM, self.stop)

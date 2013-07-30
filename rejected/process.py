@@ -563,7 +563,6 @@ class Process(multiprocessing.Process, state.State):
         self.set_state(self.STATE_STOPPED)
         LOGGER.info('Shutdown complete')
         os.kill(os.getppid(), signal.SIGALRM)
-        os._exit(0)
 
     def on_sigprof(self, unused_signum, unused_frame):
         """Called when SIGPROF is sent to the process, will dump the stats, in
@@ -881,15 +880,15 @@ class Process(multiprocessing.Process, state.State):
     def setup_signal_handlers(self):
         """Setup the stats and stop signal handlers.
         """
-        signal.signal(signal.SIGABRT, signal.SIG_IGN)
         signal.signal(signal.SIGCHLD, signal.SIG_IGN)
         signal.signal(signal.SIGINT, signal.SIG_IGN)
         signal.signal(signal.SIGPROF, self.on_sigprof)
-        signal.signal(signal.SIGTERM, self.stop)
-        signal.siginterrupt(signal.SIGABRT, False)
+        signal.signal(signal.SIGABRT, self.stop)
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
         signal.siginterrupt(signal.SIGINT, False)
         signal.siginterrupt(signal.SIGPROF, False)
-        signal.siginterrupt(signal.SIGTERM, False)
+        signal.siginterrupt(signal.SIGABRT, False)
+
 
     def start_message_processing(self):
         """Keep track of the connection in case RabbitMQ disconnects while the

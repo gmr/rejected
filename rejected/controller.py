@@ -26,7 +26,8 @@ class Controller(clihelper.Controller):
         """
         return mcp.MasterControlProgram(self._config,
                                         consumer=self._options.consumer,
-                                        profile=self._options.profile)
+                                        profile=self._options.profile,
+                                        quantity=self._options.quantity)
 
     def _prepend_python_path(self, path):  #pragma: no cover
         """Add the specified value to the python path.
@@ -43,15 +44,21 @@ class Controller(clihelper.Controller):
         if self._options.prepend_path:
             self._prepend_python_path(self._options.prepend_path)
 
-    def _shutdown(self):
+    def stop(self):
         """Shutdown the MCP and child processes cleanly"""
-        self.set_state(self.STATE_STOPPING)
+        LOGGER.info('Shutting down controller')
+        self.set_state(self.STATE_STOP_REQUESTED)
+
+        # Clear out the timer
         signal.setitimer(signal.ITIMER_PROF, 0, 0)
+
         self._mcp.stop_processes()
+
         if self._mcp.is_running:
-            LOGGER.debug('Waiting up to 3 seconds for MCP to shut things down')
+            LOGGER.info('Waiting up to 3 seconds for MCP to shut things down')
             signal.setitimer(signal.ITIMER_REAL, 3, 0)
             signal.pause()
+            LOGGER.info('Post pause')
 
         # Force MCP to stop
         if self._mcp.is_running:
@@ -63,6 +70,7 @@ class Controller(clihelper.Controller):
 
         # Change our state
         self._stopped()
+        LOGGER.info('Shutdown complete')
 
     def run(self):
         """Run the rejected Application"""
@@ -99,6 +107,12 @@ def _cli_options(parser):
                       default=None,
                       dest='prepend_path',
                       help='Prepend the python path with the value.')
+    parser.add_option('-q', '--qty',
+                      action='store',
+                      default=None,
+                      dest='quantity',
+                      help='Run the specified quanty of consumer processes '
+                           'when used in conjunction with -o')
 
 
 def main():

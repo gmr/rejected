@@ -28,7 +28,7 @@ class MasterControlProgram(state.State):
     _POLL_RESULTS_INTERVAL = 3.0
     _SHUTDOWN_WAIT = 1
 
-    def __init__(self, config, consumer=None, profile=None):
+    def __init__(self, config, consumer=None, profile=None, quantity=None):
         """Initialize the Master Control Program
 
         :param dict config: The full content from the YAML config file
@@ -49,6 +49,7 @@ class MasterControlProgram(state.State):
         self._poll_data = {'time': 0, 'processes': list()}
         self._poll_timer = None
         self._profile = profile
+        self._quantity = quantity if consumer else None
         self._results_timer = None
         self._stats = dict()
         self._stats_queue = multiprocessing.Queue()
@@ -72,6 +73,8 @@ class MasterControlProgram(state.State):
         for consumer in self._consumers:
             for name in self._consumers[consumer]['processes']:
                 child = self.get_consumer_process(consumer, name)
+                if int(child.pid) == os.getpid():
+                    continue
                 try:
                     process = psutil.Process(child.pid)
                 except psutil.NoSuchProcess:
@@ -274,8 +277,12 @@ class MasterControlProgram(state.State):
                 if int(process.pid) != int(os.getpid()):
                     LOGGER.warning('Killing %s (%s)', process.name, process.pid)
                     os.kill(int(process.pid), signal.SIGKILL)
-            time.sleep(1)
+                else:
+                    LOGGER.warning('Cowardly refusing kill self (%s, %s)',
+                                   process.pid, os.getpid())
+            time.sleep(0.5)
 
+        LOGGER.info('Killed all children')
         return self._set_state(self.STATE_STOPPED)
 
     def _log_stats(self):
@@ -497,7 +504,6 @@ class MasterControlProgram(state.State):
 
         # Start the process
         process.start()
-        #process.join(0.1)
 
     def _start_processes(self, name, connection, quantity):
         """Start the specified quantity of consumer processes for the given
@@ -551,6 +557,9 @@ class MasterControlProgram(state.State):
             # Create the dictionary values for this process
             self._consumers[name] = self._consumer_dict(config)
 
+            if self._quantity:
+                self._consumers[name]['min'] = self._quantity
+
             # Iterate through the connections to create new consumer processes
             for connection in self._consumers[name]['connections']:
                 self._start_processes(name, connection,
@@ -569,25 +578,27 @@ class MasterControlProgram(state.State):
     def stop_processes(self):
         """Iterate through all of the consumer processes shutting them down."""
         self._set_state(self.STATE_SHUTTING_DOWN)
-        LOGGER.debug('Stopping consumer processes')
+        LOGGER.info('Stopping consumer processes')
         self._stop_timers()
 
-        signal.signal(signal.SIGCHLD, signal.SIG_IGN)
         signal.signal(signal.SIGALRM, signal.SIG_IGN)
+        signal.signal(signal.SIGCHLD, signal.SIG_IGN)
         signal.signal(signal.SIGPROF, signal.SIG_IGN)
 
-        # Send SIGTERM
+        # Send SIGABRT
+        LOGGER.info('Sending SIGABRT to active children')
         for process in multiprocessing.active_children():
-            process.terminate()
+            if int(process.pid) != os.getpid():
+                os.kill(int(process.pid), signal.SIGABRT)
 
         # Wait for them to finish up to MAX_SHUTDOWN_WAIT
         iterations = 0
         processes = self.total_process_count
         while processes:
-            LOGGER.debug('Waiting on %i active processes to shut down',
-                         processes)
+            LOGGER.info('Waiting on %i active processes to shut down',
+                        processes)
             try:
-                time.sleep(1)
+                time.sleep(0.5)
             except KeyboardInterrupt:
                 LOGGER.info('Caught CTRL-C, Killing Children')
                 self._kill_processes()
@@ -626,9 +637,6 @@ class MasterControlProgram(state.State):
                                  consumer, self._consumer)
                     del self._config['Application']['Consumers'][consumer]
 
-        # Setup the SIGCHLD handler
-        #self.setup_signal_handler()
-
         # Setup consumers and start the processes
         self._setup_consumers()
 
@@ -650,14 +658,3 @@ class MasterControlProgram(state.State):
 
         """
         return len(self._active_processes)
-
-    def on_sigalrt(self, signum, frame):
-        LOGGER.debug('Received %s', signum)
-        if self.is_running and self._active_processes:
-            self._poll()
-        self.setup_signal_handler()
-
-    def setup_signal_handler(self):
-        LOGGER.debug('Setting up signal handler for SIGALRT')
-        signal.signal(signal.SIGALRT, self.on_sigalrt)
-        signal.siginterrupt(signal.SIGALRT, False)

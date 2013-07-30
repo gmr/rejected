@@ -13,6 +13,7 @@ import pika
 import plistlib
 import simplejson
 import StringIO as stringio
+import sys
 import time
 from pika.adapters import tornado_connection
 import uuid
@@ -668,7 +669,12 @@ class Consumer(object):
         :rtype: object
 
         """
-        return simplejson.loads(value, use_decimal=True)
+        try:
+            return simplejson.loads(value, use_decimal=True)
+        except simplejson.JSONDecodeError as error:
+            LOGGER.error('Could not decode message body: %s', error,
+                         exc_info=sys.exc_info())
+            return {}
 
     def _load_pickle_value(self, value):
         """Deserialize a pickle string returning the native Python data type

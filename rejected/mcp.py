@@ -78,23 +78,33 @@ class MasterControlProgram(state.State):
                     dead_processes.append((consumer, name))
                     continue
 
-                if process.status in [psutil.STATUS_DEAD, psutil.STATUS_ZOMBIE]:
-                    try:
-                        LOGGER.info('Found dead or zombie process with %s fds',
-                                    process.get_num_fds())
-                    except psutil.NoSuchProcess:
-                        LOGGER.info('Found dead or zombie process')
-
+                if self.is_a_dead_or_zombie_process(process):
                     dead_processes.append((consumer, name))
                 else:
                     active_processes.append(child)
 
         if dead_processes:
-            LOGGER.debug('Removing %i dead process(es)', len(dead_processes))
+            LOGGER.info('Removing %i dead process(es)', len(dead_processes))
             for process in dead_processes:
                 self.remove_consumer_process(*process)
-
         return active_processes
+
+    def is_a_dead_or_zombie_process(self, process):
+        try:
+            if process.status in [psutil.STATUS_DEAD, psutil.STATUS_ZOMBIE]:
+                try:
+                    LOGGER.info('Found dead or zombie process with '
+                                '%s fds',
+                                process.get_num_fds())
+                except psutil.AccessDenied as error:
+                    LOGGER.error('Found dead or zombie process, '
+                                 'could not get fd count: %s', error)
+                    return True
+        except psutil.NoSuchProcess:
+            LOGGER.info('Found dead or zombie process')
+            return True
+
+        return False
 
     def get_consumer_process(self, consumer, name):
         return self._consumers[consumer]['processes'].get(name)
@@ -104,6 +114,10 @@ class MasterControlProgram(state.State):
             if name in self._consumers[consumer]['connections'][conn]:
                 self._consumers[consumer]['connections'][conn].remove(name)
         if name in self._consumers[consumer]['processes']:
+            try:
+                self._consumers[consumer]['processes'][name].terminate()
+            except OSError:
+                pass
             del self._consumers[consumer]['processes'][name]
 
     def _calculate_stats(self, data):

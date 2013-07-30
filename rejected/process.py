@@ -15,6 +15,7 @@ except ImportError:
     import profile
 from pika.adapters import tornado_connection
 import signal
+import socket
 import sys
 import time
 from tornado import ioloop
@@ -115,6 +116,9 @@ class Process(multiprocessing.Process, state.State):
         self._state = self.STATE_INITIALIZING
         self._state_start = time.time()
         self._stats_queue = None
+        self._statsd = False
+        self._statsd_host = 'localhost'
+        self._statsd_port = 8125
 
         # Override ACTIVE with PROCESSING
         self._STATES[0x04] = 'Processing'
@@ -130,7 +134,7 @@ class Process(multiprocessing.Process, state.State):
             self.increment_count(self.CLOSED_ON_COMPLETE)
             return
         LOGGER.debug('Acking %s', delivery_tag)
-        self._channel.basic_ack(delivery_tag=delivery_tag)
+        self._channel.basic_ack(delivery_tag=delivery_tag, multiple=True)
         self.increment_count(self.ACKED)
 
     def add_on_channel_close_callback(self):
@@ -341,11 +345,16 @@ class Process(multiprocessing.Process, state.State):
         if 'config' in config:
             kwargs['configuration'] = config['config']
 
-        if consumer_.WANTS_CONNECTION_CONFIG:
-            kwargs['connections'] = self._connections
+        try:
+            if consumer_.WANTS_CONNECTION_CONFIG:
+                kwargs['connections'] = self._connections
+        except AttributeError:
+            pass
 
         try:
             return consumer_(**kwargs)
+        except TypeError:
+            return consumer_(config['config'])
         except Exception as error:
             LOGGER.error('Error creating the consumer "%s": %s',
                          config['consumer'], error)
@@ -365,6 +374,8 @@ class Process(multiprocessing.Process, state.State):
 
         """
         self._counts[counter] += value
+        if self._statsd:
+            self.send_counter_to_statsd(counter, value)
 
     def invoke_consumer(self, message):
         """Wrap the actual processor processing bits
@@ -521,11 +532,6 @@ class Process(multiprocessing.Process, state.State):
         :type unused: pika.adapters.tornado_connection.TornadoConnection
 
         """
-        # Hack due to Tornado adding to the root logger
-        rootLogger = logging.getLogger()
-        for handler in rootLogger.handlers:
-            rootLogger.removeHandler(handler)
-
         LOGGER.info('Connection opened')
         self.add_on_connection_close_callback()
         self.open_channel()
@@ -749,6 +755,14 @@ class Process(multiprocessing.Process, state.State):
             except KeyboardInterrupt:
                 LOGGER.warning('CTRL-C while waiting for clean shutdown')
 
+    def send_counter_to_statsd(self, counter, value=1):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.connect((self._statsd_host, self._statsd_port))
+        key = '.'.join(['rejected', 'consumers', self._kwargs['consumer_name'],
+                        counter])
+        sock.send('%s:%i|c\n' % (key, value))
+        sock.close()
+
     def set_qos_prefetch(self, value=None):
         """Set the QOS Prefetch count for the channel.
 
@@ -799,6 +813,12 @@ class Process(multiprocessing.Process, state.State):
         self._consumer_name = consumer_name
         self._config = config['Consumers'][consumer_name]
         self._connections = config['Connections']
+
+        self._statsd = False
+        if 'statsd' in config and config['statsd'].get('enabled', False):
+            self._statsd = True
+            self._statsd_host = config['statsd'].get('host', 'localhost')
+            self._statsd_port = config['statsd'].get('port', 8125)
 
         # Setup the consumer
         self._consumer = self.get_consumer(self._config)
@@ -883,15 +903,15 @@ class Process(multiprocessing.Process, state.State):
         our state.
 
         """
-        LOGGER.debug('Stop called in state: %s', self.state_description)
+        LOGGER.warning('Stop called in state: %s', self.state_description)
         if self.is_stopped:
-            LOGGER.debug('Stop requested but consumer is already stopped')
+            LOGGER.warning('Stop requested but consumer is already stopped')
             return
         elif self.is_shutting_down:
-            LOGGER.debug('Stop requested but consumer is already shutting down')
+            LOGGER.warning('Stop requested but consumer is already shutting down')
             return
         elif self.is_waiting_to_shutdown:
-            LOGGER.debug('Stop requested but already waiting to shut down')
+            LOGGER.warning('Stop requested but already waiting to shut down')
             return
 
         # Stop consuming

@@ -29,6 +29,10 @@ Example Configuration
      Application:
        monitor: true
        poll_interval: 60
+       statsd:
+         enabled: True
+         host: localhost
+         port: 8125
        Connections:
          rabbitmq:
            host: rabbitmq

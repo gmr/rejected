@@ -15,25 +15,27 @@ class State(object):
     STATE_CONNECTING = 0x02
     STATE_IDLE = 0x03
     STATE_ACTIVE = 0x04
-    STATE_STOP_REQUESTED = 0x05
-    STATE_SHUTTING_DOWN = 0x06
-    STATE_STOPPED = 0x07
+    STATE_SLEEPING = 0x05
+    STATE_STOP_REQUESTED = 0x06
+    STATE_SHUTTING_DOWN = 0x07
+    STATE_STOPPED = 0x08
 
     # For reverse lookup
     _STATES = {0x01: 'Initializing',
                0x02: 'Connecting',
                0x03: 'Idle',
                0x04: 'Active',
-               0x05: 'Stop Requested',
-               0x06: 'Shutting down',
-               0x07: 'Stopped'}
+               0x05: 'Sleeping',
+               0x06: 'Stop Requested',
+               0x07: 'Shutting down',
+               0x08: 'Stopped'}
 
     def __init__(self):
         """Initialize the state of the object"""
         self._state = self.STATE_INITIALIZING
         self._state_start = time.time()
 
-    def _set_state(self, new_state):
+    def set_state(self, new_state):
         """Assign the specified state to this consumer object.
 
         :param int new_state: The new state of the object
@@ -76,7 +78,8 @@ class State(object):
         :rtype: bool
 
         """
-        return self._state in [self.STATE_IDLE, self.STATE_ACTIVE]
+        return self._state in [self.STATE_IDLE, self.STATE_ACTIVE,
+                               self.STATE_SLEEPING]
 
     @property
     def is_shutting_down(self):
@@ -86,6 +89,16 @@ class State(object):
 
         """
         return self._state == self.STATE_SHUTTING_DOWN
+
+
+    @property
+    def is_sleeping(self):
+        """Returns a bool determining if the process is sleeping
+
+        :rtype: bool
+
+        """
+        return self._state == self.STATE_SLEEPING
 
     @property
     def is_stopped(self):

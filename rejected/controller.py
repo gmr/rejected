@@ -82,7 +82,7 @@ class Controller(clihelper.Controller):
             LOGGER.info('Caught CTRL-C, shutting down')
             clihelper.setup_logging(self._debug)
         if self.is_running:
-            self._shutdown()
+            self.stop()
 
 
 def _cli_options(parser):
@@ -109,7 +109,8 @@ def _cli_options(parser):
                       help='Prepend the python path with the value.')
     parser.add_option('-q', '--qty',
                       action='store',
-                      default=None,
+                      type='int',
+                      default=1,
                       dest='quantity',
                       help='Run the specified quanty of consumer processes '
                            'when used in conjunction with -o')

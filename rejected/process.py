@@ -2,6 +2,7 @@
 connection state and collects stats about the consuming process.
 
 """
+import clihelper
 from pika import exceptions
 import importlib
 import logging
@@ -106,7 +107,7 @@ class Process(multiprocessing.Process, state.State):
         self._counts = self.new_counter_dict()
         self._dynamic_qos = True
         self._hbinterval = self._HBINTERVAL
-        self._last_counts = None
+        self._last_counts = dict()
         self._last_failure = 0
         self._last_stats_time = None
         self._message_connection_id = None
@@ -343,7 +344,7 @@ class Process(multiprocessing.Process, state.State):
 
         kwargs = {}
         if 'config' in config:
-            kwargs['configuration'] = config['config']
+            kwargs['configuration'] = config.get('config', dict())
 
         try:
             if consumer_.WANTS_CONNECTION_CONFIG:
@@ -354,7 +355,7 @@ class Process(multiprocessing.Process, state.State):
         try:
             return consumer_(**kwargs)
         except TypeError:
-            return consumer_(config['config'])
+            return consumer_(config.get('config', dict()))
         except Exception as error:
             LOGGER.error('Error creating the consumer "%s": %s',
                          config['consumer'], error)
@@ -374,8 +375,6 @@ class Process(multiprocessing.Process, state.State):
 
         """
         self._counts[counter] += value
-        if self._statsd:
-            self.send_counter_to_statsd(counter, value)
 
     def invoke_consumer(self, message):
         """Wrap the actual processor processing bits
@@ -572,7 +571,15 @@ class Process(multiprocessing.Process, state.State):
         :param frame unused_frame: The python frame the signal was received at
 
         """
-        LOGGER.info('Currently %s: %r', self.state_description, self._counts)
+        for key in self._counts.keys():
+            value = self._counts[key] - self._last_counts.get(key, 0)
+            self._last_counts[key] = value
+            if self._statsd:
+                self.send_counter_to_statsd(key, value)
+
+        LOGGER.info('Currently %s: %r',
+                    self.state_description,
+                    self._last_counts)
         signal.siginterrupt(signal.SIGPROF, False)
 
     def open_channel(self):
@@ -740,7 +747,8 @@ class Process(multiprocessing.Process, state.State):
             self.setup(self._kwargs['config'],
                        self._kwargs['connection_name'],
                        self._kwargs['consumer_name'],
-                       self._kwargs['stats_queue'])
+                       self._kwargs['stats_queue'],
+                       self._kwargs['logging_config'])
         except ImportError as error:
             name = self._kwargs['consumer_name']
             consumer = self._kwargs['config']['Consumers'][name]['consumer']
@@ -759,7 +767,7 @@ class Process(multiprocessing.Process, state.State):
         sock.connect((self._statsd_host, self._statsd_port))
         key = '.'.join(['rejected', 'consumers', self._kwargs['consumer_name'],
                         counter])
-        sock.send('%s:%i|c\n' % (key, value))
+        sock.send('%s:%i|c\n' % (key, int(value)))
         sock.close()
 
     def set_qos_prefetch(self, value=None):
@@ -789,10 +797,10 @@ class Process(multiprocessing.Process, state.State):
             self.increment_count(self.TIME_SPENT, self.time_in_state)
 
         # Use the parent object to set the state
-        super(Process, self)._set_state(new_state)
+        super(Process, self).set_state(new_state)
 
-    def setup(self, config, connection_name,
-              consumer_name, stats_queue):
+    def setup(self, config, connection_name, consumer_name, stats_queue,
+              logging_config):
         """Initialize the consumer, setting up needed attributes and connecting
         to RabbitMQ.
 
@@ -855,6 +863,7 @@ class Process(multiprocessing.Process, state.State):
         self._connection = self.connect_to_rabbitmq(self._connections,
                                                     self._connection_name)
 
+
     def setup_channel(self):
         """Setup the channel that will be used to communicate with RabbitMQ and
         set the QoS, send a Basic.Recover and set the channel object in the
@@ -878,17 +887,16 @@ class Process(multiprocessing.Process, state.State):
                                     consumer_tag=self.name)
 
     def setup_signal_handlers(self):
-        """Setup the stats and stop signal handlers.
-        """
+        """Setup the stats and stop signal handlers."""
         signal.signal(signal.SIGCHLD, signal.SIG_IGN)
         signal.signal(signal.SIGINT, signal.SIG_IGN)
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+
         signal.signal(signal.SIGPROF, self.on_sigprof)
         signal.signal(signal.SIGABRT, self.stop)
-        signal.signal(signal.SIGTERM, signal.SIG_IGN)
-        signal.siginterrupt(signal.SIGINT, False)
+
         signal.siginterrupt(signal.SIGPROF, False)
         signal.siginterrupt(signal.SIGABRT, False)
-
 
     def start_message_processing(self):
         """Keep track of the connection in case RabbitMQ disconnects while the

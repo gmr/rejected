@@ -572,17 +572,16 @@ class Process(multiprocessing.Process, common.State):
         :param frame unused_frame: The python frame the signal was received at
 
         """
+        values = dict()
         for key in self._counts.keys():
-            value = self._counts[key] - self._last_counts.get(key, 0)
-            self._last_counts[key] = value
+            values[key] = self._counts[key] - self._last_counts.get(key, 0)
+            self._last_counts[key] = self._counts[key]
             if self._statsd:
-                self.send_counter_to_statsd(key, value)
+                self.send_counter_to_statsd(key, values[key])
         self._stats_queue.put({'name': self.name,
                                'consumer_name': self._consumer_name,
-                               'counts': dict(self._last_counts)})
-        LOGGER.debug('Currently %s: %r',
-                     self.state_description,
-                     self._last_counts)
+                               'counts': values})
+        LOGGER.debug('Currently %s: %r', self.state_description, values)
         signal.siginterrupt(signal.SIGPROF, False)
 
     def open_channel(self):

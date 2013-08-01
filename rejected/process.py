@@ -2,7 +2,6 @@
 connection state and collects stats about the consuming process.
 
 """
-import clihelper
 from pika import exceptions
 import importlib
 import logging
@@ -24,9 +23,9 @@ import traceback
 
 
 from rejected import __version__
+from rejected import common
 from rejected import consumer
 from rejected import data
-from rejected import state
 
 LOGGER = logging.getLogger(__name__)
 
@@ -52,8 +51,9 @@ def import_consumer(consumer):
     return getattr(import_handle, parts[-1]), version
 
 
-class Process(multiprocessing.Process, state.State):
-    """Core process class that
+class Process(multiprocessing.Process, common.State):
+    """Core process class that manages the consumer object and communicates
+    with RabbitMQ.
 
     """
     _AMQP_APP_ID = 'rejected/%s' % __version__
@@ -106,12 +106,13 @@ class Process(multiprocessing.Process, state.State):
         self._consumer = None
         self._counts = self.new_counter_dict()
         self._dynamic_qos = True
-        self._hbinterval = self._HBINTERVAL
+        self._hb_interval = self._HBINTERVAL
         self._last_counts = dict()
         self._last_failure = 0
         self._last_stats_time = None
+        self._logging_config = dict()
         self._message_connection_id = None
-        self._max_framesize = pika.spec.FRAME_MAX_SIZE
+        self._max_frame_size = pika.spec.FRAME_MAX_SIZE
         self._qos_prefetch = None
         self._prepend_path = None
         self._state = self.STATE_INITIALIZING
@@ -143,7 +144,7 @@ class Process(multiprocessing.Process, state.State):
         RabbitMQ unexpectedly closes the channel.
 
         """
-        LOGGER.info('Adding channel close callback')
+        LOGGER.debug('Adding channel close callback')
         self._channel.add_on_close_callback(self.on_channel_closed)
 
     def add_on_connection_close_callback(self):
@@ -151,7 +152,7 @@ class Process(multiprocessing.Process, state.State):
         when RabbitMQ closes the connection to the publisher unexpectedly.
 
         """
-        LOGGER.info('Adding connection close callback')
+        LOGGER.debug('Adding connection close callback')
         self._connection.add_on_close_callback(self.on_connection_closed)
 
     @property
@@ -220,7 +221,7 @@ class Process(multiprocessing.Process, state.State):
 
     def cancel_consumer_with_rabbitmq(self):
         """Tell RabbitMQ the process no longer wants to consumer messages."""
-        LOGGER.info('Sending a Basic.Cancel to RabbitMQ')
+        LOGGER.debug('Sending a Basic.Cancel to RabbitMQ')
         if self._channel and self._channel.is_open:
             self._channel.basic_cancel(consumer_tag=self.name)
 
@@ -314,9 +315,9 @@ class Process(multiprocessing.Process, state.State):
         """
         credentials = pika.PlainCredentials(username, password)
         return pika.ConnectionParameters(host, port, vhost, credentials,
-                                         frame_max=self._max_framesize,
+                                         frame_max=self._max_frame_size,
                                          socket_timeout=10,
-                                         heartbeat_interval=self._hbinterval)
+                                         heartbeat_interval=self._hb_interval)
 
     def get_consumer(self, config):
         """Import and create a new instance of the configured message consumer.
@@ -504,7 +505,7 @@ class Process(multiprocessing.Process, state.State):
         :param pika.channel.Channel channel: The channel object
 
         """
-        LOGGER.info('Channel opened')
+        LOGGER.debug('Channel opened')
         self._channel = channel
         self.add_on_channel_close_callback()
         self.setup_channel()
@@ -531,7 +532,7 @@ class Process(multiprocessing.Process, state.State):
         :type unused: pika.adapters.tornado_connection.TornadoConnection
 
         """
-        LOGGER.info('Connection opened')
+        LOGGER.debug('Connection opened')
         self.add_on_connection_close_callback()
         self.open_channel()
 
@@ -555,7 +556,7 @@ class Process(multiprocessing.Process, state.State):
         self.stop_consumer()
 
         # Stop the IOLoop
-        LOGGER.info('Stopping IOLoop')
+        LOGGER.debug('Stopping IOLoop')
         self._connection.ioloop.stop()
 
         # Note that shutdown is complete and set the state accordingly
@@ -576,15 +577,17 @@ class Process(multiprocessing.Process, state.State):
             self._last_counts[key] = value
             if self._statsd:
                 self.send_counter_to_statsd(key, value)
-
-        LOGGER.info('Currently %s: %r',
-                    self.state_description,
-                    self._last_counts)
+        self._stats_queue.put({'name': self.name,
+                               'consumer_name': self._consumer_name,
+                               'counts': dict(self._last_counts)})
+        LOGGER.debug('Currently %s: %r',
+                     self.state_description,
+                     self._last_counts)
         signal.siginterrupt(signal.SIGPROF, False)
 
     def open_channel(self):
         """Open a channel on the existing open connection to RabbitMQ"""
-        LOGGER.info('Opening a channel on %r', self._connection)
+        LOGGER.debug('Opening a channel on %r', self._connection)
         self._connection.channel(self.on_channel_open)
 
     def process(self, channel=None, method=None, header=None, body=None):
@@ -739,10 +742,11 @@ class Process(multiprocessing.Process, state.State):
                            self.profile_file)
         else:
             self._run()
-        LOGGER.info('Exiting %s (%i, %i)', self.name, os.getpid(), os.getppid())
+        LOGGER.debug('Exiting %s (%i, %i)', self.name, os.getpid(), os.getppid())
 
     def _run(self):
         """Run method that can be profiled"""
+        common.add_null_handler()
         try:
             self.setup(self._kwargs['config'],
                        self._kwargs['connection_name'],
@@ -763,11 +767,17 @@ class Process(multiprocessing.Process, state.State):
                 LOGGER.warning('CTRL-C while waiting for clean shutdown')
 
     def send_counter_to_statsd(self, counter, value=1):
+        """Send a metric passed in to statsd.
+
+        :param str counter: The counter name
+        :param int|float value: The count
+
+        """
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.connect((self._statsd_host, self._statsd_port))
         key = '.'.join(['rejected', 'consumers', self._kwargs['consumer_name'],
                         counter])
-        sock.send('%s:%i|c\n' % (key, int(value)))
+        sock.send('%s:%i|c\n' % (key, math.ceil(value)))
         sock.close()
 
     def set_qos_prefetch(self, value=None):
@@ -779,7 +789,7 @@ class Process(multiprocessing.Process, state.State):
         qos_prefetch = int(value or self.base_qos_prefetch)
         if qos_prefetch != self._qos_prefetch:
             self._qos_prefetch = qos_prefetch
-            LOGGER.info('Setting the QOS Prefetch to %i', qos_prefetch)
+            LOGGER.debug('Setting the QOS Prefetch to %i', qos_prefetch)
             self._channel.basic_qos(prefetch_count=qos_prefetch)
 
     def set_state(self, new_state):
@@ -807,62 +817,44 @@ class Process(multiprocessing.Process, state.State):
         :param dict config: Consumer config section
 \        :param str connection_name: The name of the connection
         :param str consumer_name: Consumer name for config
-        :param multiprocessing.Queue stats_queue: The queue to append stats in
+        :param multiprocessing.SimpleQueue stats_queue: Queue to MCP
+        :param dict logging_config: Logging config from YAML file
 
         """
-        LOGGER.info('Initializing for %s on %s', self.name, connection_name)
-
-        # The queue for populating stats data
+        LOGGER.info('Initializing for %s on %s connection',
+                    self.name, connection_name)
+        self._logging_config = logging_config
         self._stats_queue = stats_queue
-
-        # Hold the consumer config
         self._connection_name = connection_name
         self._consumer_name = consumer_name
         self._config = config['Consumers'][consumer_name]
         self._connections = config['Connections']
+        self._consumer = self.get_consumer(self._config)
 
+        if not self._consumer:
+            LOGGER.critical('Could not import and start processor')
+            self.set_state(self.STATE_STOPPED)
+            os._exit(1)
+
+        self._queue_name = self._config['queue']
+        self._dynamic_qos = self._config.get('dynamic_qos', False)
+        self._ack = self._config.get('ack', True)
+        self._max_error_count = int(self._config.get('max_errors',
+                                                     self._MAX_ERROR_COUNT))
+        self._hb_interval = self._config.get('heartbeat_interval',
+                                             self._HBINTERVAL)
+        self._max_frame_size = self._config.get('max_frame_size',
+                                                pika.spec.FRAME_MAX_SIZE)
         self._statsd = False
         if 'statsd' in config and config['statsd'].get('enabled', False):
             self._statsd = True
             self._statsd_host = config['statsd'].get('host', 'localhost')
             self._statsd_port = config['statsd'].get('port', 8125)
 
-        # Setup the consumer
-        self._consumer = self.get_consumer(self._config)
-        if not self._consumer:
-            LOGGER.critical('Could not import and start processor')
-            self.set_state(self.STATE_STOPPED)
-            os._exit(1)
-
-        # Set the routing information
-        self._queue_name = self._config['queue']
-
-        # Set the dynamic QoS toggle
-        self._dynamic_qos = self._config.get('dynamic_qos', True)
-
-        # Set the various control nobs
-        self._ack = self._config.get('ack', True)
-
-        # How many errors until the process stops
-        self._max_error_count = int(self._config.get('max_errors',
-                                                     self._MAX_ERROR_COUNT))
         self.reset_failure_counter()
-
-        # Get the heartbeat interval
-        self._hbinterval = self._config.get('heartbeat_interval',
-                                            self._HBINTERVAL)
-
-        # Get the framesize
-        self._max_framesize = self._config.get('max_frame_size',
-                                               pika.spec.FRAME_MAX_SIZE)
-
-        # Setup the signal handler for stats
         self.setup_signal_handlers()
-
-        # Create the RabbitMQ Connection
         self._connection = self.connect_to_rabbitmq(self._connections,
                                                     self._connection_name)
-
 
     def setup_channel(self):
         """Setup the channel that will be used to communicate with RabbitMQ and
@@ -876,7 +868,7 @@ class Process(multiprocessing.Process, state.State):
         try:
             self._consumer.set_channel(self._channel)
         except AttributeError:
-            LOGGER.debug('Consumer does not support channel assignment')
+            LOGGER.info('Consumer does not support channel assignment')
 
         # Setup QoS, Send a Basic.Recover and then Basic.Consume
         self.set_qos_prefetch()
@@ -910,12 +902,12 @@ class Process(multiprocessing.Process, state.State):
         our state.
 
         """
-        LOGGER.warning('Stop called in state: %s', self.state_description)
+        LOGGER.debug('Stop called in state: %s', self.state_description)
         if self.is_stopped:
             LOGGER.warning('Stop requested but consumer is already stopped')
             return
         elif self.is_shutting_down:
-            LOGGER.warning('Stop requested but consumer is already shutting down')
+            LOGGER.warning('Stop requested, consumer is already shutting down')
             return
         elif self.is_waiting_to_shutdown:
             LOGGER.warning('Stop requested but already waiting to shut down')

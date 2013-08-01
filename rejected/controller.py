@@ -7,6 +7,7 @@ import logging
 import signal
 import sys
 
+from rejected import common
 from rejected import mcp
 from rejected import __version__
 
@@ -41,6 +42,7 @@ class Controller(clihelper.Controller):
     def _setup(self):
         """Continue the run process blocking on MasterControlProgram.run"""
         # If the app was invoked to specified to prepend the path, do so now
+        common.add_null_handler()
         if self._options.prepend_path:
             self._prepend_python_path(self._options.prepend_path)
 

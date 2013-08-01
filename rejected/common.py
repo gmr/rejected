@@ -1,8 +1,26 @@
-"""Base object that carries runtime state info"""
+"""
+Common Mixin Classes
+
+"""
+import clihelper
 import logging
 import time
 
 LOGGER = logging.getLogger(__name__)
+
+
+try:
+    from logging import NullHandler
+except ImportError:
+    # Python 2.6 does not have a NullHandler
+    class NullHandler(logging.Handler):
+        def emit(self, record):
+            pass
+
+
+def add_null_handler():
+    logger = logging.getLogger()
+    logger.addHandler(NullHandler())
 
 
 class State(object):

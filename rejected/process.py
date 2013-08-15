@@ -677,11 +677,11 @@ class Process(multiprocessing.Process, common.State):
         """
         self.increment_count(self.ERROR)
         if handled:
-            LOGGER.warning('Processor handled %s: %s',
-                           error.__class__.__name__, error)
+            LOGGER.exception('Processor handled %s: %s',
+                             error.__class__.__name__, error)
         else:
-            LOGGER.critical('Processor threw an uncaught exception %s: %s',
-                            error.__class__.__name__, error)
+            LOGGER.exception('Processor threw an uncaught exception %s: %s',
+                             error.__class__.__name__, error)
             self.increment_count(self.UNHANDLED_EXCEPTIONS)
         if exc_info:
             formatted_lines = traceback.format_exception(*exc_info)
@@ -879,7 +879,6 @@ class Process(multiprocessing.Process, common.State):
 
     def setup_signal_handlers(self):
         """Setup the stats and stop signal handlers."""
-        signal.signal(signal.SIGCHLD, signal.SIG_IGN)
         signal.signal(signal.SIGINT, signal.SIG_IGN)
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
 

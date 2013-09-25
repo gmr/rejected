@@ -9,6 +9,8 @@ Rejected runs as a master process with multiple consumer configurations that are
 each run it an isolated process. It has the ability to collect statistical
 data from the consumer processes and report on it.
 
+[![PyPI version](https://badge.fury.io/py/rejected.png)](http://badge.fury.io/py/rejected) [![Downloads](https://pypip.in/d/rejected/badge.png)](https://crate.io/packages/pamqp) [![Build Status](https://travis-ci.org/gmr/rejected.png?branch=master)](https://travis-ci.org/gmr/rejected)
+
 Example Processor
 -----------------
     from rejected import consumer

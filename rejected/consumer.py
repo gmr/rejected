@@ -670,7 +670,8 @@ class Consumer(object):
 
         """
         try:
-            return simplejson.loads(value, use_decimal=True)
+            return simplejson.loads(value, encoding='utf-8',
+			            use_decimal=True)
         except simplejson.JSONDecodeError as error:
             LOGGER.error('Could not decode message body: %s', error,
                          exc_info=sys.exc_info())

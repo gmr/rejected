@@ -55,12 +55,12 @@ class MasterControlProgram(common.State):
         self._polled = False
 
         # Carry for logging internal stats collection data
-        self._log_stats_enabled = config.get('Application',
-                                             dict()).get('log_stats', False)
+        self._log_stats_enabled = config.application.get('log_stats', False)
         LOGGER.debug('Stats logging enabled: %s', self._log_stats_enabled)
 
         # Setup the poller related threads
-        self._poll_interval = config.get('poll_interval', self._POLL_INTERVAL)
+        self._poll_interval = config.application.get('poll_interval',
+                                                     self._POLL_INTERVAL)
         LOGGER.debug('Set process poll interval to %.2f', self._poll_interval)
 
     @property
@@ -311,13 +311,13 @@ class MasterControlProgram(common.State):
                                   self.new_process_number(consumer_name))
         LOGGER.debug('Creating a new process for %s: %s',
                      connection_name, process_name)
-        kwargs = {'config': self._config['Application'],
+        kwargs = {'config': self._config.application,
                   'connection_name': connection_name,
                   'consumer_name': consumer_name,
                   'profile': self._profile,
                   'daemon': False,
                   'stats_queue': self._stats_queue,
-                  'logging_config': self._config['Logging']}
+                  'logging_config': self._config.logging}
         return process_name, process.Process(name=process_name, kwargs=kwargs)
 
     def new_process_number(self, name):
@@ -477,19 +477,19 @@ class MasterControlProgram(common.State):
         self.set_state(self.STATE_ACTIVE)
 
         # Get the consumer section from the config
-        if 'Consumers' not in self._config['Application']:
+        if 'Consumers' not in self._config.application:
             LOGGER.error('Missing Consumers section of configuration, '
-                         'aborting: %r', self._config['Application'])
+                         'aborting: %r', self._config.application)
             return self.set_state(self.STATE_STOPPED)
 
         # Strip consumers if a consumer is specified
         if self._consumer:
-            consumers = self._config['Application']['Consumers'].keys()
+            consumers = self._config.application.Consumers.keys()
             for consumer in consumers:
                 if consumer != self._consumer:
                     LOGGER.debug('Removing %s for %s only processing',
                                  consumer, self._consumer)
-                    del self._config['Application']['Consumers'][consumer]
+                    del self._config.application.Consumers[consumer]
 
         # Setup consumers and start the processes
         self.setup_consumers()
@@ -570,10 +570,10 @@ class MasterControlProgram(common.State):
         minimal amount of processes, setting up the runtime data as well.
 
         """
-        for name in self._config['Application']['Consumers']:
+        for name in self._config.application.Consumers:
 
             # Hold the config as a shortcut
-            config = self._config['Application']['Consumers'][name]
+            config = self._config.application.Consumers[name]
 
             # If queue is not configured, report the error but skip processes
             if 'queue' not in config:

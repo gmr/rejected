@@ -8,7 +8,7 @@ to focus on the development of the code that handles the messages and not the
 code that facilitates the communication with RabbitMQ."""
 
 install_requires = ['beautifulsoup4',
-                    'clihelper>=1.7.3',
+                    'helper',
                     'pika>=0.9.13',
                     'pgsql_wrapper',
                     'psutil',
@@ -26,7 +26,7 @@ setup(name='rejected',
                   'Controller Daemon',
       long_description=long_description,
       classifiers=[
-        'Development Status :: 4 - Beta',
+        'Development Status :: 5 - Stable',
         'Intended Audience :: Developers',
         'License :: OSI Approved :: BSD License',
       ],

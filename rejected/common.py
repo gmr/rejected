@@ -2,7 +2,6 @@
 Common Mixin Classes
 
 """
-import clihelper
 import logging
 import time
 

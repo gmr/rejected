@@ -2,8 +2,9 @@
 OS Level controlling class invokes startup, shutdown and handles signals.
 
 """
-import clihelper
+import helper
 import logging
+from helper import parser
 import signal
 import sys
 
@@ -14,7 +15,7 @@ from rejected import __version__
 LOGGER = logging.getLogger(__name__)
 
 
-class Controller(clihelper.Controller):
+class Controller(helper.Controller):
     """Rejected Controller application that invokes the MCP and handles all
     of the OS level concerns.
 
@@ -25,10 +26,10 @@ class Controller(clihelper.Controller):
         :rtype: rejected.mcp.MasterControlProgram
 
         """
-        return mcp.MasterControlProgram(self._config,
-                                        consumer=self._options.consumer,
-                                        profile=self._options.profile,
-                                        quantity=self._options.quantity)
+        return mcp.MasterControlProgram(self.config,
+                                        consumer=self.args.consumer,
+                                        profile=self.args.profile,
+                                        quantity=self.args.quantity)
 
     def _prepend_python_path(self, path):  #pragma: no cover
         """Add the specified value to the python path.
@@ -39,12 +40,12 @@ class Controller(clihelper.Controller):
         LOGGER.debug('Prepending "%s" to the python path.', path)
         sys.path.insert(0, path)
 
-    def _setup(self):
+    def setup(self):
         """Continue the run process blocking on MasterControlProgram.run"""
         # If the app was invoked to specified to prepend the path, do so now
         common.add_null_handler()
-        if self._options.prepend_path:
-            self._prepend_python_path(self._options.prepend_path)
+        if self.args.prepend_path:
+            self._prepend_python_path(self.args.prepend_path)
 
     def stop(self):
         """Shutdown the MCP and child processes cleanly"""
@@ -76,52 +77,48 @@ class Controller(clihelper.Controller):
 
     def run(self):
         """Run the rejected Application"""
-        self._setup()
+        self.setup()
         self._mcp = self._master_control_program()
         try:
             self._mcp.run()
         except KeyboardInterrupt:
             LOGGER.info('Caught CTRL-C, shutting down')
-            clihelper.setup_logging(self._debug)
         if self.is_running:
             self.stop()
 
 
-def _cli_options(parser):
-    """Add options to the parser
-
-    :param optparse.OptionParser parser: The option parser to add options to
-
-    """
-    parser.add_option('-P', '--profile',
-                      action='store',
-                      default=None,
-                      dest='profile',
-                      help='Profile the consumer modules, specifying '
-                           'the output directory.')
-    parser.add_option('-o', '--only',
-                      action='store',
-                      default=None,
-                      dest='consumer',
-                      help='Only run the consumer specified')
-    parser.add_option('-p', '--prepend-path',
-                      action='store',
-                      default=None,
-                      dest='prepend_path',
-                      help='Prepend the python path with the value.')
-    parser.add_option('-q', '--qty',
-                      action='store',
-                      type='int',
-                      default=1,
-                      dest='quantity',
-                      help='Run the specified quanty of consumer processes '
-                           'when used in conjunction with -o')
+def add_parser_arguments():
+    """Add options to the parser"""
+    argparser = parser.get()
+    argparser.add_argument('-P', '--profile',
+                           action='store',
+                           default=None,
+                           dest='profile',
+                           help='Profile the consumer modules, specifying '
+                                'the output directory.')
+    argparser.add_argument('-o', '--only',
+                           action='store',
+                           default=None,
+                           dest='consumer',
+                           help='Only run the consumer specified')
+    argparser.add_argument('-p', '--prepend-path',
+                           action='store',
+                           default=None,
+                           dest='prepend_path',
+                           help='Prepend the python path with the value.')
+    argparser.add_argument('-q', '--qty',
+                           action='store',
+                           default=1,
+                           dest='quantity',
+                           help='Run the specified quanty of consumer processes'
+                                ' when used in conjunction with -o')
 
 
 def main():
     """Called when invoking the command line script."""
-    clihelper.setup('rejected', 'RabbitMQ consumer framework', __version__)
-    clihelper.run(Controller, _cli_options)
+    add_parser_arguments()
+    parser.description('RabbitMQ consumer framework')
+    helper.start(Controller)
 
 
 if __name__ == '__main__':

@@ -3,6 +3,10 @@
 Application:
   poll_interval: 10.0
   log_stats: True
+  statsd:
+    enabled: True
+    host: localhost
+    port: 8125
   Connections:
     rabbitmq:
       host: localhost
@@ -11,23 +15,19 @@ Application:
       pass: guest
       ssl: False
       vhost: /
+      heartbeat_interval: 300
   Consumers:
     example:
       consumer: rejected.example.Consumer
       connections: [rabbitmq]
+      qty: 2
       queue: generated_messages
-      min: 2
-      max: 5
+      dynamic_qos: True
+      ack: True
+      max_errors: 100
       config:
-        republish: True
-    test:
-      consumer: rejected.example.Consumer
-      connections: [rabbitmq]
-      queue: generated_messages
-      min: 2
-      max: 5
-      config:
-        republish: True
+        foo: True
+        bar: baz
 
 Daemon:
   user: rejected
@@ -38,7 +38,7 @@ Logging:
   version: 1
   formatters:
     verbose:
-      format: "%(levelname) -10s %(asctime)s %(process)-6d %(processName) -35s %(name) -35s %(funcName) -30s: %(message)s"
+      format: "%(levelname) -10s %(asctime)s %(process)-6d %(processName) -25s %(name) -30s %(funcName) -30s: %(message)s"
       datefmt: "%Y-%m-%d %H:%M:%S"
     syslog:
       format: "%(levelname)s <PID %(process)d:%(processName)s> %(name)s.%(funcName)s(): %(message)s"
@@ -48,28 +48,28 @@ Logging:
       class: logging.StreamHandler
       formatter: verbose
       debug_only: false
-    syslog:
-      class: logging.handlers.SysLogHandler
-      facility: daemon
-      address: /var/run/syslog
-      #address: /dev/log
-      formatter: syslog
+    #syslog:
+    #  class: logging.handlers.SysLogHandler
+    #  facility: daemon
+    #  address: /var/run/syslog
+    #  #address: /dev/log
+    #  formatter: syslog
   loggers:
-    ROOT:
+    helper:
       level: INFO
       propagate: true
-      handlers: [console, syslog]
-    clihelper:
-      level: INFO
-      propagate: true
-      handlers: [console, syslog]
+      handlers: [console] # , syslog]
     rejected:
-      level: DEBUG
+      level: INFO
       propagate: false
-      handlers: [console, syslog]
+      handlers: [console] # , syslog]
     rejected.consumer:
-      level: DEBUG
+      level: INFO
       propagate: false
-      handlers: [console, syslog]
+      handlers: [console] # , syslog]
+  root:
+    level: INFO
+    propagate: true
+    handlers: [console, syslog]
   disable_existing_loggers: true
   incremental: false

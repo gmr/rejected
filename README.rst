@@ -1,5 +1,6 @@
 Rejected
 ========
+
 Rejected is a AMQP consumer daemon and message processing framework. It allows
 for rapid development of message processing consumers by handling all of the
 core functionality of communicating with RabbitMQ and management of consumer
@@ -9,17 +10,25 @@ Rejected runs as a master process with multiple consumer configurations that are
 each run it an isolated process. It has the ability to collect statistical
 data from the consumer processes and report on it.
 
+|Version| |Downloads| |Status| |Coverage| |License|
+
 Features
 --------
+
 - Dynamic QoS
 - Automatic exception handling including connection management and consumer restarting
 - Smart consumer classes that can automatically decode and deserialize message bodies based upon message headers
 - Metrics logging and submission to statsd
 
-[![PyPI version](https://badge.fury.io/py/rejected.png)](http://badge.fury.io/py/rejected) [![Downloads](https://pypip.in/d/rejected/badge.png)](https://crate.io/packages/pamqp) [![Build Status](https://travis-ci.org/gmr/rejected.png?branch=master)](https://travis-ci.org/gmr/rejected)
+Documentation
+-------------
+
+https://rejected.readthedocs.org
 
 Example Consumer
------------------
+----------------
+
+.. code:: python
     from rejected import consumer
     import logging
 
@@ -32,7 +41,7 @@ Example Consumer
 
 Example Configuration
 ---------------------
-```yaml
+.. code:: yaml
 
     %YAML 1.2
     ---
@@ -64,12 +73,12 @@ Example Configuration
           config:
             foo: True
             bar: baz
-
+    
      Daemon:
        user: rejected
        group: daemon
        pidfile: /var/run/rejected/example.%(pid)s.pid
-
+    
      Logging:
        version: 1
        formatters:
@@ -104,4 +113,23 @@ Example Configuration
            propagate: true
        disable_existing_loggers: false
        incremental: false
-```
+
+
+Version History
+---------------
+Available at https://rejected.readthedocs.org/en/latest/history.html
+
+.. |Version| image:: https://badge.fury.io/py/rejected.svg?
+   :target: http://badge.fury.io/py/rejected
+
+.. |Status| image:: https://travis-ci.org/gmr/rejected.svg?branch=master
+   :target: https://travis-ci.org/gmr/rejected
+
+.. |Coverage| image:: https://coveralls.io/repos/gmr/rejected/badge.png
+   :target: https://coveralls.io/r/gmr/rejected
+  
+.. |Downloads| image:: https://pypip.in/d/rejected/badge.svg?
+   :target: https://pypi.python.org/pypi/rejected
+   
+.. |License| image:: https://pypip.in/license/rejected/badge.svg?
+   :target: https://rejected.readthedocs.org

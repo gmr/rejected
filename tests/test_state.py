@@ -7,27 +7,27 @@ if (sys.version_info[0], sys.version_info[1]) == (2, 7):
 else:
     import unittest2 as unittest
 
-from rejected import state
+from rejected import common
 
 
 class TestState(unittest.TestCase):
 
     def setUp(self):
-        self._obj = state.State()
+        self._obj = common.State()
 
-    def test_set_state_invalid_value(self):
-        self.assertRaises(ValueError, self._obj._set_state, 9999)
+    def testset_state_invalid_value(self):
+        self.assertRaises(ValueError, self._obj.set_state, 9999)
 
-    def test_set_state_expected_assignment(self):
+    def testset_state_expected_assignment(self):
         self._state = self._obj.STATE_IDLE
-        self._obj._set_state(self._obj.STATE_CONNECTING)
+        self._obj.set_state(self._obj.STATE_CONNECTING)
         self.assertEqual(self._obj._state, self._obj.STATE_CONNECTING)
 
-    def test_set_state_state_start(self):
+    def testset_state_state_start(self):
         self._state = self._obj.STATE_IDLE
         value = 86400
         with mock.patch('time.time', return_value=value):
-            self._obj._set_state(self._obj.STATE_CONNECTING)
+            self._obj.set_state(self._obj.STATE_CONNECTING)
             self.assertEqual(self._obj._state_start, value)
 
     def test_state_initializing_desc(self):

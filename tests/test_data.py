@@ -10,24 +10,6 @@ from rejected import data
 from . import mocks
 
 
-class TestDataObject(unittest.TestCase):
-
-    ATTRIBUTES = {'test': 'Attribute',
-                  'boolean': True,
-                  'intval': 10}
-
-    def setUp(self):
-        self._obj = data.DataObject()
-        for attribute in self.ATTRIBUTES:
-            setattr(self._obj, attribute, self.ATTRIBUTES[attribute])
-
-    def testRepr(self):
-        self.assertEqual(repr(self._obj),
-                         "<DataObject(['test=Attribute', 'boolean=True', "
-                         "'intval=10'])>")
-
-
-
 class TestProperties(unittest.TestCase):
 
     def setUp(self):

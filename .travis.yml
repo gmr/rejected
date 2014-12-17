@@ -1,0 +1,25 @@
+language: python
+python:
+  - 2.6
+  - 2.7
+before_install:
+  - pip install codecov
+install:
+  - if [[ $TRAVIS_PYTHON_VERSION == '2.6' ]]; then pip install unittest2 importlib; fi
+  - "pip install -r requirements.txt"
+script: nosetests --with-coverage --cover-package=rejected
+after_success:
+  - codecov
+  - coveralls
+services:
+  - rabbitmq
+deploy:
+  distributions: sdist bdist_wheel
+  provider: pypi
+  user: crad
+  on:
+    python: 2.7
+    tags: true
+    all_branches: true
+  password:
+    secure: "QNndN99rD5boB/Sg3I0CzjkFUF1JmGrsQKZ7ONiA+obUWQDqOmggUoPEs1zN8xIExDcM4tPhlCQX0QiYJrKdLQwWiClvKo1wpYUxVm0s/W8SqvhV3IK9VxhMrbZUkmksO48TH4YKav06rEkVxke9g3U92XUJZ6cRAnYUKrjMYaQ="

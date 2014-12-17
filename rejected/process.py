@@ -57,7 +57,6 @@ class Process(multiprocessing.Process, common.State):
 
     """
     _AMQP_APP_ID = 'rejected/%s' % __version__
-    _QOS_PREFETCH_COUNT = 1
 
     # Additional State constants
     STATE_PROCESSING = 0x04
@@ -100,6 +99,7 @@ class Process(multiprocessing.Process, common.State):
         self._application = None
         self._channel = None
         self._config = None
+        self._connection = None
         self._connection_id = 0
         self._connection_name = None
         self._connections = None
@@ -287,7 +287,8 @@ class Process(multiprocessing.Process, common.State):
         LOGGER.debug('Calculated prefetch value: %i', value)
         return value
 
-    def get_config(self, config, number, name, connection):
+    @staticmethod
+    def get_config(config, number, name, connection):
         """Initialize a new consumer thread, setting defaults and config values
 
         :param dict config: Consumer config section from YAML File
@@ -346,12 +347,6 @@ class Process(multiprocessing.Process, common.State):
         kwargs = {}
         if 'config' in config:
             kwargs['configuration'] = config.get('config', dict())
-
-        try:
-            if consumer_.WANTS_CONNECTION_CONFIG:
-                kwargs['connections'] = self._connections
-        except AttributeError:
-            pass
 
         try:
             return consumer_(**kwargs)

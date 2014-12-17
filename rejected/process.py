@@ -75,11 +75,7 @@ class Process(multiprocessing.Process, common.State):
     TIME_WAITED = 'idle_time'
     UNHANDLED_EXCEPTIONS = 'unhandled_exceptions'
 
-    _HBINTERVAL = 120
-
-    # Locations to search for newrelic ini files
-    INI_DIRS = ['.', '/etc/', '/etc/newrelic']
-    INI_FILE = 'newrelic.ini'
+    _HBINTERVAL = 300
 
     # Default message pre-allocation value
     _QOS_PREFETCH_COUNT = 1

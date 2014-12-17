@@ -7,6 +7,7 @@ before_install:
 install:
   - if [[ $TRAVIS_PYTHON_VERSION == '2.6' ]]; then pip install unittest2 importlib; fi
   - "pip install -r requirements.txt"
+  - "pip install -r dev-requirements.txt"
 script: nosetests --with-coverage --cover-package=rejected
 after_success:
   - codecov

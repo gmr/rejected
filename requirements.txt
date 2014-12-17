@@ -1,9 +1,5 @@
-beautifulsoup4
 helper
-pika>=0.9.13,
-pgsql_wrapper
+pika>=0.9.14
 psutil
 pyyaml
-redis
-simplejson
 tornado

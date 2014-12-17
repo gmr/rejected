@@ -90,6 +90,8 @@ class Process(multiprocessing.Process, common.State):
     _MAX_SHUTDOWN_WAIT = 5
     _RECONNECT_DELAY = 10
 
+    _STATSD_FORMAT = 'rejected.consumer.{0}.{1}:{2}|c\n'
+
     def __init__(self, group=None, target=None, name=None, args=(),
                  kwargs=None):
         if kwargs is None:
@@ -106,14 +108,16 @@ class Process(multiprocessing.Process, common.State):
         self._consumer = None
         self._counts = self.new_counter_dict()
         self._dynamic_qos = True
-        self._hb_interval = self._HBINTERVAL
         self._last_counts = dict()
         self._last_failure = 0
         self._last_stats_time = None
         self._logging_config = dict()
         self._message_connection_id = None
+        self._max_error_count = self._MAX_ERROR_COUNT
         self._max_frame_size = pika.spec.FRAME_MAX_SIZE
+        self._name = self._kwargs['consumer_name']
         self._qos_prefetch = None
+        self._queue_name = None
         self._prepend_path = None
         self._state = self.STATE_INITIALIZING
         self._state_start = time.time()
@@ -121,6 +125,9 @@ class Process(multiprocessing.Process, common.State):
         self._statsd = False
         self._statsd_host = 'localhost'
         self._statsd_port = 8125
+        self._statsd_socket = socket.socket(socket.AF_INET,
+                                            socket.SOCK_DGRAM,
+                                            socket.IPPROTO_UDP)
 
         # Override ACTIVE with PROCESSING
         self._STATES[0x04] = 'Processing'
@@ -171,6 +178,9 @@ class Process(multiprocessing.Process, common.State):
         :rtype: bool or int
 
         """
+        if not self._last_stats_time:
+            return
+
         qos_prefetch = self.dynamic_qos_pretch
 
         # Don't change anything
@@ -187,6 +197,7 @@ class Process(multiprocessing.Process, common.State):
 
         # If calculated QoS exceeds max
         if qos_prefetch > self._QOS_MAX:
+            LOGGER.debug('Hit QoS Max ceiling of %i', self._QOS_MAX)
             return self.set_qos_prefetch(self._QOS_MAX)
 
         # Set to base value if QoS calc is < than the base
@@ -243,11 +254,13 @@ class Process(multiprocessing.Process, common.State):
                      config[name]['vhost'], config[name]['user'])
         self.set_state(self.STATE_CONNECTING)
         self._connection_id += 1
+        hb_interval = config[name].get('heartbeat_interval', self._HBINTERVAL)
         parameters = self.get_connection_parameters(config[name]['host'],
                                                     config[name]['port'],
                                                     config[name]['vhost'],
                                                     config[name]['user'],
-                                                    config[name]['pass'])
+                                                    config[name]['pass'],
+                                                    hb_interval)
         return tornado_connection.TornadoConnection(parameters,
                                                     self.on_connection_open,
                                                     stop_ioloop_on_close=True)
@@ -303,7 +316,8 @@ class Process(multiprocessing.Process, common.State):
                 'consumer_name': name,
                 'process_name': '%s_%i_tag_%i' % (name, os.getpid(), number)}
 
-    def get_connection_parameters(self, host, port, vhost, username, password):
+    def get_connection_parameters(self, host, port, vhost, username, password,
+                                  heartbeat_interval):
         """Return connection parameters for a pika connection.
 
         :param str host: The RabbitMQ host to connect to
@@ -311,6 +325,7 @@ class Process(multiprocessing.Process, common.State):
         :param str vhost: The virtual host
         :param str username: The username to use
         :param str password: The password to use
+        :param int heartbeat_interval: AMQP Heartbeat interval
         :rtype: pika.ConnectionParameters
 
         """
@@ -318,7 +333,7 @@ class Process(multiprocessing.Process, common.State):
         return pika.ConnectionParameters(host, port, vhost, credentials,
                                          frame_max=self._max_frame_size,
                                          socket_timeout=10,
-                                         heartbeat_interval=self._hb_interval)
+                                         heartbeat_interval=heartbeat_interval)
 
     @staticmethod
     def get_consumer(config):
@@ -383,7 +398,7 @@ class Process(multiprocessing.Process, common.State):
         self.start_message_processing()
         # Try and process the message
         try:
-            self._consumer.process(message)
+            self._consumer.receive(message)
 
         except KeyboardInterrupt:
 
@@ -569,6 +584,7 @@ class Process(multiprocessing.Process, common.State):
 
         """
         values = dict()
+        self.calculate_qos_prefetch()
         for key in self._counts.keys():
             values[key] = self._counts[key] - self._last_counts.get(key, 0)
             self._last_counts[key] = self._counts[key]
@@ -578,6 +594,7 @@ class Process(multiprocessing.Process, common.State):
                                'consumer_name': self._consumer_name,
                                'counts': values})
         LOGGER.debug('Currently %s: %r', self.state_description, values)
+        self._last_stats_time = time.time()
         signal.siginterrupt(signal.SIGPROF, False)
 
     def open_channel(self):
@@ -768,12 +785,10 @@ class Process(multiprocessing.Process, common.State):
         :param int|float value: The count
 
         """
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.connect((self._statsd_host, self._statsd_port))
-        key = '.'.join(['rejected', 'consumers', self._kwargs['consumer_name'],
-                        counter])
-        sock.send('%s:%i|c\n' % (key, math.ceil(value)))
-        sock.close()
+        self._statsd_socket.sendto(self._STATSD_FORMAT.format(self._name,
+                                                              counter,
+                                                              math.ceil(value)),
+                                   (self._statsd_host, self._statsd_port))
 
     def set_qos_prefetch(self, value=None):
         """Set the QOS Prefetch count for the channel.
@@ -829,17 +844,16 @@ class Process(multiprocessing.Process, common.State):
         if not self._consumer:
             LOGGER.critical('Could not import and start processor')
             self.set_state(self.STATE_STOPPED)
-            os._exit(1)
+            exit(1)
 
         self._queue_name = self._config['queue']
-        self._dynamic_qos = self._config.get('dynamic_qos', False)
         self._ack = self._config.get('ack', True)
+        self._dynamic_qos = self._config.get('dynamic_qos', False)
         self._max_error_count = int(self._config.get('max_errors',
                                                      self._MAX_ERROR_COUNT))
-        self._hb_interval = self._config.get('heartbeat_interval',
-                                             self._HBINTERVAL)
         self._max_frame_size = self._config.get('max_frame_size',
                                                 pika.spec.FRAME_MAX_SIZE)
+
         self._statsd = False
         if 'statsd' in config and config['statsd'].get('enabled', False):
             self._statsd = True

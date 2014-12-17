@@ -19,6 +19,7 @@ Features
 - Automatic exception handling including connection management and consumer restarting
 - Smart consumer classes that can automatically decode and deserialize message bodies based upon message headers
 - Metrics logging and submission to statsd
+- Built-in profiling of consumer code
 
 Documentation
 -------------
@@ -27,7 +28,6 @@ https://rejected.readthedocs.org
 
 Example Consumer
 ----------------
-
 .. code:: python
     from rejected import consumer
     import logging

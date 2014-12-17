@@ -1,12 +1,35 @@
-"""Base rejected message Consumer class that aims at simplifying the process
-of writing message Consumers that enforce good behaviors in dealing with
-messages.
+"""
+The :py:class:`Consumer`, :py:class:`PublishingConsumer`,
+:py:class:`SmartConsumer`, and :py:class:`SmartPublishingConsumer` provide base
+classes to extend for consumer applications.
+
+While the :py:class:`Consumer` class provides all the structure required for
+implementing a rejected consumer, the :py:class:`SmartConsumer` adds
+functionality designed to make writing consumers even easier. When messages
+are received by consumers extending :py:class:`SmartConsumer`, if the message's
+``content_type`` property contains one of the supported mime-types, the message
+body will automatically be deserialized, making the deserialized message body
+available via the ``body`` attribute. Additionally, should one of the supported
+``content_encoding`` types (``gzip`` or ``bzip2``) be specified in the
+message's property, it will automatically be decoded.
+
+Supported MIME types are:
+
+ - application/json
+ - application/pickle
+ - application/x-pickle
+ - application/x-plist
+ - application/x-vnd.python.pickle
+ - application/vnd.python.pickle
+ - text/csv
+ - text/html (with beautifulsoup4 installed)
+ - text/xml (with beautifulsoup4 installed)
+ - text/yaml
+ - text/x-yaml
 
 """
 import bz2
-import copy
 import csv
-import datetime
 import json
 import logging
 import pickle
@@ -40,12 +63,13 @@ class Consumer(object):
     """Base consumer class that defines the contract between rejected and
     consumer applications.
 
-    If ``MESSAGE_TYPE`` is set, it will be validated against when a message
-    is received, checking the properties.type value. If they are not matched,
-    the :py:class:`Consumer` will not process the message and will drop the
-    message, returning True if ``DROP_INVALID_MESSAGES`` is ``True``. If it is
-    ``False``, the message will cause the :py:class:`Consumer` to return
-    ``False`` and return the message to the broker.
+    In any of the consumer base classes, if the ``MESSAGE_TYPE`` attribute is
+    set, the ``type`` property of incoming messages will be validated against
+    when a message is received, checking for string equality against the
+    ``MESSAGE_TYPE`` attribute. If they are not matched, the consumer will not
+    process the message and will drop the message without an exception if the
+    ``DROP_INVALID_MESSAGES`` attribute is set to ``True``. If it is ``False``,
+    a :py:class:`ConsumerException` is raised.
 
     """
     DROP_INVALID_MESSAGES = False
@@ -118,7 +142,8 @@ class Consumer(object):
 
     @property
     def app_id(self):
-        """Return the app-id from the message properties.
+        """Access the current message's ``app-id`` property as an attribute of
+        the consumer class.
 
         :rtype: str
 
@@ -127,7 +152,7 @@ class Consumer(object):
 
     @property
     def body(self):
-        """Return the opaque body from the current message.
+        """Access the opaque body from the current message.
 
         :rtype: str
 
@@ -136,7 +161,8 @@ class Consumer(object):
 
     @property
     def configuration(self):
-        """Return the configuration data passed in by the rejected Processor.
+        """Access the configuration stanza for the consumer as specified by
+        the ``config`` section for the consumer in the rejected configuration.
 
         :rtype: dict
 
@@ -145,7 +171,8 @@ class Consumer(object):
 
     @property
     def content_encoding(self):
-        """Return the content-encoding from the message properties.
+        """Access the current message's ``content-encoding`` property as an
+        attribute of the consumer class.
 
         :rtype: str
 
@@ -154,9 +181,8 @@ class Consumer(object):
 
     @property
     def content_type(self):
-        """Return the content-type from the message properties for the current
-        message.
-
+        """Access the current message's ``content-type`` property as an
+        attribute of the consumer class.
         :rtype: str
 
         """
@@ -164,8 +190,8 @@ class Consumer(object):
 
     @property
     def correlation_id(self):
-        """Return the correlation-id from the message properties for the current
-        message.
+        """Access the current message's ``correlation-id`` property as an
+        attribute of the consumer class.
 
         :rtype: str
 
@@ -174,7 +200,8 @@ class Consumer(object):
 
     @property
     def exchange(self):
-        """Return the exchange the message for the current message.
+        """Access the exchange the message was published to as an attribute
+        of the consumer class.
 
         :rtype: str
 
@@ -183,8 +210,8 @@ class Consumer(object):
 
     @property
     def expiration(self):
-        """Return the expiration from the message properties for the current
-        message.
+        """Access the current message's ``expiration`` property as an attribute
+        of the consumer class.
 
         :rtype: str
 
@@ -193,8 +220,8 @@ class Consumer(object):
 
     @property
     def headers(self):
-        """Return the headers from the message properties for the current
-         message.
+        """Access the current message's ``headers`` property as an attribute
+        of the consumer class.
 
         :rtype: dict
 
@@ -203,9 +230,8 @@ class Consumer(object):
 
     @property
     def message_id(self):
-        """Return the message-id from the message properties for the current
-        message.
-
+        """Access the current message's ``message-id`` property as an
+        attribute of the consumer class.
         :rtype: str
 
         """
@@ -213,7 +239,7 @@ class Consumer(object):
 
     @property
     def name(self):
-        """Return the consumer class name.
+        """Property returning the name of the consumer class.
 
         :rtype: str
 
@@ -222,8 +248,8 @@ class Consumer(object):
 
     @property
     def priority(self):
-        """Return the priority from the message properties for the current
-        message.
+        """Access the current message's ``priority`` property as an
+        attribute of the consumer class.
 
         :rtype: int
 
@@ -232,7 +258,8 @@ class Consumer(object):
 
     @property
     def properties(self):
-        """Return the properties for the current message as dict.
+        """Access the current message's properties in dict form as an attribute
+        of the consumer class.
 
         :rtype: dict
 
@@ -250,8 +277,8 @@ class Consumer(object):
 
     @property
     def reply_to(self):
-        """Return the priority from the message properties for the current
-        message.
+        """Access the current message's ``reply-to`` property as an
+        attribute of the consumer class.
 
         :rtype: str
 
@@ -260,7 +287,7 @@ class Consumer(object):
 
     @property
     def routing_key(self):
-        """Return the routing key for the current message.
+        """Access the routing key for the current message.
 
         :rtype: str
 
@@ -269,7 +296,8 @@ class Consumer(object):
 
     @property
     def message_type(self):
-        """Return the type from the current message's properties.
+        """Access the current message's ``type`` property as an attribute of
+        the consumer class.
 
         :rtype: str
 
@@ -278,7 +306,7 @@ class Consumer(object):
 
     @property
     def timestamp(self):
-        """Return the unix epoch timestamp value from the properties of the
+        """Access the unix epoch timestamp value from the properties of the
         current message.
 
         :rtype: int
@@ -288,7 +316,7 @@ class Consumer(object):
 
     @property
     def user_id(self):
-        """Return the user-id from the current message's properties.
+        """Access the user-id from the current message's properties.
 
         :rtype: str
 
@@ -298,36 +326,33 @@ class Consumer(object):
 
 class PublishingConsumer(Consumer):
     """The PublishingConsumer extends the Consumer class, adding two methods,
-    one that allows for arbitrary publishing back on the same channel that the
-    consumer is communicating on and another for replying to messages, adding
-    RPC reply semantics to the outbound message.
+    one that allows for
+    :py:meth:`publishing <rejected.consumer.PublishingConsumer.publish_message>`
+    of messages back on the same channel that the consumer is communicating on
+    and another for
+    :py:meth:`replying to messages<rejected.consumer.PublishingConsumer.reply>`,
+    adding RPC reply semantics to the outbound message.
+
+    In any of the consumer base classes, if the ``MESSAGE_TYPE`` attribute is
+    set, the ``type`` property of incoming messages will be validated against
+    when a message is received, checking for string equality against the
+    ``MESSAGE_TYPE`` attribute. If they are not matched, the consumer will not
+    process the message and will drop the message without an exception if the
+    ``DROP_INVALID_MESSAGES`` attribute is set to ``True``. If it is ``False``,
+    a :py:class:`ConsumerException` is raised.
 
     """
     def publish_message(self, exchange, routing_key, properties, body):
         """Publish a message to RabbitMQ on the same channel the original
         message was received on.
 
-        By default, if you pass a non-string object to the body and the
-        properties have a supported content-type set, the body will be
-        auto-serialized in the specified content-type.
-
-        If the properties do not have a timestamp set, it will be set to the
-        current time.
-
-        If you specify a content-encoding in the properties and the encoding is
-        supported, the body will be auto-encoded.
-
-        Both of these behaviors can be disabled by setting no_serialization or
-        no_encoding to True.
-
         :param str exchange: The exchange to publish to
         :param str routing_key: The routing key to publish with
-        :param rejected.data.Properties: The message properties
-        :param bool no_serialization: Turn off auto-serialization of the body
-        :param bool no_encoding: Turn off auto-encoding of the body
+        :param dict properties: The message properties
+        :param str body: The message body
 
         """
-        # Convert the rejected.data.Properties object to a pika.BasicProperties
+        # Convert the dict to pika.BasicProperties
         LOGGER.debug('Converting properties')
         msg_props = self._get_pika_properties(properties)
 
@@ -356,11 +381,6 @@ class PublishingConsumer(Consumer):
         in the properties and it is not passed in, a ValueException will be
         raised. If reply to is set in the properties, it will be cleared out
         prior to the message being republished.
-
-        Like with the publish method, if you pass in a non-String object and
-        content-type is set to a supported content type, the content will
-        be auto-serialized. In addition, if the content-encoding is set to a
-        supported encoding, it will be auto-encoded.
 
         :param any response_body: The message body to send
         :param dict properties: Message properties to use
@@ -411,7 +431,31 @@ class PublishingConsumer(Consumer):
 class SmartConsumer(Consumer):
     """Base class to ease the implementation of strongly typed message consumers
     that validate and automatically decode and deserialize the inbound message
-    body based upon the message properties.
+    body based upon the message properties. Additionally, should one of the
+    supported ``content_encoding`` types (``gzip`` or ``bzip2``) be specified
+    in the message's property, it will automatically be decoded.
+
+    *Supported MIME types for automatic deserialization are:*
+
+     - application/json
+     - application/pickle
+     - application/x-pickle
+     - application/x-plist
+     - application/x-vnd.python.pickle
+     - application/vnd.python.pickle
+     - text/csv
+     - text/html (with beautifulsoup4 installed)
+     - text/xml (with beautifulsoup4 installed)
+     - text/yaml
+     - text/x-yaml
+
+    In any of the consumer base classes, if the ``MESSAGE_TYPE`` attribute is
+    set, the ``type`` property of incoming messages will be validated against
+    when a message is received, checking for string equality against the
+    ``MESSAGE_TYPE`` attribute. If they are not matched, the consumer will not
+    process the message and will drop the message without an exception if the
+    ``DROP_INVALID_MESSAGES`` attribute is set to ``True``. If it is ``False``,
+    a :py:class:`ConsumerException` is raised.
 
     """
     def __init__(self, configuration):

@@ -7,15 +7,22 @@ Rejected is a RabbitMQ consumer framework and controller daemon that allows you
 to focus on the development of the code that handles the messages and not the
 code that facilitates the communication with RabbitMQ."""
 
-install_requires = ['beautifulsoup4',
-                    'helper',
-                    'pika>=0.9.13',
-                    'pgsql_wrapper',
+classifiers = ['Development Status :: 5 - Production/Stable',
+               'Intended Audience :: Developers',
+               'Programming Language :: Python :: 2',
+               'Programming Language :: Python :: 2.6',
+               'Programming Language :: Python :: 2.7',
+               'Programming Language :: Python :: Implementation :: CPython',
+               'Programming Language :: Python :: Implementation :: PyPy',
+               'License :: OSI Approved :: BSD License']
+
+install_requires = ['helper',
+                    'pika>=0.9.14',
                     'psutil',
                     'pyyaml',
-                    'redis',
-                    'simplejson',
                     'tornado']
+
+extras_require = {'html': ['beautifulsoup4']}
 
 if sys.version_info < (2, 7, 0):
     install_requires.append('importlib')
@@ -25,11 +32,7 @@ setup(name='rejected',
       description='Rejected is a Python RabbitMQ Consumer Framework and '
                   'Controller Daemon',
       long_description=long_description,
-      classifiers=[
-        'Development Status :: 5 - Production/Stable',
-        'Intended Audience :: Developers',
-        'License :: OSI Approved :: BSD License',
-      ],
+      classifiers=classifiers,
       keywords='amqp rabbitmq',
       author='Gavin M. Roy',
       author_email='gmr@meetme.com',

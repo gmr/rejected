@@ -1,11 +1,9 @@
 """Tests for the State Class"""
 import mock
-import sys
-# Import unittest if 2.7, unittest2 if other version
-if (sys.version_info[0], sys.version_info[1]) == (2, 7):
-    import unittest
-else:
+try:
     import unittest2 as unittest
+except ImportError:
+    import unittest
 
 from rejected import common
 

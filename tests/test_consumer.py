@@ -1,561 +1,178 @@
 # coding=utf-8
 """Tests for rejected.consumer"""
-import sys
 import bs4
 import bz2
 import csv
-import datetime
+import json
 import mock
 import pickle
 try:
-    import pgsql_wrapper
-except ImportError:
-    pgsql_wrapper = None
-try:
-    import psycopg2
-except ImportError:
-    psycopg2 = None
-try:
-    import redis
-except ImportError:
-    redis = None
-# Import unittest if 2.7, unittest2 if other version
-if (sys.version_info[0], sys.version_info[1]) == (2, 7):
-    import unittest
-else:
     import unittest2 as unittest
+except ImportError:
+    import unittest
 import zlib
 
+from . import mocks
+
 from rejected import consumer
+from rejected import data
 
 
-class MockAllProperties(object):
-    app_id = "go/1.2.7"
-    content_type = "application/x-plist"
-    content_encoding = None
-    correlation_id = "6e43f307-b82e-4167-9285-345b9a06c424"
-    delivery_mode = 1
-    expiration = 1340211265
-    headers = {"foo": "bar"}
-    message_id = "3f777eda-7841-4d04-a7c0-21ab88f4a671"
-    priority = 5
-    reply_to = "4f757efa-7a41-4504-b7c0-21ab88f4a671"
-    timestamp = 1340211260
-    type = "click"
-    user_id = 'gmr'
+class ConsumerInitializationTests(unittest.TestCase):
 
-class MockJSONProperties(object):
-    app_id = "go/1.2.7"
-    content_type = "application/json"
-    content_encoding = None
-    correlation_id = "6e43f307-b82e-4167-9285-345b9a06c424"
-    delivery_mode = 1
-    expiration = None
-    headers = None
-    message_id = "3f777eda-7841-4d04-a7c0-21ab88f4a671"
-    priority = None
-    reply_to = None
-    timestamp = 1340211260
-    type = "click"
-    user_id = None
+    def test_configuration_is_assigned(self):
+        cfg = {'foo': 'bar'}
+        obj = consumer.Consumer(cfg)
+        self.assertDictEqual(obj._config, cfg)
 
-class MockJSONMessage(object):
+    def test_channel_is_none(self):
+        obj = consumer.Consumer({})
+        self.assertIsNone(obj._channel)
 
-    body = '{"foo": "bar", "baz": 10}'
-    body_expectation = {'foo': 'bar', 'baz': 10}
-    routing_key = 'click'
-    redelivered = False
-    properties = MockJSONProperties
-    def __init__(self):
-        self.properties = MockJSONProperties()
+    def test_message_is_none(self):
+        obj = consumer.Consumer({})
+        self.assertIsNone(obj._message)
+
+    def test_initialize_is_invoked(self):
+        with mock.patch('rejected.consumer.Consumer.initialize') as init:
+            consumer.Consumer({})
+            init.assert_called_once_with()
 
 
-class LocalConsumer(consumer.Consumer):
+class ConsumerDefaultProcessTests(unittest.TestCase):
 
-    _CONFIG= {'pgsql': {'host': 'localhost',
-                        'port': 6000,
-                        'user': 'www',
-                        'dbname': 'production'},
-              'redis': {'host': 'localhost',
-                        'port': 6879,
-                        'db': 0},
-              'whitelist': False}
-
-    _DROP_INVALID_MESSAGES = True
-    _MESSAGE_TYPE = None
+    def test_process_raises_exception(self):
+        obj = consumer.Consumer({})
+        self.assertRaises(NotImplementedError, obj.process)
 
 
-class TestJSONConsumer(unittest.TestCase):
-    _CONFIG = {'pgsql': {'host': 'localhost',
-                         'port': 6000,
-                         'user': 'www',
-                         'dbname': 'production'},
-               'redis': {'host': 'localhost',
-                         'port': 6879,
-                         'db': 0},
-               'whitelist': False}
-    _CSV = '"foo","bar"\r\n1,2\r\n3,4\r\n5,6\r\n'
-    _CSV_EXPECTATION = [{"foo": "1", "bar": "2"},
-            {"foo": "3", "bar": "4"},
-            {"foo": "5", "bar": "6"}]
+class ConsumerSetChannelTests(unittest.TestCase):
 
-    _HTML = '<html><head><title>hi</title></head><body>there</body></html>'
+    def test_set_channel_assigns_to_channel(self):
+        obj = consumer.Consumer({})
+        channel = mock.Mock()
+        obj.set_channel(channel)
+        self.assertEqual(obj._channel, channel)
 
-    _PLIST = """\
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Name</key>
-    <string>John Doe</string>
-    <key>Phones</key>
-    <array>
-        <string>408-974-0000</string>
-        <string>503-333-5555</string>
-    </array>
-</dict>
-</plist>
-"""
-    _PLIST_EXPECTATION = {'Phones': ['408-974-0000', '503-333-5555'],
-                          'Name': 'John Doe'}
 
-    _YAML = """\
-%YAML 1.2
----
-Logging:
-  format: "%(levelname) -10s %(asctime)s %(process)-6d %(processName) -15s %(name) -35s %(funcName) -30s: %(message)s"
-  level: warning
-  handler: syslog
-  syslog:
-    address: /dev/log
-    facility: local6
-"""
-    _YAML_EXPECTATION = {'Logging': {'format':'%(levelname) -10s %(asctime)s '
-                                              '%(process)-6d %(processName) '
-                                              '-15s %(name) -35s %(funcName) '
-                                              '-30s: %(message)s',
-                                     'level': 'warning',
-                                     'handler': 'syslog',
-                                     'syslog': {'address': '/dev/log',
-                                                'facility': 'local6'}}}
+class TestConsumer(consumer.Consumer):
+    def process(self):
+        pass
+
+
+class ConsumerReceiveTests(unittest.TestCase):
 
     def setUp(self):
-        self._obj = LocalConsumer(self._CONFIG)
-        self._obj._message = MockJSONMessage()
-
-    def tearDown(self):
-        del self._obj
-
-    def test_underscore_process_raises_exception(self):
-        consumer_ = consumer.Consumer({'config': True})
-        self.assertRaises(NotImplementedError, consumer_._process)
-
-    def test_bz2_decompress(self):
-        value = ('BZh91AY&SY\xe7\xdex,\x00\x00E\x9f\x80\x10\x07\x7f\xf0\x00'
-                 '\xa0@\x00\xbe\xe7\xde\n \x00u\x11\x1a\x87\xa4\xf2@\x00\x03'
-                 '\xd4i\xa0j\xa7\xfa)\xa4\xc6M4\xd0\x04`\x03\xab\xff\x01\x8f'
-                 '\x07\x82\x17\xb9\xfe\x04\x8d\x14\x90m2WM\xb1,\x11\xb2d\x8d'
-                 '\x80\xb6v\xb1%\xfb2!\x81"N$8\x13\xdc\xd63\xcc\xe0\xb0\xddV'
-                 '\x06{\x12\xc4\x0c\xe2\x82\x1e\xc1\xa2o\x078\x07\xa9U\\A\xdc'
-                 '\x97\x9e\xd3\x94W\xb9d\x83 \xf2\x18\x1a(\xf1\xde\x8b\xb9"'
-                 '\x9c(Hs\xef<\x16\x00')
-        expectation = ('{"birth_date":"1989-10-18","gender":"m","latitude":27'
-                       '.945900,"longitude":-82.788400,"geolocation_source":"'
-                       'GeoIP","ip_address":"97.78.13.106"}')
-        self.assertEqual(self._obj._decode_bz2(value), expectation)
-
-    def test_gzip_decompress(self):
-        value = ('x\x9c-\xccA\x0e\xc2 \x10\x05\xd0\xbb\xccZ\x08\xd4*\x8c\x170'
-                 '\xee\xbc\x01\xc12A\x92\xca\x18\xa0+\xe3\xdd\x9d&.\xff\xcb'
-                 '\xff\xff\x03\x8f\xd2\xc63\xa48\x08.`\xd1\xa3\xb2FY\x0f\x07'
-                 '\xc8T\x135\xd1\x97\x845\x8e2\xb6$\xa5\xc9i\x9cOh\x8c \xd7'
-                 "\xfcW\xe5'\xed\xbc\x9fw\xce\xc4+/2\xe0\x1a:om\xd9\xaf\xaf"
-                 '\xc4\xb7\xbb\x1c\x95w\x88)5\xea]\x10\x9d\x8c\xb4=jk\xce\xf0'
-                 '\xfd\x01\x93))\x83')
-        expectation = ('{"birth_date":"1989-10-18","gender":"m","latitude":27'
-                       '.945900,"longitude":-82.788400,"geolocation_source":"'
-                       'GeoIP","ip_address":"97.78.13.106"}')
-        self.assertEqual(self._obj._decode_gzip(value), expectation)
-
-    def test_get_service(self):
-        value = 'foo.bar.baz'
-        expectation = 'baz_bar_foo'
-        self.assertEqual(self._obj._get_service(value), expectation)
-
-    def test_get_pgsql_cursor_connect(self):
-        if not psycopg2:
-            self.skipTest('psycopg2 not installed')
-        if not pgsql_wrapper:
-            self.skipTest('pgsql_wrapper not installed')
-        with mock.patch('pgsql_wrapper.PgSQL', autospec=True):
-            with mock.patch('psycopg2.connect') as mock_method:
-                self._obj._get_pgsql_cursor(**self._obj._CONFIG['pgsql'])
-                mock_method.assertCalledWith(**self._obj._CONFIG['pgsql'])
-
-    def test_get_postgresql_connection_error(self):
-        if not psycopg2:
-            self.skipTest('psycopg2 not installed')
-        if not pgsql_wrapper:
-            self.skipTest('pgsql_wrapper not installed')
-        with mock.patch('pgsql_wrapper.PgSQL', autospec=True,
-                        side_effect=psycopg2.OperationalError):
-            self.assertRaises(IOError,
-                              self._obj._get_pgsql_cursor,
-                              **self._obj._CONFIG['pgsql'])
-
-    def test_get_pgsql_cursor_value(self):
-        if not psycopg2:
-            self.skipTest('psycopg2 not installed')
-        if not pgsql_wrapper:
-            self.skipTest('pgsql_wrapper not installed')
-        with mock.patch('pgsql_wrapper.PgSQL', autospec=True):
-            with mock.patch('psycopg2.connect'):
-                    val = self._obj._get_pgsql_cursor(**self._obj._CONFIG['pgsql'])
-                    self.assertEqual(val._mock_name, 'cursor')
-
-    def test_get_pgsql_cursor_with_no_pgsql_wrapper_module(self):
-        with mock.patch('rejected.consumer.pgsql_wrapper', new=None):
-            self.assertRaises(ImportError,
-                              self._obj._get_pgsql_cursor,
-                              **self._obj._CONFIG['pgsql'])
-
-    def test_get_redis(self):
-        if not redis:
-            self.skipTest('redis client not installed')
-        with mock.patch.object(redis, 'Redis', spec=redis.Redis):
-            client = self._obj._get_redis_client(**self._obj._CONFIG['redis'])
-            self.assertIsInstance(client, mock.NonCallableMagicMock)
-            self.assertEqual(client._spec_class, redis.Redis._spec_class)
-
-    def test_get_redis_with_no_redis_module(self):
-        with mock.patch('rejected.consumer.redis', new=None):
-            self.assertRaises(ImportError,
-                              self._obj._get_redis_client, 'localhost', 6379, 0)
-
-
-    def test_load_bs4_value_html_return_type(self):
-        if not bs4:
-            self.skipTest('BeautifulSoup4 is not installed')
-        self.assertIsInstance(self._obj._load_bs4_value(self._HTML),
-                              bs4.BeautifulSoup)
-
-    def test_load_bs4_html_value(self):
-        if not bs4:
-            self.skipTest('BeautifulSoup4 is not installed')
-        expectation = 'hi'
-        result = self._obj._load_bs4_value(self._HTML)
-        self.assertEqual(result.title.string, expectation)
-
-    def test_load_bs4_xml_value(self):
-        if not bs4:
-            self.skipTest('BeautifulSoup4 is not installed')
-        value = self._obj._load_bs4_value(self._PLIST)
-        self.assertEqual(value.find('key').string, 'Name')
-
-    def test_load_bs4_with_no_bs4(self):
-        with mock.patch('rejected.consumer.bs4', new=None):
-            self.assertRaises(consumer.ConsumerException,
-                              self._obj._load_bs4_value, '<html></html>')
-
-    def test_load_csv_value_return_type(self):
-        self.assertIsInstance(self._obj._load_csv_value(self._CSV),
-                              csv.DictReader)
-
-    def test_load_csv_value(self):
-        result = list(self._obj._load_csv_value(self._CSV))
-        self.assertListEqual(result, self._CSV_EXPECTATION)
-
-    def test_load_json_value_return_type(self):
-        self.assertIsInstance(self._obj._load_json_value(MockJSONMessage.body),
-                              dict)
-
-    def test_load_json_value(self):
-        self.assertEqual(self._obj._load_json_value(MockJSONMessage.body),
-                         MockJSONMessage.body_expectation)
-
-    def test_load_pickle_value_return_type(self):
-        value = pickle.dumps(MockJSONMessage.body_expectation)
-        self.assertIsInstance(self._obj._load_pickle_value(value),
-                              dict)
-
-    def test_load_pickle_value(self):
-        value = pickle.dumps(MockJSONMessage.body_expectation)
-        self.assertEqual(self._obj._load_pickle_value(value),
-                         MockJSONMessage.body_expectation)
-
-    def test_load_plist_value_return_type(self):
-        self.assertIsInstance(self._obj._load_plist_value(self._PLIST),
-                              dict)
-
-    def test_load_plist_value(self):
-        self.assertEqual(self._obj._load_plist_value(self._PLIST),
-                         self._PLIST_EXPECTATION)
-
-    def test_message_app_id(self):
-        self.assertEqual(self._obj.message_app_id, MockJSONProperties.app_id)
-
-    def test_message_app_id_is_null(self):
-        with mock.patch.object(LocalConsumer, '_process'):
-            message = MockJSONMessage()
-            message.properties = MockAllProperties()
-            message.properties.app_id = None
-            self._obj.process(message)
-        self.assertIsNone(self._obj.message_app_id)
-
-    def test_message_body(self):
-        with mock.patch.object(LocalConsumer, '_process'):
-            self._obj.process(MockJSONMessage())
-        self.assertEqual(self._obj.message_body,
-                         MockJSONMessage.body_expectation)
-
-    def test_message_correlation_id(self):
-        self.assertEqual(self._obj.message_correlation_id,
-                         MockJSONProperties.correlation_id)
-
-    def test_message_correlation_id_is_null(self):
-        with mock.patch.object(LocalConsumer, '_process'):
-            message = MockJSONMessage()
-            message.properties = MockAllProperties()
-            message.properties.correlation_id = None
-            self._obj.process(message)
-        self.assertIsNone(self._obj.message_correlation_id)
-
-    def _datetime(self, value):
-        return datetime.datetime.fromtimestamp(float(value))
-
-    def test_message_expiration(self):
-        expectation = self._datetime(MockAllProperties.expiration)
-        with mock.patch.object(LocalConsumer, '_process'):
-            message = MockJSONMessage()
-            message.properties = MockAllProperties()
-            self._obj.process(message)
-        self.assertEqual(self._obj.message_expiration,
-                         expectation)
-
-    def test_message_expiration_is_null(self):
-        with mock.patch.object(LocalConsumer, '_process'):
-            message = MockJSONMessage()
-            message.properties = MockAllProperties()
-            message.properties.expiration = None
-            self._obj.process(message)
-        self.assertIsNone(self._obj.message_expiration)
-
-    def test_message_headers(self):
-        with mock.patch.object(LocalConsumer, '_process'):
-            message = MockJSONMessage()
-            message.properties = MockAllProperties()
-            self._obj.process(message)
-        self.assertEqual(self._obj.message_headers,
-                         MockAllProperties.headers)
-
-    def test_message_headers_is_null(self):
-        self.assertIsNone(self._obj.message_headers)
-
-    def test_message_id(self):
-        self.assertEqual(self._obj.message_id, MockJSONProperties.message_id)
-
-    def test_message_id_is_null(self):
-        with mock.patch.object(LocalConsumer, '_process'):
-            message = MockJSONMessage()
-            message.properties = MockAllProperties()
-            message.properties.message_id = None
-            self._obj.process(message)
-        self.assertIsNone(self._obj.message_id)
-
-    def test_message_priority(self):
-        with mock.patch.object(LocalConsumer, '_process'):
-            message = MockJSONMessage()
-            message.properties = MockAllProperties()
-            self._obj.process(message)
-        self.assertEqual(self._obj.message_priority,
-                         MockAllProperties.priority)
-
-    def test_message_priority_is_null(self):
-        self.assertIsNone(self._obj.message_priority)
-
-    def test_message_reply_to(self):
-        with mock.patch.object(LocalConsumer, '_process'):
-            message = MockJSONMessage()
-            message.properties = MockAllProperties()
-            self._obj.process(message)
-        self.assertEqual(self._obj.message_reply_to,
-                         MockAllProperties.reply_to)
-
-    def test_message_reply_to_is_null(self):
-        self.assertIsNone(self._obj.message_reply_to)
-
-    def test_message_time(self):
-        expectation = self._datetime(MockJSONProperties.timestamp)
-        self.assertEqual(self._obj.message_time, expectation)
-
-    def test_message_time_is_null(self):
-        with mock.patch.object(LocalConsumer, '_process'):
-            message = MockJSONMessage()
-            message.properties = MockAllProperties()
-            message.properties.timestamp = None
-            self._obj.process(message)
-        self.assertIsNone(self._obj.message_time)
-
-    def test_message_type(self):
-        self.assertEqual(self._obj.message_type,
-                         MockJSONProperties.type)
-
-    def test_message_type_is_null(self):
-        with mock.patch.object(LocalConsumer, '_process'):
-            message = MockJSONMessage()
-            message.properties = MockAllProperties()
-            message.properties.type = None
-            self._obj.process(message)
-        self.assertIsNone(self._obj.message_type)
-
-    def test_message_user_id(self):
-        with mock.patch.object(LocalConsumer, '_process'):
-            message = MockJSONMessage()
-            message.properties = MockAllProperties()
-            self._obj.process(message)
-        self.assertEqual(self._obj.message_user_id, MockAllProperties.user_id)
-
-    def test_message_user_id_is_null(self):
-        self.assertIsNone(self._obj.message_user_id)
-
-    def test_process_with_message_type_validation_pass(self):
-        self._obj._MESSAGE_TYPE = MockJSONProperties.type
-        with mock.patch.object(LocalConsumer, '_process'):
-            message = MockJSONMessage()
-            self._obj.process(message)
-            assert True, "ConsumerException was not raised"
-
-    def test_process_with_message_type_validation_fail_drop(self):
-        self._obj._MESSAGE_TYPE = 'BAD_TYPE_LOL'
-        self._obj._DROP_INVALID_MESSAGES = True
-        with mock.patch.object(LocalConsumer, '_process'):
-            message = MockJSONMessage()
-            self._obj.process(message)
-            assert True, 'ConsumerException not raised'
-
-    def test_process_with_message_type_validation_fail_dont_drop(self):
-        self._obj._MESSAGE_TYPE = 'BAD_TYPE_LOL'
-        self._obj._DROP_INVALID_MESSAGES = False
-        with mock.patch.object(LocalConsumer, '_process'):
-            message = MockJSONMessage()
-            self.assertRaises(consumer.ConsumerException,
-                              self._obj.process, message)
-
-    def test_process_with_processing_exception(self):
-        self._obj._MESSAGE_TYPE = None
-        with mock.patch.object(LocalConsumer, '_process') as mock_method:
-            mock_method.side_effect = consumer.ConsumerException
-            message = MockJSONMessage()
-            self.assertRaises(consumer.ConsumerException,
-                              self._obj.process, message)
-
-    def test_message_body_compressed_with_bzip2(self):
-        with mock.patch.object(LocalConsumer, '_process'):
-            message = MockJSONMessage()
-            message.body = bz2.compress(self._PLIST)
-            message.properties.content_type = 'application/x-plist'
-            message.properties.content_encoding = 'bzip2'
-            self._obj.process(message)
-            self.assertEqual(self._obj.message_body,
-                             self._PLIST_EXPECTATION)
-
-    def test_message_body_compressed_with_gzip(self):
-        with mock.patch.object(LocalConsumer, '_process'):
-            message = MockJSONMessage()
-            message.body = zlib.compress(self._PLIST)
-            message.properties.content_type = 'application/x-plist'
-            message.properties.content_encoding = 'gzip'
-            self._obj.process(message)
-            self.assertEqual(self._obj.message_body,
-                             self._PLIST_EXPECTATION)
-
-    def test_message_body_with_utf8_encoding(self):
-        with mock.patch.object(LocalConsumer, '_process'):
-            message = MockJSONMessage()
-            message.properties.content_encoding = 'utf-8'
-            self._obj.process(message)
-            body = self._obj.message_body  # Get this to change encoding
-            self.assertIsNone(self._obj.message_content_encoding)
-
-    def test_message_body_as_json(self):
-        with mock.patch.object(LocalConsumer, '_process'):
-            self._obj.process(MockJSONMessage())
-            self.assertEqual(self._obj.message_body,
-                             MockJSONMessage.body_expectation)
-
-    def test_message_body_as_pickle(self):
-        with mock.patch.object(LocalConsumer, '_process'):
-            message = MockJSONMessage()
-            message.body = pickle.dumps(self._PLIST_EXPECTATION)
-            message.properties.content_type = 'application/pickle'
-            self._obj.process(message)
-            self.assertEqual(self._obj.message_body,
-                             self._PLIST_EXPECTATION)
-
-    def test_message_body_as_csv(self):
-        with mock.patch.object(LocalConsumer, '_process'):
-            message = MockJSONMessage()
-            message.body = self._CSV
-            message.properties.content_type = 'text/csv'
-            self._obj.process(message)
-            self.assertEqual(list(self._obj.message_body),
-                             self._CSV_EXPECTATION)
-
-    def test_message_body_as_html(self):
-        with mock.patch.object(LocalConsumer, '_process'):
-            message = MockJSONMessage()
-            message.body = self._HTML
-            message.properties.content_type = 'text/html'
-            self._obj.process(message)
-            self.assertEqual(self._obj.message_body.title.string, 'hi')
-
-    def test_message_body_as_plist(self):
-        with mock.patch.object(LocalConsumer, '_process'):
-            message = MockJSONMessage()
-            message.body = self._PLIST
-            message.properties.content_type = 'application/x-plist'
-            self._obj.process(message)
-            self.assertEqual(self._obj.message_body,
-                             self._PLIST_EXPECTATION)
-
-    def test_message_body_as_xml(self):
-        with mock.patch.object(LocalConsumer, '_process'):
-            message = MockJSONMessage()
-            message.body = self._PLIST
-            message.properties.content_type = 'text/xml'
-            self._obj.process(message)
-            self.assertEqual(self._obj.message_body.find('key').string, 'Name')
-
-
-    def test_message_body_as_yaml(self):
-        with mock.patch.object(LocalConsumer, '_process'):
-            message = MockJSONMessage()
-            message.body = self._YAML
-            message.properties.content_type = 'text/yaml'
-            self._obj.process(message)
-            self.assertEqual(self._obj.message_body, self._YAML_EXPECTATION)
-
-    def test_message_body_no_decoding_deserializing(self):
-        with mock.patch.object(LocalConsumer, '_process'):
-            message = MockJSONMessage()
-            message.body = self._PLIST
-            message.properties.content_type = 'text/text'
-            self._obj.process(message)
-            self.assertEqual(self._obj.message_body, self._PLIST)
-
-    def test_message_body_no_content_type(self):
-        with mock.patch.object(LocalConsumer, '_process'):
-            message = MockJSONMessage()
-            message.body = self._PLIST
-            message.properties.content_type = None
-            self._obj.process(message)
-            self.assertEqual(self._obj.message_body, self._PLIST)
-
-    def test_message_body_called_twice(self):
-        with mock.patch.object(LocalConsumer, '_process'):
-            message = MockJSONMessage()
-            message.body = self._PLIST
-            message.properties.content_type = None
-            self._obj.process(message)
-            _first_call = self._obj.message_body
-            self.assertEqual(self._obj.message_body, self._PLIST)
+        self.obj = TestConsumer({})
+        self.message = data.Message(mocks.CHANNEL, mocks.METHOD,
+                                    mocks.HEADER, mocks.BODY)
+
+    def test_receive_assigns_message(self):
+        self.obj.receive(self.message)
+        self.assertEqual(self.obj._message, self.message)
+
+    def test_receive_invokes_process(self):
+        with mock.patch.object(self.obj, 'process') as process:
+            self.obj.receive(self.message)
+            process.assert_called_once_with()
+
+    def test_receive_drops_invalid_message_type(self):
+        self.obj.MESSAGE_TYPE = 'foo'
+        self.obj.DROP_INVALID_MESSAGES = True
+        with mock.patch.object(self.obj, 'process') as process:
+            self.obj.receive(self.message)
+            process.assert_not_called()
+
+    def test_raises_with_invalid_message_type(self):
+        self.obj.MESSAGE_TYPE = 'foo'
+        self.obj.DROP_INVALID_MESSAGES = False
+        self.assertRaises(consumer.ConsumerException, self.obj.receive,
+                          self.message)
+
+
+class ConsumerPropertyTests(unittest.TestCase):
+
+    def setUp(self):
+        self.config = {'foo': 'bar', 'baz': 1, 'qux': True}
+        self.message = data.Message(mocks.CHANNEL, mocks.METHOD,
+                                    mocks.HEADER, mocks.BODY)
+        self.obj = TestConsumer(self.config)
+        self.obj.receive(self.message)
+
+    def test_app_id_property(self):
+        self.assertEqual(self.obj.app_id, mocks.PROPERTIES.app_id)
+
+    def test_body_property(self):
+        self.assertEqual(self.obj.body, mocks.BODY)
+
+    def test_configuration_property(self):
+        self.assertDictEqual(self.obj.configuration, self.config)
+
+    def test_content_encoding_property(self):
+        self.assertEqual(self.obj.content_encoding,
+                         mocks.PROPERTIES.content_encoding)
+
+    def test_content_type_property(self):
+        self.assertEqual(self.obj.content_type, mocks.PROPERTIES.content_type)
+
+    def test_correlation_id_property(self):
+        self.assertEqual(self.obj.correlation_id,
+                         mocks.PROPERTIES.correlation_id)
+
+    def test_exchange_property(self):
+        self.assertEqual(self.obj.exchange, mocks.METHOD.exchange)
+
+    def test_expiration_property(self):
+        self.assertEqual(self.obj.expiration, mocks.PROPERTIES.expiration)
+
+    def test_headers_property(self):
+        self.assertDictEqual(self.obj.headers, mocks.PROPERTIES.headers)
+
+    def test_message_id_property(self):
+        self.assertEqual(self.obj.message_id, mocks.PROPERTIES.message_id)
+
+    def test_name_property(self):
+        self.assertEqual(self.obj.name, self.obj.__class__.__name__)
+
+    def test_priority_property(self):
+        self.assertEqual(self.obj.priority, mocks.PROPERTIES.priority)
+
+    def test_properties_property(self):
+        self.assertDictEqual(self.obj.properties,
+                             dict(data.Properties(mocks.PROPERTIES)))
+
+    def test_redelivered_property(self):
+        self.assertEqual(self.obj.redelivered, mocks.METHOD.redelivered)
+
+    def test_reply_to_property(self):
+        self.assertEqual(self.obj.reply_to, mocks.PROPERTIES.reply_to)
+
+    def test_routing_key_property(self):
+        self.assertEqual(self.obj.routing_key, mocks.METHOD.routing_key)
+
+    def test_message_type_property(self):
+        self.assertEqual(self.obj.message_type, mocks.PROPERTIES.type)
+
+    def test_timestamp_property(self):
+        self.assertEqual(self.obj.timestamp, mocks.PROPERTIES.timestamp)
+
+    def test_user_id_property(self):
+        self.assertEqual(self.obj.user_id, mocks.PROPERTIES.user_id)
+
+
+class TestSmartConsumer(consumer.SmartConsumer):
+    def process(self):
+        pass
+
+
+class TestSmartConsumerWithJSON(unittest.TestCase):
+
+    def setUp(self):
+        self.body = {'foo': 'bar', 'baz': 1, 'qux': True}
+        self.message = data.Message(mocks.CHANNEL, mocks.METHOD,
+                                    mocks.HEADER, json.dumps(self.body))
+        self.obj = TestSmartConsumer({})
+        self.obj.receive(self.message)
+
+    def test_message_body_property(self):
+        self.assertDictEqual(self.obj.body, self.body)

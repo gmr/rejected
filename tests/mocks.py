@@ -1,45 +1,34 @@
-__author__ = 'gmr'
+import mock
+from pika import spec
+from pika import frame
+import time
+
+
+CHANNEL = mock.Mock('pika.channel.Channel')
+METHOD = spec.Basic.Deliver('ctag0', 1, False, 'exchange', 'routing_key')
+PROPERTIES = spec.BasicProperties(content_type='application/json',
+                                  content_encoding='qux',
+                                  headers={'foo': 'bar', 'baz': 1},
+                                  delivery_mode=2,
+                                  priority=5,
+                                  correlation_id='c123',
+                                  reply_to='rtrk',
+                                  expiration='32768',
+                                  message_id='mid123',
+                                  timestamp=time.time(),
+                                  type='test',
+                                  user_id='foo',
+                                  app_id='bar')
+HEADER = frame.Header(1, 37, PROPERTIES)
+BODY = '{"qux": true, "foo": "bar", "baz": 1}'
+
 
 class MockConsumer(object):
 
     def __init__(self, configuration):
         """Creates a new instance of a Mock Consumer class. To perform
         initialization tasks, extend Consumer._initialize
-
         :param dict configuration: The configuration from rejected
-
         """
         # Carry the configuration for use elsewhere
         self._configuration = configuration
-
-
-
-class MockHeader(object):
-
-    ATTRIBUTES = {'content_type': 'text/html',
-                  'content_encoding': 'gzip',
-                  'headers': {'foo': 'bar', 'boolean': True},
-                  'delivery_mode': 1,
-                  'priority': 0,
-                  'correlation_id': 'abc123',
-                  'reply_to': 'def456',
-                  'expiration': 1341855318,
-                  'message_id': 'ghi789',
-                  'timestamp': 1341855300,
-                  'type': 'test_message',
-                  'user_id': 'nose',
-                  'app_id': 'nosetests',
-                  'cluster_id': 'mock'}
-
-    def __init__(self):
-        for attribute in self.ATTRIBUTES:
-            setattr(self, attribute, self.ATTRIBUTES[attribute])
-
-
-class MockMethod(object):
-
-    consumer_tag = 'tag0'
-    delivery_tag = 10
-    exchange = 'unittests'
-    redelivered = False
-    routing_key = 'mock_tests'

@@ -4,21 +4,15 @@ import mock
 from pika import channel
 from pika import connection
 from pika import credentials
-from pika import exceptions
-from pika import frame
-from pika import spec
 import signal
-import sys
-# Import unittest if 2.7, unittest2 if other version
-if (sys.version_info[0], sys.version_info[1]) == (2, 7):
-    import unittest
-else:
+try:
     import unittest2 as unittest
+except ImportError:
+    import unittest
 
 from helper import config as helper_config
 
 from rejected import consumer
-from rejected import data
 from rejected import process
 from rejected import __version__
 
@@ -143,7 +137,8 @@ class TestProcess(test_state.TestState):
                                                            port,
                                                            vhost,
                                                            user,
-                                                           password)
+                                                           password,
+                                                           500)
 
     def default_connection_parameters(self):
         return {'host': 'rabbitmq',

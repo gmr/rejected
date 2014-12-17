@@ -52,7 +52,7 @@ class Message(Data):
         """
         self.channel = channel
         self.method = method
-        self.properties = Properties(header)
+        self.properties = Properties(header.properties)
         self.body = copy.copy(body)
 
         # Map method properties
@@ -73,27 +73,27 @@ class Properties(Data):
                  'priority', 'reply_to', 'message_id', 'timestamp', 'type',
                  'user_id']
 
-    def __init__(self, header=None):
+    def __init__(self, properties=None):
         """Create a base object to contain all of the properties we need
 
-        :param pika.spec.BasicProperties header: A header object from Pika
+        :param pika.spec.BasicProperties properties: pika.spec.BasicProperties
 
         """
-        if header:
-            self.app_id = header.app_id
-            self.cluster_id = header.cluster_id
-            self.content_type = header.content_type
-            self.content_encoding = header.content_encoding
-            self.correlation_id = header.correlation_id
-            self.delivery_mode = header.delivery_mode
-            self.expiration = header.expiration
-            self.headers = copy.deepcopy(header.headers) or dict()
-            self.priority = header.priority
-            self.reply_to = header.reply_to
-            self.message_id = header.message_id
-            self.timestamp = header.timestamp
-            self.type = header.type
-            self.user_id = header.user_id
+        if properties:
+            self.app_id = properties.app_id
+            self.cluster_id = properties.cluster_id
+            self.content_type = properties.content_type
+            self.content_encoding = properties.content_encoding
+            self.correlation_id = properties.correlation_id
+            self.delivery_mode = properties.delivery_mode
+            self.expiration = properties.expiration
+            self.headers = properties.headers
+            self.priority = properties.priority
+            self.reply_to = properties.reply_to
+            self.message_id = properties.message_id
+            self.timestamp = properties.timestamp
+            self.type = properties.type
+            self.user_id = properties.user_id
         else:
             for attr in self.__slots__:
                 setattr(self, attr, None)

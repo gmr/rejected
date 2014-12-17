@@ -29,6 +29,7 @@ https://rejected.readthedocs.org
 Example Consumer
 ----------------
 .. code:: python
+
     from rejected import consumer
     import logging
 

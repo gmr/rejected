@@ -5,7 +5,7 @@ Rejected data objects
 import copy
 
 
-class _Base(object):
+class Data(object):
 
     __slots__ = []
 
@@ -30,7 +30,7 @@ class _Base(object):
         return '<%s(%s)>' % (self.__class__.__name__, items)
 
 
-class Message(_Base):
+class Message(Data):
     """Class for containing all the attributes about a message object creating a
     flatter, move convenient way to access the data while supporting the legacy
     methods that were previously in place in rejected < 2.0
@@ -63,7 +63,7 @@ class Message(_Base):
         self.routing_key = method.routing_key
 
 
-class Properties(_Base):
+class Properties(Data):
     """A class that represents all of the field attributes of AMQP's
     Basic.Properties
 

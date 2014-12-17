@@ -30,16 +30,16 @@ from rejected import data
 LOGGER = logging.getLogger(__name__)
 
 
-def import_consumer(consumer):
+def import_consumer(value):
     """Pass in a string in the format of foo.Bar, foo.bar.Baz, foo.bar.baz.Qux
     and it will return a handle to the class
 
-    :param str consumer: The consumer class in module.Consumer format
+    :param str value: The consumer class in module.Consumer format
     :return: tuple(Class, str)
 
     """
 
-    parts = consumer.split('.')
+    parts = value.split('.')
     import_name = '.'.join(parts[0:-1])
     import_handle = importlib.import_module(import_name)
     if hasattr(import_handle, '__version__'):
@@ -136,7 +136,7 @@ class Process(multiprocessing.Process, common.State):
             self.increment_count(self.CLOSED_ON_COMPLETE)
             return
         LOGGER.debug('Acking %s', delivery_tag)
-        self._channel.basic_ack(delivery_tag=delivery_tag, multiple=True)
+        self._channel.basic_ack(delivery_tag=delivery_tag)
         self.increment_count(self.ACKED)
 
     def add_on_channel_close_callback(self):
@@ -320,7 +320,8 @@ class Process(multiprocessing.Process, common.State):
                                          socket_timeout=10,
                                          heartbeat_interval=self._hb_interval)
 
-    def get_consumer(self, config):
+    @staticmethod
+    def get_consumer(config):
         """Import and create a new instance of the configured message consumer.
 
         :param dict config: The named consumer section of the configuration
@@ -809,7 +810,7 @@ class Process(multiprocessing.Process, common.State):
         to RabbitMQ.
 
         :param dict config: Consumer config section
-\        :param str connection_name: The name of the connection
+        :param str connection_name: The name of the connection
         :param str consumer_name: Consumer name for config
         :param multiprocessing.SimpleQueue stats_queue: Queue to MCP
         :param dict logging_config: Logging config from YAML file

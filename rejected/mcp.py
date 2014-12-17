@@ -111,9 +111,9 @@ class MasterControlProgram(common.State):
             consumer_stats[name] = self.consumer_stats_counter()
             consumer_stats[name]['processes'] = \
                 self.process_count_by_consumer(name)
-            for process in data[name].keys():
+            for proc in data[name].keys():
                 for key in stats:
-                    value = data[name][process]['counts'][key]
+                    value = data[name][proc]['counts'][key]
                     stats[key] += value
                     consumer_stats[name][key] += value
 

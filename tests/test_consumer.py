@@ -65,7 +65,7 @@ class ConsumerReceiveTests(unittest.TestCase):
     def setUp(self):
         self.obj = TestConsumer({})
         self.message = data.Message(mocks.CHANNEL, mocks.METHOD,
-                                    mocks.HEADER, mocks.BODY)
+                                    mocks.PROPERTIES, mocks.BODY)
 
     def test_receive_assigns_message(self):
         self.obj.receive(self.message)
@@ -95,7 +95,7 @@ class ConsumerPropertyTests(unittest.TestCase):
     def setUp(self):
         self.config = {'foo': 'bar', 'baz': 1, 'qux': True}
         self.message = data.Message(mocks.CHANNEL, mocks.METHOD,
-                                    mocks.HEADER, mocks.BODY)
+                                    mocks.PROPERTIES, mocks.BODY)
         self.obj = TestConsumer(self.config)
         self.obj.receive(self.message)
 
@@ -170,7 +170,7 @@ class TestSmartConsumerWithJSON(unittest.TestCase):
     def setUp(self):
         self.body = {'foo': 'bar', 'baz': 1, 'qux': True}
         self.message = data.Message(mocks.CHANNEL, mocks.METHOD,
-                                    mocks.HEADER, json.dumps(self.body))
+                                    mocks.PROPERTIES, json.dumps(self.body))
         self.obj = TestSmartConsumer({})
         self.obj.receive(self.message)
 

@@ -392,8 +392,10 @@ class Process(multiprocessing.Process, common.State):
 
         """
         self.start_message_processing()
+
         # Try and process the message
         try:
+            LOGGER.debug('Processing message')
             self._consumer.receive(message)
 
         except KeyboardInterrupt:
@@ -598,12 +600,12 @@ class Process(multiprocessing.Process, common.State):
         LOGGER.debug('Opening a channel on %r', self._connection)
         self._connection.channel(self.on_channel_open)
 
-    def process(self, channel=None, method=None, header=None, body=None):
+    def process(self, channel=None, method=None, properties=None, body=None):
         """Process a message from Rabbit
 
         :param pika.channel.Channel channel: The channel the message was sent on
         :param pika.frames.MethodFrame method: The method frame
-        :param pika.frames.HeaderFrame header: The header frame
+        :param pika.spec.BasicProperties properties: The message properties
         :param str body: The message body
 
         """
@@ -613,13 +615,14 @@ class Process(multiprocessing.Process, common.State):
             return self.reject(method.delivery_tag, True)
         self.set_state(self.STATE_PROCESSING)
         LOGGER.debug('Received message #%s', method.delivery_tag)
-        message = data.Message(channel, method, header, body)
+        message = data.Message(channel, method, properties, body)
         if method.redelivered:
             self.increment_count(self.REDELIVERED)
         self._state_start = time.time()
         if not self.invoke_consumer(message):
             LOGGER.debug('Bypassing ack due to False return from _process')
             return
+
         self.increment_count(self.PROCESSED)
         if self._ack:
             self.ack_message(method.delivery_tag)

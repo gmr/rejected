@@ -34,9 +34,6 @@ class TestProperties(unittest.TestCase):
     def test_expiration(self):
         self.assertEqual(self._obj.expiration, mocks.PROPERTIES.expiration)
 
-    def test_headers(self):
-        self.assertDictEqual(self._obj.headers, mocks.PROPERTIES.headers)
-
     def test_message_id(self):
         self.assertEqual(self._obj.message_id, mocks.PROPERTIES.message_id)
 
@@ -62,7 +59,7 @@ class TestMessage(unittest.TestCase):
     def setUp(self):
         self._obj = data.Message(mocks.CHANNEL,
                                  mocks.METHOD,
-                                 mocks.HEADER,
+                                 mocks.PROPERTIES,
                                  mocks.BODY)
 
     def test_method(self):
@@ -113,10 +110,6 @@ class TestMessage(unittest.TestCase):
     def test_expiration(self):
         self.assertEqual(self._obj.properties.expiration,
                          mocks.PROPERTIES.expiration)
-
-    def test_headers(self):
-        self.assertDictEqual(self._obj.properties.headers,
-                             mocks.PROPERTIES.headers)
 
     def test_message_id(self):
         self.assertEqual(self._obj.properties.message_id,

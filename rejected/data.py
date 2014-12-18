@@ -30,6 +30,7 @@ class Data(object):
         return '<%s(%s)>' % (self.__class__.__name__, items)
 
 
+
 class Message(Data):
     """Class for containing all the attributes about a message object creating a
     flatter, move convenient way to access the data while supporting the legacy
@@ -39,20 +40,20 @@ class Message(Data):
     __slots__ = ['channel', 'method', 'properties', 'body', 'consumer_tag',
                  'delivery_tag', 'exchange', 'redelivered', 'routing_key']
 
-    def __init__(self, channel, method, header, body):
+    def __init__(self, channel, method, properties, body):
         """Initialize a message setting the attributes from the given channel,
         method, header and body.
 
         :param channel: The channel the message was received on
         :type channel: pika.channel.Channel
         :param pika.frames.Method method: pika Method Frame object
-        :param pika.frames.Header header: pika Header Frame object
+        :param pika.spec.BasicProperties properties: message properties
         :param str body: Opaque message body
 
         """
         self.channel = channel
         self.method = method
-        self.properties = Properties(header.properties)
+        self.properties = Properties(properties)
         self.body = copy.copy(body)
 
         # Map method properties
@@ -68,7 +69,7 @@ class Properties(Data):
     Basic.Properties
 
     """
-    __slots__ = ['app_id', 'cluster_id', 'content_type', 'content_encoding',
+    __slots__ = ['app_id', 'content_type', 'content_encoding',
                  'correlation_id', 'delivery_mode', 'expiration', 'headers',
                  'priority', 'reply_to', 'message_id', 'timestamp', 'type',
                  'user_id']
@@ -79,21 +80,7 @@ class Properties(Data):
         :param pika.spec.BasicProperties properties: pika.spec.BasicProperties
 
         """
-        if properties:
-            self.app_id = properties.app_id
-            self.cluster_id = properties.cluster_id
-            self.content_type = properties.content_type
-            self.content_encoding = properties.content_encoding
-            self.correlation_id = properties.correlation_id
-            self.delivery_mode = properties.delivery_mode
-            self.expiration = properties.expiration
-            self.headers = properties.headers
-            self.priority = properties.priority
-            self.reply_to = properties.reply_to
-            self.message_id = properties.message_id
-            self.timestamp = properties.timestamp
-            self.type = properties.type
-            self.user_id = properties.user_id
-        else:
-            for attr in self.__slots__:
-                setattr(self, attr, None)
+        for attr in self.__slots__:
+            setattr(self, attr, None)
+            if properties and getattr(properties, attr):
+                setattr(self, attr, getattr(properties, attr))

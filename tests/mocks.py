@@ -19,7 +19,6 @@ PROPERTIES = spec.BasicProperties(content_type='application/json',
                                   type='test',
                                   user_id='foo',
                                   app_id='bar')
-HEADER = frame.Header(1, 37, PROPERTIES)
 BODY = '{"qux": true, "foo": "bar", "baz": 1}'
 
 

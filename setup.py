@@ -12,7 +12,7 @@ classifiers = ['Development Status :: 5 - Production/Stable',
                'License :: OSI Approved :: BSD License']
 
 install_requires = ['helper',
-                    'pika>=0.9.14',
+                    'pika',
                     'psutil',
                     'pyyaml',
                     'tornado']

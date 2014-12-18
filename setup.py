@@ -1,5 +1,6 @@
 from setuptools import setup
 from rejected import __version__
+import os
 import sys
 
 classifiers = ['Development Status :: 5 - Production/Stable',
@@ -21,6 +22,9 @@ extras_require = {'html': ['beautifulsoup4']}
 
 if sys.version_info < (2, 7, 0):
     install_requires.append('importlib')
+
+if os.environ.get('READTHEDOCS', None) == 'True':
+    install_requires.append('pyev==0.8.1')
 
 setup(name='rejected',
       version=__version__,

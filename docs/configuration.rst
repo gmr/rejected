@@ -108,7 +108,9 @@ Logging
 -------
 rejected uses :py:mod:`logging.config.dictConfig <logging.config>` to create a flexible method for configuring the python standard logging module. If rejected is being run in Python 2.6, `logutils.dictconfig.dictConfig <https://pypi.python.org/pypi/logutils>`_ is used instead.
 
-The following basic example illustrates all of the required sections in the dictConfig format, implemented in YAML::
+The following basic example illustrates all of the required sections in the dictConfig format, implemented in YAML:
+
+.. code:: yaml
 
     version: 1
     formatters: []

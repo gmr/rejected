@@ -94,7 +94,7 @@ This section contains the settings required to run the application as a daemon. 
 +---------+---------------------------------------------------------------------------+
 | group   | Optional The group name to switch to when the process is daemonized (str) |
 +---------+---------------------------------------------------------------------------+
-| pidfile | The pidfile to write when the process is daemonized                       |
+| pidfile | The pidfile to write when the process is daemonized (str)                 |
 +---------+---------------------------------------------------------------------------+
 
 

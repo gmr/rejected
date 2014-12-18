@@ -36,7 +36,6 @@ Getting Started
    :glob:
    :maxdepth: 2
 
-   concepts
    consumer_howto
    configuration
    cli

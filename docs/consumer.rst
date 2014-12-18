@@ -1,3 +1,5 @@
+.. _consumer_api:
+
 Consumer API
 ============
 The :py:class:`Consumer <rejected.consumer.Consumer>`, :py:class:`PublishingConsumer <rejected.consumer.PublishingConsumer>`,

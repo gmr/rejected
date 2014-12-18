@@ -80,7 +80,7 @@ class TestProcess(test_state.TestState):
                                 'queue': 'mock_you'}}}
     logging_config = helper_config.LoggingConfig(helper_config.Config.LOGGING)
 
-    mock_args = {'config': config,
+    mock_args = {'cfg': config,
                  'connection_name': 'MockConnection',
                  'consumer_name': 'MockConsumer',
                  'stats_queue': 'StatsQueue',
@@ -349,7 +349,7 @@ class TestProcess(test_state.TestState):
 
     def test_setup_prefetch_count_no_config(self):
         args = copy.deepcopy(self.mock_args)
-        del args['config']['Consumers']['MockConsumer']['qos_prefetch']
+        del args['cfg']['Consumers']['MockConsumer']['qos_prefetch']
         mock_process = self.new_process()
         mock_process.setup(**args)
         self.assertEqual(mock_process.base_qos_prefetch,

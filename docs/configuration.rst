@@ -24,34 +24,64 @@ The application section of the configuration is broken down into multiple top-le
 +---------------+-----------------------------------------------------------------------------------------+
 | `statsd`_     | Enable and configure statsd metric submission (obj)                                     |
 +---------------+-----------------------------------------------------------------------------------------+
-| `Connections`_| A subsection with a list of RabbitMQ connection information for consumers (list)        |
+| `Connections`_| A subsection with RabbitMQ connection information for consumers (obj)                   |
 +---------------+-----------------------------------------------------------------------------------------+
 | `Consumers`_  | Where each consumer type is configured (obj)                                            |
 +---------------+-----------------------------------------------------------------------------------------+
 
 statsd
 ^^^^^^
-enabled: True
-host: localhost
-port: 8125
++---------------+--------------------------------------------------------+
+| enabled       | Enable the per consumer statsd metric reporting (bool) |
++---------------+--------------------------------------------------------+
+| host          | The hostname or ip address of the statsd server (str)  |
++---------------+--------------------------------------------------------+
+| port          | The port of the statsd server (int)                    |
++---------------+--------------------------------------------------------+
 
 Connections
 ^^^^^^^^^^^
+Each RabbitMQ connection entry should be a nested object with a unique name with connection attributes.
 
-    rabbitmq:
-      host: localhost
-      port: 5672
-      user: guest
-      pass: guest
-      ssl: False
-      vhost: /
-      heartbeat_interval: 300
++----------------+---------------------------------------------------------------------------------------+
+| ConnectionName | +---------------------+--------------------------------------------------------------+|
+|                | | host                | The hostname or ip address of the RabbitMQ server (str)      ||
+|                | +---------------------+--------------------------------------------------------------+|
+|                | | port                | The port of the RabbitMQ server (int)                        ||
+|                | +---------------------+--------------------------------------------------------------+|
+|                | | vhost               | The virtual host to connect to (str)                         ||
+|                | +---------------------+--------------------------------------------------------------+|
+|                | | user                | The username to connect as (str)                             ||
+|                | +---------------------+--------------------------------------------------------------+|
+|                | | pass                | The password to use (str)                                    ||
+|                | +---------------------+--------------------------------------------------------------+|
+|                | | heartbeat_interval  | Optional: the AMQP heartbeat interval (int) default: 300 sec ||
+|                | +---------------------+--------------------------------------------------------------+|
++----------------+---------------------------------------------------------------------------------------+
 
 Consumers
 ^^^^^^^^^
+Each consumer entry should be a nested object with a unique name with consumer attributes.
 
-
-
++----------------+---------------------------------------------------------------------------------------------------+
+| ConsumerName   | +-------------+----------------------------------------------------------------------------------+|
+|                | | consumer    | The package.module.Class path to the consumer code (str)                         ||
+|                | +-------------+----------------------------------------------------------------------------------+|
+|                | | connections | The connections, by name, to connect to from the Connections section (list)      ||
+|                | +-------------+----------------------------------------------------------------------------------+|
+|                | | qty         | The number of consumers per connection to run (int)                              ||
+|                | +-------------+----------------------------------------------------------------------------------+|
+|                | | queue       | The RabbitMQ queue name to consume from (int)                                    ||
+|                | +-------------+----------------------------------------------------------------------------------+|
+|                | | ack         | Explicitly acknowledge messages (no_ack = not ack) (bool)                        ||
+|                | +-------------+----------------------------------------------------------------------------------+|
+|                | | dynamic_qos | Automatically figure out channel prefetch-count QoS settings by message velocity ||
+|                | +-------------+----------------------------------------------------------------------------------+|
+|                | | max_errors  | Number of errors encountered before restarting a consumer                        ||
+|                | +-------------+----------------------------------------------------------------------------------+|
+|                | | config      | Free-form key-value configuration section for the consumer (obj)                 ||
+|                | +-------------+----------------------------------------------------------------------------------+|
++----------------+---------------------------------------------------------------------------------------------------+
 
 .. _daemon:
 

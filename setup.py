@@ -24,7 +24,7 @@ if sys.version_info < (2, 7, 0):
     install_requires.append('importlib')
 
 if os.environ.get('READTHEDOCS', None) == 'True':
-    install_requires.append('pyev==0.8.1')
+    install_requires.append('pyev==0.8.1-4.04')
 
 setup(name='rejected',
       version=__version__,

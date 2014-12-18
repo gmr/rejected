@@ -59,8 +59,7 @@ the message. This should be done when there is a problem with the message itself
 such as a malformed payload or non-supported properties like ``content-type``
 or ``type``.
 
-.. note:: If unhandled exceptions are raised by a consumer, they will be caught by rejected,
-logged, and turned into a :py:class:`ConsumerException <rejected.consumer.ConsumerException>`.
+.. note:: If unhandled exceptions are raised by a consumer, they will be caught by rejected, logged, and turned into a :py:class:`ConsumerException <rejected.consumer.ConsumerException>`.
 
 .. autoclass:: rejected.consumer.ConsumerException
    :members:

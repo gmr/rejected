@@ -1,0 +1,6 @@
+beautifulsoup4
+helper
+pika==0.9.13
+psutil
+pyyaml
+tornado

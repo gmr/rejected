@@ -102,8 +102,10 @@ class Process(multiprocessing.Process, common.State):
         self._connection_name = None
         self._connections = None
         self._consumer = None
+        self._consumer_name = None
         self._counts = self.new_counter_dict()
         self._dynamic_qos = True
+        self._ioloop = None
         self._last_counts = dict()
         self._last_failure = 0
         self._last_stats_time = None
@@ -111,7 +113,6 @@ class Process(multiprocessing.Process, common.State):
         self._message_connection_id = None
         self._max_error_count = self._MAX_ERROR_COUNT
         self._max_frame_size = pika.spec.FRAME_MAX_SIZE
-        self._name = self._kwargs['consumer_name']
         self._qos_prefetch = None
         self._queue_name = None
         self._prepend_path = None
@@ -237,29 +238,29 @@ class Process(multiprocessing.Process, common.State):
         LOGGER.info('Closing connection')
         self._connection.close()
 
-    def connect_to_rabbitmq(self, config, name):
+    def connect_to_rabbitmq(self, cfg, name):
         """Connect to RabbitMQ returning the connection handle.
 
-        :param dict config: The Connections section of the configuration
+        :param dict cfg: The Connections section of the configuration
         :param str name: The name of the connection
         :rtype: pika.adapters.tornado_connection.TornadoConnection
 
         """
         LOGGER.debug('Connecting to %s:%i:%s as %s',
-                     config[name]['host'], config[name]['port'],
-                     config[name]['vhost'], config[name]['user'])
+                     cfg[name]['host'], cfg[name]['port'],
+                     cfg[name]['vhost'], cfg[name]['user'])
         self.set_state(self.STATE_CONNECTING)
         self._connection_id += 1
-        hb_interval = config[name].get('heartbeat_interval', self._HBINTERVAL)
-        parameters = self.get_connection_parameters(config[name]['host'],
-                                                    config[name]['port'],
-                                                    config[name]['vhost'],
-                                                    config[name]['user'],
-                                                    config[name]['pass'],
+        hb_interval = cfg[name].get('heartbeat_interval', self._HBINTERVAL)
+        parameters = self.get_connection_parameters(cfg[name]['host'],
+                                                    cfg[name]['port'],
+                                                    cfg[name]['vhost'],
+                                                    cfg[name]['user'],
+                                                    cfg[name]['pass'],
                                                     hb_interval)
         return tornado_connection.TornadoConnection(parameters,
                                                     self.on_connection_open,
-                                                    stop_ioloop_on_close=True)
+                                                    stop_ioloop_on_close=False)
 
     def count(self, stat):
         """Return the current count quantity for a specific stat.
@@ -297,17 +298,17 @@ class Process(multiprocessing.Process, common.State):
         return value
 
     @staticmethod
-    def get_config(config, number, name, connection):
+    def get_config(cfg, number, name, connection):
         """Initialize a new consumer thread, setting defaults and config values
 
-        :param dict config: Consumer config section from YAML File
+        :param dict cfg: Consumer config section from YAML File
         :param int number: The identification number for the consumer
         :param str name: The name of the consumer
         :param str connection: The name of the connection):
         :rtype: dict
 
         """
-        return {'connection': config['Connections'][connection],
+        return {'connection': cfg['Connections'][connection],
                 'connection_name': connection,
                 'consumer_name': name,
                 'process_name': '%s_%i_tag_%i' % (name, os.getpid(), number)}
@@ -332,19 +333,19 @@ class Process(multiprocessing.Process, common.State):
                                          heartbeat_interval=heartbeat_interval)
 
     @staticmethod
-    def get_consumer(config):
+    def get_consumer(cfg):
         """Import and create a new instance of the configured message consumer.
 
-        :param dict config: The named consumer section of the configuration
+        :param dict cfg: The named consumer section of the configuration
         :rtype: instance
         :raises: ImportError
 
         """
         try:
-            consumer_, version = import_consumer(config['consumer'])
+            consumer_, version = import_consumer(cfg['consumer'])
         except ImportError as error:
             LOGGER.exception('Error importing the consumer %s: %s',
-                             config['consumer'], error)
+                             cfg['consumer'], error)
             exc_type, exc_value, exc_traceback = sys.exc_info()
             lines = traceback.extract_tb(exc_traceback)
             for line in lines:
@@ -352,21 +353,21 @@ class Process(multiprocessing.Process, common.State):
             return
 
         if version:
-            LOGGER.info('Creating consumer %s v%s', config['consumer'], version)
+            LOGGER.info('Creating consumer %s v%s', cfg['consumer'], version)
         else:
-            LOGGER.info('Creating consumer %s', config['consumer'])
+            LOGGER.info('Creating consumer %s', cfg['consumer'])
 
         kwargs = {}
-        if 'config' in config:
-            kwargs['configuration'] = config.get('config', dict())
+        if 'config' in cfg:
+            kwargs['configuration'] = cfg.get('config', dict())
 
         try:
             return consumer_(**kwargs)
         except TypeError:
-            return consumer_(config.get('config', dict()))
+            return consumer_(cfg.get('config', dict()))
         except Exception as error:
             LOGGER.error('Error creating the consumer "%s": %s',
-                         config['consumer'], error)
+                         cfg['consumer'], error)
             exc_type, exc_value, exc_traceback = sys.exc_info()
             lines = traceback.extract_tb(exc_traceback)
             for line in lines:
@@ -566,7 +567,7 @@ class Process(multiprocessing.Process, common.State):
 
         # Stop the IOLoop
         LOGGER.debug('Stopping IOLoop')
-        self._connection.ioloop.stop()
+        self._ioloop.stop()
 
         # Note that shutdown is complete and set the state accordingly
         self.set_state(self.STATE_STOPPED)
@@ -582,15 +583,18 @@ class Process(multiprocessing.Process, common.State):
 
         """
         values = dict()
-        self.calculate_qos_prefetch()
+        if self.is_processing or self.is_idle:
+            self.calculate_qos_prefetch()
         for key in self._counts.keys():
             values[key] = self._counts[key] - self._last_counts.get(key, 0)
             self._last_counts[key] = self._counts[key]
             if self._statsd:
                 self.send_counter_to_statsd(key, values[key])
+
         self._stats_queue.put({'name': self.name,
                                'consumer_name': self._consumer_name,
-                               'counts': values})
+                               'counts': values}, True)
+
         LOGGER.debug('Currently %s: %r', self.state_description, values)
         self._last_stats_time = time.time()
         signal.siginterrupt(signal.SIGPROF, False)
@@ -670,15 +674,19 @@ class Process(multiprocessing.Process, common.State):
         if self._connection:
             if self._connection.socket:
                 fd = self._connection.socket.fileno()
-                self._connection.ioloop.remove_handler(fd)
-            self._connection.ioloop.stop()
-            del self._connection
-        else:
-            _ioloop = ioloop.IOLoop.instance()
-            _ioloop.stop()
-        time.sleep(self._RECONNECT_DELAY)
+                self._ioloop.remove_handler(fd)
+            self._connection = None
+
+        self._ioloop.add_timeout(time.time() + self._RECONNECT_DELAY,
+                                 self._reconnect)
+
+    def _reconnect(self):
+        """Create and set the RabbitMQ connection"""
+        LOGGER.info('Connecting to RabbitMQ')
+        self.reset_failure_counter()
         self._connection = self.connect_to_rabbitmq(self._connections,
                                                     self._connection_name)
+        self.setup_signal_handlers()
 
     def record_exception(self, error, handled=False, exc_info=None):
         """Record an exception
@@ -695,7 +703,7 @@ class Process(multiprocessing.Process, common.State):
             LOGGER.exception('Processor threw an uncaught exception %s: %s',
                              error.__class__.__name__, error)
             self.increment_count(self.UNHANDLED_EXCEPTIONS)
-        if exc_info:
+        if not isinstance(error, consumer.MessageException) and exc_info:
             formatted_lines = traceback.format_exception(*exc_info)
             for offset, line in enumerate(formatted_lines):
                 LOGGER.debug('(%s) %i: %s', error.__class__.__name__,
@@ -757,6 +765,7 @@ class Process(multiprocessing.Process, common.State):
 
     def _run(self):
         """Run method that can be profiled"""
+        self._ioloop = ioloop.IOLoop.instance()
         common.add_null_handler()
         try:
             self.setup(self._kwargs['config'],
@@ -766,14 +775,14 @@ class Process(multiprocessing.Process, common.State):
                        self._kwargs['logging_config'])
         except ImportError as error:
             name = self._kwargs['consumer_name']
-            consumer = self._kwargs['config']['Consumers'][name]['consumer']
+            classname = self._kwargs['config']['Consumers'][name]['consumer']
             LOGGER.critical('Could not import %s, stopping process: %r',
-                            consumer, error)
+                            classname, error)
             return
 
         if not self.is_stopped:
             try:
-                self._connection.ioloop.start()
+                self._ioloop.start()
             except KeyboardInterrupt:
                 LOGGER.warning('CTRL-C while waiting for clean shutdown')
 
@@ -784,10 +793,11 @@ class Process(multiprocessing.Process, common.State):
         :param int|float value: The count
 
         """
-        self._statsd_socket.sendto(self._STATSD_FORMAT.format(self._name,
-                                                              counter,
-                                                              math.ceil(value)),
-                                   (self._statsd_host, self._statsd_port))
+        payload = self._STATSD_FORMAT.format(self._consumer_name,
+                                             counter,
+                                             math.ceil(value))
+        self._statsd_socket.sendto(payload, (self._statsd_host,
+                                             self._statsd_port))
 
     def set_qos_prefetch(self, value=None):
         """Set the QOS Prefetch count for the channel.
@@ -818,15 +828,15 @@ class Process(multiprocessing.Process, common.State):
         # Use the parent object to set the state
         super(Process, self).set_state(new_state)
 
-    def setup(self, config, connection_name, consumer_name, stats_queue,
+    def setup(self, cfg, connection_name, consumer_name, stats_queue,
               logging_config):
         """Initialize the consumer, setting up needed attributes and connecting
         to RabbitMQ.
 
-        :param dict config: Consumer config section
+        :param dict cfg: Consumer config section
         :param str connection_name: The name of the connection
         :param str consumer_name: Consumer name for config
-        :param multiprocessing.SimpleQueue stats_queue: Queue to MCP
+        :param multiprocessing.Queue stats_queue: Queue to MCP
         :param dict logging_config: Logging config from YAML file
 
         """
@@ -834,10 +844,11 @@ class Process(multiprocessing.Process, common.State):
                     self.name, connection_name)
         self._logging_config = logging_config
         self._stats_queue = stats_queue
+        LOGGER.info('Stats queue: %r', self._stats_queue)
         self._connection_name = connection_name
         self._consumer_name = consumer_name
-        self._config = config['Consumers'][consumer_name]
-        self._connections = config['Connections']
+        self._config = cfg['Consumers'][consumer_name]
+        self._connections = cfg['Connections']
         self._consumer = self.get_consumer(self._config)
 
         if not self._consumer:
@@ -854,10 +865,10 @@ class Process(multiprocessing.Process, common.State):
                                                 pika.spec.FRAME_MAX_SIZE)
 
         self._statsd = False
-        if 'statsd' in config and config['statsd'].get('enabled', False):
+        if 'statsd' in cfg and cfg['statsd'].get('enabled', False):
             self._statsd = True
-            self._statsd_host = config['statsd'].get('host', 'localhost')
-            self._statsd_port = config['statsd'].get('port', 8125)
+            self._statsd_host = cfg['statsd'].get('host', 'localhost')
+            self._statsd_port = cfg['statsd'].get('port', 8125)
 
         self.reset_failure_counter()
         self.setup_signal_handlers()
@@ -896,6 +907,7 @@ class Process(multiprocessing.Process, common.State):
 
         signal.siginterrupt(signal.SIGPROF, False)
         signal.siginterrupt(signal.SIGABRT, False)
+        LOGGER.info('Signal handlers setup')
 
     def start_message_processing(self):
         """Keep track of the connection in case RabbitMQ disconnects while the

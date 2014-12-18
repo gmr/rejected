@@ -325,9 +325,7 @@ class MasterControlProgram(common.State):
                   'daemon': False,
                   'stats_queue': self._stats_queue,
                   'logging_config': self._config.logging}
-        proc = process.Process(kwargs=kwargs)
-        proc.name = process_name
-        return process_name, proc
+        return process_name, process.Process(name=process_name, kwargs=kwargs)
 
     def new_process_number(self, name):
         """Increment the counter for the process id number for a given consumer

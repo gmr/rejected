@@ -18,9 +18,9 @@ Application:
       heartbeat_interval: 300
   Consumers:
     example:
-      consumer: rejected.example.Consumer
+      consumer: rejected.example.ExampleConsumer
       connections: [rabbitmq]
-      qty: 2
+      qty: 1
       queue: generated_messages
       dynamic_qos: True
       ack: True
@@ -60,16 +60,8 @@ Logging:
       propagate: true
       handlers: [console] # , syslog]
     rejected:
-      level: INFO
-      propagate: false
+      level: DEBUG
+      propagate: true
       handlers: [console] # , syslog]
-    rejected.consumer:
-      level: INFO
-      propagate: false
-      handlers: [console] # , syslog]
-  root:
-    level: INFO
-    propagate: true
-    handlers: [console, syslog]
   disable_existing_loggers: true
   incremental: false

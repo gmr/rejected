@@ -7,16 +7,17 @@ __version__ = '1.0.0'
 
 LOGGER = logging.getLogger(__name__)
 
-class Consumer(consumer.Consumer):
+
+class ExampleConsumer(consumer.Consumer):
 
     def process(self):
-        LOGGER.debug('Received message %s, a %s message: %r',
-                     self.message_id, self.message_type, self.body)
-        chance = random.randint(0, 100)
-        if chance < 1:
+        LOGGER.info('Message: %r', self._message.body)
+        action = int(random.random() * 100)
+        if action == 0:
             raise consumer.ConsumerException('zomg')
-        elif 0 < chance < 3:
+        elif action < 2:
+            LOGGER.debug('Raising message exception')
             raise consumer.MessageException('reject')
-        elif 2 < chance < 4:
+        elif action < 5:
+            LOGGER.debug('Raising unhandled exception')
             raise ValueError('Unhandled exception')
-

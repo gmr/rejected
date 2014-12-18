@@ -15,7 +15,43 @@ point for creating your own configuration file.
 
 Application
 -----------
-The application section
+The application section of the configuration is broken down into multiple top-level options:
+
++---------------+-----------------------------------------------------------------------------------------+
+| poll_interval | How often rejected should poll consumer processes for stats data in seconds (int/float) |
++---------------+-----------------------------------------------------------------------------------------+
+| log_stats     | Should stats data be logged via Python's standard logging mechanism (bool)              |
++---------------+-----------------------------------------------------------------------------------------+
+| `statsd`_     | Enable and configure statsd metric submission (obj)                                     |
++---------------+-----------------------------------------------------------------------------------------+
+| `Connections`_| A subsection with a list of RabbitMQ connection information for consumers (list)        |
++---------------+-----------------------------------------------------------------------------------------+
+| `Consumers`_  | Where each consumer type is configured (obj)                                            |
++---------------+-----------------------------------------------------------------------------------------+
+
+statsd
+^^^^^^
+enabled: True
+host: localhost
+port: 8125
+
+Connections
+^^^^^^^^^^^
+
+    rabbitmq:
+      host: localhost
+      port: 5672
+      user: guest
+      pass: guest
+      ssl: False
+      vhost: /
+      heartbeat_interval: 300
+
+Consumers
+^^^^^^^^^
+
+
+
 
 .. _daemon:
 

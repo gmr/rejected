@@ -11,13 +11,12 @@ LOGGER = logging.getLogger(__name__)
 class ExampleConsumer(consumer.Consumer):
 
     def process(self):
-        LOGGER.info('Message: %r', self._message.body)
-        action = int(random.random() * 100)
+        LOGGER.debug('Message: %r', self._message.body)
+        action = random.randint(0, 1000)
         if action == 0:
-            raise consumer.ConsumerException('zomg')
-        elif action < 2:
-            LOGGER.debug('Raising message exception')
-            raise consumer.MessageException('reject')
-        elif action < 5:
-            LOGGER.debug('Raising unhandled exception')
             raise ValueError('Unhandled exception')
+        elif action < 2:
+            raise consumer.ConsumerException('zomg')
+        elif action < 5:
+            raise consumer.MessageException('reject')
+

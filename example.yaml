@@ -58,10 +58,14 @@ Logging:
     helper:
       level: INFO
       propagate: true
-      handlers: [console] # , syslog]
+      handlers: [console]
     rejected:
       level: DEBUG
       propagate: true
-      handlers: [console] # , syslog]
+      handlers: [console]
+  ROOT:
+    level: CRITICAL
+    propagate: false
+    handlers: [console]
   disable_existing_loggers: true
   incremental: false

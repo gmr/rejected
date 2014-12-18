@@ -697,8 +697,9 @@ class Process(multiprocessing.Process, common.State):
         """
         self.increment_count(self.ERROR)
         if handled:
-            LOGGER.exception('Processor handled %s: %s',
-                             error.__class__.__name__, error)
+            if not isinstance(error, consumer.MessageException):
+                LOGGER.exception('Processor handled %s: %s',
+                                 error.__class__.__name__, error)
         else:
             LOGGER.exception('Processor threw an uncaught exception %s: %s',
                              error.__class__.__name__, error)
@@ -907,7 +908,7 @@ class Process(multiprocessing.Process, common.State):
 
         signal.siginterrupt(signal.SIGPROF, False)
         signal.siginterrupt(signal.SIGABRT, False)
-        LOGGER.info('Signal handlers setup')
+        LOGGER.debug('Signal handlers setup')
 
     def start_message_processing(self):
         """Keep track of the connection in case RabbitMQ disconnects while the

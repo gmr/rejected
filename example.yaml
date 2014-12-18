@@ -60,8 +60,12 @@ Logging:
       propagate: true
       handlers: [console]
     rejected:
-      level: DEBUG
+      level: INFO
       propagate: true
+      handlers: [console]
+    rejected.example:
+      level: INFO
+      propagate: false
       handlers: [console]
   ROOT:
     level: CRITICAL

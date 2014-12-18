@@ -44,7 +44,9 @@ Connections
 Each RabbitMQ connection entry should be a nested object with a unique name with connection attributes.
 
 +----------------+---------------------------------------------------------------------------------------+
-| ConnectionName | +---------------------+--------------------------------------------------------------+|
+| ConnectionName | *Attributes*                                                                          |
++================+=======================================================================================+
+|                | +---------------------+--------------------------------------------------------------+|
 |                | | host                | The hostname or ip address of the RabbitMQ server (str)      ||
 |                | +---------------------+--------------------------------------------------------------+|
 |                | | port                | The port of the RabbitMQ server (int)                        ||
@@ -64,7 +66,9 @@ Consumers
 Each consumer entry should be a nested object with a unique name with consumer attributes.
 
 +----------------+---------------------------------------------------------------------------------------------------+
-| ConsumerName   | +-------------+----------------------------------------------------------------------------------+|
+| ConsumerName   | *Attributes*                                                                                      |
++================+===================================================================================================+
+|                | +-------------+----------------------------------------------------------------------------------+|
 |                | | consumer    | The package.module.Class path to the consumer code (str)                         ||
 |                | +-------------+----------------------------------------------------------------------------------+|
 |                | | connections | The connections, by name, to connect to from the Connections section (list)      ||
@@ -89,12 +93,14 @@ Daemon
 ------
 This section contains the settings required to run the application as a daemon. They are as follows:
 
-user
-    The username to run as when the process is daemonized
-group [optional]
-    The group name to switch to when the process is daemonized
-pidfile
-    The pidfile to write when the process is daemonized
++---------+---------------------------------------------------------------------------+
+| user    | The username to run as when the process is daemonized (bool)              |
++---------+---------------------------------------------------------------------------+
+| group   | Optional The group name to switch to when the process is daemonized (str) |
++---------+---------------------------------------------------------------------------+
+| pidfile | The pidfile to write when the process is daemonized                       |
++---------+---------------------------------------------------------------------------+
+
 
 .. _logging:
 

@@ -383,7 +383,7 @@ class PublishingConsumer(Consumer):
         prior to the message being republished.
 
         :param any response_body: The message body to send
-        :param dict properties: Message properties to use
+        :param rejected.data.Properties properties: Message properties to use
         :param bool auto_id: Automatically shuffle message_id and correlation_id
         :param str reply_to: Override the reply_to in the properties
         :raises: ValueError
@@ -409,7 +409,7 @@ class PublishingConsumer(Consumer):
 
         self.publish_message(exchange or self._message.exchange,
                              reply_to,
-                             properties,
+                             dict(properties),
                              response_body)
 
     @staticmethod
@@ -421,6 +421,8 @@ class PublishingConsumer(Consumer):
         :rtype: pika.BasicProperties
 
         """
+        if not properties_in:
+            return
         properties = pika.BasicProperties()
         for key in properties_in:
             if properties_in.get(key) is not None:
@@ -640,14 +642,14 @@ class SmartPublishingConsumer(SmartConsumer, PublishingConsumer):
 
         # Auto-serialize the content if needed
         if (not no_serialization and not isinstance(body, basestring) and
-            properties.content_type):
+            properties.get('content_type')):
             LOGGER.debug('Auto-serializing message body')
-            body = self._auto_serialize(properties.content_type, body)
+            body = self._auto_serialize(properties.get('content_type'), body)
 
         # Auto-encode the message body if needed
-        if not no_encoding and properties.content_encoding:
+        if not no_encoding and properties.get('content_encoding'):
             LOGGER.debug('Auto-encoding message body')
-            body = self._auto_encode(properties.content_encoding, body)
+            body = self._auto_encode(properties.get('content_encoding'), body)
 
         # Publish the message
         LOGGER.debug('Publishing message to %s:%s', exchange, routing_key)
@@ -655,6 +657,7 @@ class SmartPublishingConsumer(SmartConsumer, PublishingConsumer):
                                     routing_key=routing_key,
                                     properties=properties_out,
                                     body=body)
+
         
     def _auto_encode(self, content_encoding, value):
         """Based upon the value of the content_encoding, encode the value.

@@ -37,6 +37,30 @@ Consumer Classes
 
 Exceptions
 ----------
+There are two exception types that consumer applications should raise to handle
+problems that may arise when processing a message. When these exceptions are raised,
+rejected will reject the message delivery, letting RabbitMQ know that there was
+a failure.
+
+The :py:class:`ConsumerException <rejected.consumer.ConsumerException>` should be
+raised when there is a problem in the consumer itself, such as inability to contact
+a database server or other resources. When a
+:py:class:`ConsumerException <rejected.consumer.ConsumerException>` is raised,
+the message will be rejected *and* requeued, adding it back to the RabbitMQ it
+was delivered back to. Additionally, rejected keeps track of consumer exceptions
+and will shutdown the consumer process and start a new one once a consumer has
+exceeded its configured maximum error count within a ``60`` second window. The
+default maximum error count is ``5``.
+
+The :py:class:`MessageException <rejected.consumer.MessageException>` should be
+raised when there is a problem with the message. When this exception is raised,
+the message will be rejected on the RabbitMQ server *without* requeue, discarding
+the message. This should be done when there is a problem with the message itself,
+such as a malformed payload or non-supported properties like ``content-type``
+or ``type``.
+
+.. note:: If unhandled exceptions are raised by a consumer, they will be caught by rejected,
+logged, and turned into a :py:class:`ConsumerException <rejected.consumer.ConsumerException>`.
 
 .. autoclass:: rejected.consumer.ConsumerException
    :members:

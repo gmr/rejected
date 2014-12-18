@@ -124,7 +124,8 @@ class MasterControlProgram(common.State):
                 'process_data': data,
                 'counts': stats}
 
-    def calculate_velocity(self, counts):
+    @staticmethod
+    def calculate_velocity(counts):
         """Calculate the message velocity to determine how many messages are
         processed per second.
 
@@ -201,7 +202,8 @@ class MasterControlProgram(common.State):
         """
         return 'consumer' if counts['processes'] == 1 else 'consumers'
 
-    def consumer_stats_counter(self):
+    @staticmethod
+    def consumer_stats_counter():
         """Return a new consumer stats counter instance.
 
         :rtype: dict
@@ -270,6 +272,10 @@ class MasterControlProgram(common.State):
 
     def log_stats(self):
         """Output the stats to the LOGGER."""
+        if not self._stats.get('counts'):
+            LOGGER.info('Did not receive any stats data from children')
+            return
+
         LOGGER.info('%i total %s have processed %i messages with %i '
                     'errors, waiting %.2f seconds and have spent %.2f seconds '
                     'processing messages with an overall velocity of %.2f '
@@ -308,7 +314,7 @@ class MasterControlProgram(common.State):
         :return tuple: (str, process.Process)
 
         """
-        process_name = '%s_%s' % (consumer_name,
+        process_name = '%s-%s' % (consumer_name,
                                   self.new_process_number(consumer_name))
         LOGGER.debug('Creating a new process for %s: %s',
                      connection_name, process_name)
@@ -319,7 +325,9 @@ class MasterControlProgram(common.State):
                   'daemon': False,
                   'stats_queue': self._stats_queue,
                   'logging_config': self._config.logging}
-        return process_name, process.Process(name=process_name, kwargs=kwargs)
+        proc = process.Process(kwargs=kwargs)
+        proc.name = process_name
+        return process_name, proc
 
     def new_process_number(self, name):
         """Increment the counter for the process id number for a given consumer
@@ -365,15 +373,15 @@ class MasterControlProgram(common.State):
                            'processes': list()}
 
         # Iterate through all of the consumers
-        for process in self.active_processes:
-            LOGGER.debug('Checking runtime state of %s', process.name)
-            if process == multiprocessing.current_process():
+        for proc in self.active_processes:
+            LOGGER.debug('Checking runtime state of %s', proc.name)
+            if proc == multiprocessing.current_process():
                 LOGGER.debug('Matched current process in active_processes')
                 continue
 
             # Send the profile signal
-            os.kill(int(process.pid), signal.SIGPROF)
-            self._poll_data['processes'].append(process.name)
+            os.kill(int(proc.pid), signal.SIGPROF)
+            self._poll_data['processes'].append(proc.name)
 
         # Check if we need to start more processes
         self.check_process_counts()
@@ -398,7 +406,6 @@ class MasterControlProgram(common.State):
             try:
                 stats = self._stats_queue.get(False)
             except Queue.Empty:
-                LOGGER.debug('Stats queue is empty')
                 break
             self._poll_data['processes'].remove(stats['name'])
             self.collect_results(stats)
@@ -544,10 +551,10 @@ class MasterControlProgram(common.State):
         :param str connection: The connection name
 
         """
-        LOGGER.info('Spawning new consumer process for %s to %s',
-                    name, connection)
-
         process_name, process = self.new_process(name, connection)
+
+        LOGGER.info('Spawning %s process for %s to %s',
+                    process_name, name, connection)
 
         # Append the process to the consumer process list
         self._consumers[name]['processes'][process_name] = process

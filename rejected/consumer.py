@@ -85,6 +85,7 @@ class Consumer(object):
         self._config = configuration
         self._channel = None
         self._message = None
+        self._message_body = None
 
         # Run any child object specified initialization
         self.initialize()
@@ -115,6 +116,7 @@ class Consumer(object):
         """
         LOGGER.debug('Received: %r', message_in)
         self._message = message_in
+        self._message_body = None
 
         # Validate the message type if the child sets _MESSAGE_TYPE
         if self.MESSAGE_TYPE and self.MESSAGE_TYPE != self.message_type:

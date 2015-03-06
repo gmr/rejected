@@ -845,7 +845,6 @@ class Process(multiprocessing.Process, common.State):
                     self.name, connection_name)
         self._logging_config = logging_config
         self._stats_queue = stats_queue
-        LOGGER.info('Stats queue: %r', self._stats_queue)
         self._connection_name = connection_name
         self._consumer_name = consumer_name
         self._config = cfg['Consumers'][consumer_name]

@@ -405,7 +405,10 @@ class MasterControlProgram(common.State):
                 stats = self._stats_queue.get(False)
             except Queue.Empty:
                 break
-            self._poll_data['processes'].remove(stats['name'])
+            try:
+                self._poll_data['processes'].remove(stats['name'])
+            except ValueError:
+                pass
             self.collect_results(stats)
 
         if self._poll_data['processes']:

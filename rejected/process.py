@@ -867,8 +867,15 @@ class Process(multiprocessing.Process, common.State):
         self._statsd = False
         if 'statsd' in cfg and cfg['statsd'].get('enabled', False):
             self._statsd = True
-            self._statsd_host = cfg['statsd'].get('host', 'localhost')
-            self._statsd_port = cfg['statsd'].get('port', 8125)
+            self._statsd_host = \
+                cfg['statsd'].get('host', os.environ.get('STATSD_HOST',
+                                                         'localhost'))
+            self._statsd_port = \
+                cfg['statsd'].get('port', os.environ.get('STATSD_PORT', 8125))
+            if self._statsd_host != os.environ.get('STATSD_HOST', None):
+                os.environ['STATSD_HOST'] = self._statsd_host
+            if self._statsd_port != os.environ.get('STATSD_PORT', None):
+                os.environ['STATSD_PORT'] = self._statsd_host
 
         self.reset_failure_counter()
         self.setup_signal_handlers()

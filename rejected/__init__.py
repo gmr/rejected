@@ -28,3 +28,4 @@ except ImportError:
             pass
 
 logging.getLogger('rejected').addHandler(NullHandler())
+logging.getLogger('rejected.consumer').addHandler(NullHandler())

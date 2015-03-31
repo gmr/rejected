@@ -528,7 +528,7 @@ class Process(multiprocessing.Process, common.State):
         :param pika.connection.Connection unused: The closed connection
 
         """
-        LOGGER.critical('Connection from RabbitMQ closed in state %i (%s, %s)',
+        LOGGER.critical('Connection from RabbitMQ closed in state %s (%s, %s)',
                         self.state_description, code, text)
         self._channel = None
         if not self.is_shutting_down and not self.is_waiting_to_shutdown:

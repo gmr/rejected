@@ -880,7 +880,7 @@ class Process(multiprocessing.Process, common.State):
             if self._statsd_host != os.environ.get('STATSD_HOST', None):
                 os.putenv('STATSD_HOST', self._statsd_host)
             if self._statsd_port != os.environ.get('STATSD_PORT', None):
-                os.putenv('STATSD_PORT', self._statsd_port)
+                os.putenv('STATSD_PORT', str(self._statsd_port))
 
         self.reset_failure_counter()
         self.setup_signal_handlers()

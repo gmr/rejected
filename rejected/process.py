@@ -86,7 +86,7 @@ class Process(multiprocessing.Process, common.State):
     _MAX_SHUTDOWN_WAIT = 5
     _RECONNECT_DELAY = 10
 
-    _STATSD_FORMAT = 'rejected.consumer.{0}.{1}:{2}|c\n'
+    _STATSD_FORMAT = '{0}.consumer.{1}.{2}.{3}:{4}|c\n'
 
     def __init__(self, group=None, target=None, name=None, args=(),
                  kwargs=None):
@@ -122,9 +122,11 @@ class Process(multiprocessing.Process, common.State):
         self._statsd = False
         self._statsd_host = 'localhost'
         self._statsd_port = 8125
+        self._statsd_prefix = 'rejected'
         self._statsd_socket = socket.socket(socket.AF_INET,
                                             socket.SOCK_DGRAM,
                                             socket.IPPROTO_UDP)
+        self._node_name = socket.gethostname().split('.')[0]
 
         # Override ACTIVE with PROCESSING
         self._STATES[0x04] = 'Processing'
@@ -794,7 +796,9 @@ class Process(multiprocessing.Process, common.State):
         :param int|float value: The count
 
         """
-        payload = self._STATSD_FORMAT.format(self._consumer_name,
+        payload = self._STATSD_FORMAT.format(self._statsd_prefix,
+                                             self._node_name,
+                                             self._consumer_name,
                                              counter,
                                              math.ceil(value))
         self._statsd_socket.sendto(payload, (self._statsd_host,
@@ -867,15 +871,16 @@ class Process(multiprocessing.Process, common.State):
         self._statsd = False
         if 'statsd' in cfg and cfg['statsd'].get('enabled', False):
             self._statsd = True
+            self._statsd_prefix = cfg['statsd'].get('prefix', 'rejected')
             self._statsd_host = \
                 cfg['statsd'].get('host', os.environ.get('STATSD_HOST',
                                                          'localhost'))
             self._statsd_port = \
                 cfg['statsd'].get('port', os.environ.get('STATSD_PORT', 8125))
             if self._statsd_host != os.environ.get('STATSD_HOST', None):
-                os.environ['STATSD_HOST'] = self._statsd_host
+                os.putenv('STATSD_HOST', self._statsd_host)
             if self._statsd_port != os.environ.get('STATSD_PORT', None):
-                os.environ['STATSD_PORT'] = self._statsd_host
+                os.putenv('STATSD_PORT', self._statsd_port)
 
         self.reset_failure_counter()
         self.setup_signal_handlers()

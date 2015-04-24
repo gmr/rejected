@@ -4,7 +4,7 @@ Rejected is a Python RabbitMQ Consumer Framework and Controller Daemon
 """
 __author__ = 'Gavin M. Roy <gavinmroy@gmail.com>'
 __since__ = "2009-09-10"
-__version__ = "3.4.6"
+__version__ = "3.5.0"
 
 from consumer import Consumer
 from consumer import PublishingConsumer
@@ -21,11 +21,8 @@ except ImportError:
         """Python 2.6 does not have a NullHandler"""
         def emit(self, record):
             """Emit a record
-
             :param record record: The record to emit
-
             """
             pass
 
 logging.getLogger('rejected').addHandler(NullHandler())
-logging.getLogger('rejected.consumer').addHandler(NullHandler())

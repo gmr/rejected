@@ -20,6 +20,7 @@ install_requires = ['helper',
 extras_require = {'html': ['beautifulsoup4']}
 
 if sys.version_info < (2, 7, 0):
+    install_requires.append('backport_collections')
     install_requires.append('importlib')
 
 setup(name='rejected',

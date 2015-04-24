@@ -13,15 +13,15 @@ class TestState(unittest.TestCase):
     def setUp(self):
         self._obj = state.State()
 
-    def testset_state_invalid_value(self):
+    def test_set_state_invalid_value(self):
         self.assertRaises(ValueError, self._obj.set_state, 9999)
 
-    def testset_state_expected_assignment(self):
+    def test_set_state_expected_assignment(self):
         self.state = self._obj.STATE_IDLE
         self._obj.set_state(self._obj.STATE_CONNECTING)
         self.assertEqual(self._obj.state, self._obj.STATE_CONNECTING)
 
-    def testset_state_state_start(self):
+    def test_set_state_state_start(self):
         self.state = self._obj.STATE_IDLE
         value = 86400
         with mock.patch('time.time', return_value=value):

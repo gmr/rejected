@@ -26,4 +26,3 @@ class TestMCP(test_state.TestState):
 
     def test_mcp_init_queue_initialized(self):
         self.assertIsInstance(self._obj.stats_queue, mock.MagicMock)
-

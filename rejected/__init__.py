@@ -17,12 +17,15 @@ import logging
 try:
     from logging import NullHandler
 except ImportError:
+
     class NullHandler(logging.Handler):
         """Python 2.6 does not have a NullHandler"""
+
         def emit(self, record):
             """Emit a record
             :param record record: The record to emit
             """
             pass
+
 
 logging.getLogger('rejected').addHandler(NullHandler())

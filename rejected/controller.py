@@ -8,9 +8,7 @@ from helper import parser
 import signal
 import sys
 
-from rejected import common
 from rejected import mcp
-from rejected import __version__
 
 LOGGER = logging.getLogger(__name__)
 
@@ -20,6 +18,7 @@ class Controller(helper.Controller):
     of the OS level concerns.
 
     """
+
     def _master_control_program(self):
         """Return an instance of the MasterControlProgram.
 
@@ -43,7 +42,6 @@ class Controller(helper.Controller):
     def setup(self):
         """Continue the run process blocking on MasterControlProgram.run"""
         # If the app was invoked to specified to prepend the path, do so now
-        common.add_null_handler()
         if self.args.prepend_path:
             self._prepend_python_path(self.args.prepend_path)
 
@@ -95,7 +93,7 @@ def add_parser_arguments():
                            default=None,
                            dest='profile',
                            help='Profile the consumer modules, specifying '
-                                'the output directory.')
+                           'the output directory.')
     argparser.add_argument('-o', '--only',
                            action='store',
                            default=None,
@@ -108,10 +106,11 @@ def add_parser_arguments():
                            help='Prepend the python path with the value.')
     argparser.add_argument('-q', '--qty',
                            action='store',
-                           default=1,
+                           type=int,
+                           default=None,
                            dest='quantity',
-                           help='Run the specified quanty of consumer processes'
-                                ' when used in conjunction with -o')
+                           help='Run the specified quantity of consumer '
+                           'processes when used in conjunction with -o')
 
 
 def main():

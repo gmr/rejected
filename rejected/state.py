@@ -24,14 +24,16 @@ class State(object):
     STATE_STOPPED = 0x08
 
     # For reverse lookup
-    STATES = {0x01: 'Initializing',
-              0x02: 'Connecting',
-              0x03: 'Idle',
-              0x04: 'Active',
-              0x05: 'Sleeping',
-              0x06: 'Stop Requested',
-              0x07: 'Shutting down',
-              0x08: 'Stopped'}
+    STATES = {
+        0x01: 'Initializing',
+        0x02: 'Connecting',
+        0x03: 'Idle',
+        0x04: 'Active',
+        0x05: 'Sleeping',
+        0x06: 'Stop Requested',
+        0x07: 'Shutting down',
+        0x08: 'Stopped'
+    }
 
     def __init__(self):
         """Initialize the state of the object"""
@@ -50,8 +52,8 @@ class State(object):
             raise ValueError('Invalid state value: %r' % new_state)
 
         # Set the state
-        LOGGER.debug('State changing from %s to %s',
-                     self.STATES[self.state], self.STATES[new_state])
+        LOGGER.debug('State changing from %s to %s', self.STATES[self.state],
+                     self.STATES[new_state])
         self.state = new_state
         self.state_start = time.time()
 
@@ -92,7 +94,6 @@ class State(object):
 
         """
         return self.state == self.STATE_SHUTTING_DOWN
-
 
     @property
     def is_sleeping(self):

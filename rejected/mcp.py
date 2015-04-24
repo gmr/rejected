@@ -23,6 +23,7 @@ class Consumer(object):
     the MCP
 
     """
+
     def __init__(self, connections, last_proc_num, processes, qty, queue):
         self.connections = connections
         self.last_proc_num = last_proc_num
@@ -132,10 +133,12 @@ class MasterControlProgram(state.State):
 
         # Return a data structure that can be used in reporting out the stats
         stats['processes'] = len(self.active_processes)
-        return {'last_poll': timestamp,
-                'consumers': consumer_stats,
-                'process_data': data,
-                'counts': stats}
+        return {
+            'last_poll': timestamp,
+            'consumers': consumer_stats,
+            'process_data': data,
+            'counts': stats
+        }
 
     @staticmethod
     def calculate_velocity(counts):
@@ -205,11 +208,13 @@ class MasterControlProgram(state.State):
         :rtype: dict
 
         """
-        return {process.Process.ERROR: 0,
-                process.Process.PROCESSED: 0,
-                process.Process.REDELIVERED: 0,
-                process.Process.TIME_SPENT: 0,
-                process.Process.TIME_WAITED: 0}
+        return {
+            process.Process.ERROR: 0,
+            process.Process.PROCESSED: 0,
+            process.Process.REDELIVERED: 0,
+            process.Process.TIME_SPENT: 0,
+            process.Process.TIME_WAITED: 0
+        }
 
     def get_consumer_process(self, consumer, name):
         """Get the process object for the specified consumer and process name.
@@ -295,8 +300,7 @@ class MasterControlProgram(state.State):
         LOGGER.info('%i total %s have processed %i messages with %i '
                     'errors, waiting %.2f seconds and have spent %.2f seconds '
                     'processing messages with an overall velocity of %.2f '
-                    'messages per second.',
-                    self.stats['counts']['processes'],
+                    'messages per second.', self.stats['counts']['processes'],
                     self.consumer_keyword(self.stats['counts']),
                     self.stats['counts']['processed'],
                     self.stats['counts']['failed'],
@@ -310,16 +314,14 @@ class MasterControlProgram(state.State):
                         'of %.2f messages per second.',
                         self.stats['consumers'][key]['processes'],
                         self.consumer_keyword(self.stats['consumers'][key]),
-                        key,
-                        self.stats['consumers'][key]['processed'],
+                        key, self.stats['consumers'][key]['processed'],
                         self.stats['consumers'][key]['failed'],
                         self.stats['consumers'][key]['idle_time'],
                         self.stats['consumers'][key]['processing_time'],
                         self.calculate_velocity(self.stats['consumers'][key]))
         if self.poll_data['processes']:
             LOGGER.warning('%i process(es) did not respond with stats in '
-                           'time: %r',
-                           len(self.poll_data['processes']),
+                           'time: %r', len(self.poll_data['processes']),
                            self.poll_data['processes'])
 
     def new_consumer(self, config):
@@ -329,9 +331,8 @@ class MasterControlProgram(state.State):
         :rtype: dict
 
         """
-        return Consumer(dict([(c, []) for c in config['connections']]),
-                        0, dict(),
-                        config.get('qty', self.DEFAULT_CONSUMER_QTY),
+        return Consumer(dict([(c, []) for c in config['connections']]), 0,
+                        dict(), config.get('qty', self.DEFAULT_CONSUMER_QTY),
                         config['queue'])
 
     def new_process(self, consumer_name, connection_name):
@@ -344,15 +345,17 @@ class MasterControlProgram(state.State):
         """
         process_name = '%s-%s' % (consumer_name,
                                   self.new_process_number(consumer_name))
-        LOGGER.debug('Creating a new process for %s: %s',
-                     connection_name, process_name)
-        kwargs = {'config': self.config.application,
-                  'connection_name': connection_name,
-                  'consumer_name': consumer_name,
-                  'profile': self.profile,
-                  'daemon': False,
-                  'stats_queue': self.stats_queue,
-                  'logging_config': self.config.logging}
+        LOGGER.debug('Creating a new process for %s: %s', connection_name,
+                     process_name)
+        kwargs = {
+            'config': self.config.application,
+            'connection_name': connection_name,
+            'consumer_name': consumer_name,
+            'profile': self.profile,
+            'daemon': False,
+            'stats_queue': self.stats_queue,
+            'logging_config': self.config.logging
+        }
         return process_name, process.Process(name=process_name, kwargs=kwargs)
 
     def new_process_number(self, name):
@@ -417,8 +420,7 @@ class MasterControlProgram(state.State):
         :rtype: bool
 
         """
-        return (time.time() -
-                self.poll_data['timestamp']) >= self.poll_interval
+        return (time.time() - self.poll_data['timestamp']) >= self.poll_interval
 
     def poll_results_check(self):
         """Check the polling results by checking to see if the stats queue is
@@ -561,8 +563,8 @@ class MasterControlProgram(state.State):
 
         """
         process_name, proc = self.new_process(name, connection)
-        LOGGER.info('Spawning %s process for %s to %s',
-                    process_name, name, connection)
+        LOGGER.info('Spawning %s process for %s to %s', process_name, name,
+                    connection)
 
         # Append the process to the consumer process list
         self.consumers[name].processes[process_name] = proc

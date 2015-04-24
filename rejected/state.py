@@ -1,25 +1,11 @@
 """
-Common Mixin Classes
+Base State Tracking Class
 
 """
 import logging
 import time
 
 LOGGER = logging.getLogger(__name__)
-
-
-try:
-    from logging import NullHandler
-except ImportError:
-    # Python 2.6 does not have a NullHandler
-    class NullHandler(logging.Handler):
-        def emit(self, record):
-            pass
-
-
-def add_null_handler():
-    logger = logging.getLogger()
-    logger.addHandler(NullHandler())
 
 
 class State(object):
@@ -38,19 +24,19 @@ class State(object):
     STATE_STOPPED = 0x08
 
     # For reverse lookup
-    _STATES = {0x01: 'Initializing',
-               0x02: 'Connecting',
-               0x03: 'Idle',
-               0x04: 'Active',
-               0x05: 'Sleeping',
-               0x06: 'Stop Requested',
-               0x07: 'Shutting down',
-               0x08: 'Stopped'}
+    STATES = {0x01: 'Initializing',
+              0x02: 'Connecting',
+              0x03: 'Idle',
+              0x04: 'Active',
+              0x05: 'Sleeping',
+              0x06: 'Stop Requested',
+              0x07: 'Shutting down',
+              0x08: 'Stopped'}
 
     def __init__(self):
         """Initialize the state of the object"""
-        self._state = self.STATE_INITIALIZING
-        self._state_start = time.time()
+        self.state = self.STATE_INITIALIZING
+        self.state_start = time.time()
 
     def set_state(self, new_state):
         """Assign the specified state to this consumer object.
@@ -60,14 +46,14 @@ class State(object):
 
         """
         # Make sure it's a valid state
-        if new_state not in self._STATES:
+        if new_state not in self.STATES:
             raise ValueError('Invalid state value: %r' % new_state)
 
         # Set the state
         LOGGER.debug('State changing from %s to %s',
-                     self._STATES[self._state], self._STATES[new_state])
-        self._state = new_state
-        self._state_start = time.time()
+                     self.STATES[self.state], self.STATES[new_state])
+        self.state = new_state
+        self.state_start = time.time()
 
     @property
     def is_connecting(self):
@@ -76,7 +62,7 @@ class State(object):
         :rtype: bool
 
         """
-        return self._state == self.STATE_CONNECTING
+        return self.state == self.STATE_CONNECTING
 
     @property
     def is_idle(self):
@@ -85,7 +71,7 @@ class State(object):
         :rtype: bool
 
         """
-        return self._state == self.STATE_IDLE
+        return self.state == self.STATE_IDLE
 
     @property
     def is_running(self):
@@ -95,8 +81,8 @@ class State(object):
         :rtype: bool
 
         """
-        return self._state in [self.STATE_IDLE, self.STATE_ACTIVE,
-                               self.STATE_SLEEPING]
+        return self.state in [self.STATE_IDLE, self.STATE_ACTIVE,
+                              self.STATE_SLEEPING]
 
     @property
     def is_shutting_down(self):
@@ -105,7 +91,7 @@ class State(object):
         :rtype: bool
 
         """
-        return self._state == self.STATE_SHUTTING_DOWN
+        return self.state == self.STATE_SHUTTING_DOWN
 
 
     @property
@@ -115,7 +101,7 @@ class State(object):
         :rtype: bool
 
         """
-        return self._state == self.STATE_SLEEPING
+        return self.state == self.STATE_SLEEPING
 
     @property
     def is_stopped(self):
@@ -124,7 +110,7 @@ class State(object):
         :rtype: bool
 
         """
-        return self._state == self.STATE_STOPPED
+        return self.state == self.STATE_STOPPED
 
     @property
     def is_waiting_to_shutdown(self):
@@ -133,7 +119,7 @@ class State(object):
         :rtype: bool
 
         """
-        return self._state == self.STATE_STOP_REQUESTED
+        return self.state == self.STATE_STOP_REQUESTED
 
     @property
     def state_description(self):
@@ -142,4 +128,13 @@ class State(object):
         :rtype: str
 
         """
-        return self._STATES[self._state]
+        return self.STATES[self.state]
+
+    @property
+    def time_in_state(self):
+        """Return the time that has been spent in the current state.
+
+        :rtype: float
+
+        """
+        return time.time() - self.state_start

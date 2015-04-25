@@ -48,6 +48,9 @@ class TestImportNamspacedClass(unittest.TestCase):
 class TestProcess(test_state.TestState):
 
     config = {
+        'statsd': {
+          'enabled': False
+        },
         'Connections': {
             'MockConnection': {
                 'host': 'localhost',
@@ -168,36 +171,20 @@ class TestProcess(test_state.TestState):
         new_process = self.new_process()
         self.assertIsNone(new_process.consumer)
 
-    def test_ack_message(self):
-        delivery_tag = 'MockDeliveryTag-1'
-        mock_ack = mock.Mock()
-        self._obj._ack = True
-        self._obj._message_connection_id = self._obj._connection_id = 1
-        self._obj._channel = self.new_mock_channel()
-        self._obj._channel.basic_ack = mock_ack
-        self._obj.ack_message(delivery_tag)
-        mock_ack.assert_called_once_with(delivery_tag=delivery_tag)
-
-    def test_count(self):
-        expectation = 10
-        self._obj.stats[process.Process.REDELIVERED] = expectation
-        self.assertEqual(self._obj.count(process.Process.REDELIVERED),
-                         expectation)
-
     def test_get_config(self):
-        connection = 'MockConnection'
+        conn = 'MockConnection'
         name = 'MockConsumer'
         number = 5
         pid = 1234
         expectation = {
-            'connection': self.config['Connections'][connection],
-            'connection_name': connection,
+            'connection': self.config['Connections'][conn],
+            'connection_name': conn,
             'consumer_name': name,
             'process_name': '%s_%i_tag_%i' % (name, pid, number)
         }
         with patch('os.getpid', return_value=pid):
             self.assertEqual(self._obj.get_config(self.config, number, name,
-                                                  connection), expectation)
+                                                  conn), expectation)
 
     def test_get_consumer_with_invalid_consumer(self):
         cfg = self.config['Consumers']['MockConsumer2']
@@ -234,35 +221,6 @@ class TestProcess(test_state.TestState):
         new_process = self.new_process()
         self.assertIsNone(new_process.get_consumer(config))
 
-    def test_reject_message(self):
-        delivery_tag = 'MockDeliveryTag-1'
-        mock_reject = mock.Mock()
-        self._obj.channel = self.new_mock_channel()
-        self._obj.ack = True
-        self._obj.message_connection_id = self._obj.connection_id = 1
-        self._obj.channel.basic_nack = mock_reject
-        self._obj.reject(delivery_tag)
-        mock_reject.assert_called_once_with(requeue=True,
-                                            delivery_tag=delivery_tag)
-
-    def test_set_qos_prefetch_value(self):
-        new_process = self.new_process()
-        new_process.setup(**self.mock_args)
-        mock_channel = self.new_mock_channel()
-        new_process._channel = mock_channel
-        value = 12
-        new_process.set_qos_prefetch(value)
-        mock_channel.basic_qos.assert_called_once_with(prefetch_count=value)
-
-    def test_set_qos_prefetch_no_value(self):
-        new_process = self.new_process()
-        new_process.setup(**self.mock_args)
-        mock_channel = self.new_mock_channel()
-        new_process._channel = mock_channel
-        new_process.set_qos_prefetch()
-        value = new_process.qos_prefetch
-        mock_channel.basic_qos.assert_called_once_with(prefetch_count=value)
-
     def test_setup_signal_handlers(self):
         signals = [mock.call(signal.SIGPROF, self._obj.on_sigprof),
                    mock.call(signal.SIGABRT, self._obj.stop)]
@@ -281,38 +239,32 @@ class TestProcess(test_state.TestState):
 
     def test_setup_stats_queue(self):
         mock_process = self.mock_setup()
-        self.assertEqual(mock_process._stats_queue,
+        self.assertEqual(mock_process.stats_queue,
                          self.mock_args['stats_queue'])
 
     def test_setup_consumer_name(self):
         mock_process = self.mock_setup()
-        self.assertEqual(mock_process._stats_queue,
+        self.assertEqual(mock_process.stats_queue,
                          self.mock_args['stats_queue'])
 
     def test_setup_config(self):
         mock_process = self.mock_setup()
         config = self.config['Consumers']['MockConsumer']
-        self.assertEqual(mock_process._config, config)
-
-    def test_setup_with_consumer_config(self):
-        new_process = self.new_process()
-        new_process.setup(**self.mock_args)
-        self.assertEqual(new_process.consumer._settings,
-                         self.config['Consumers']['MockConsumer']['config'])
+        self.assertEqual(mock_process.config, config)
 
     def test_setup_config_queue_name(self):
         mock_process = self.mock_setup()
-        self.assertEqual(mock_process._queue_name,
+        self.assertEqual(mock_process.queue_name,
                          self.config['Consumers']['MockConsumer']['queue'])
 
     def test_setup_config_ack(self):
         mock_process = self.mock_setup()
-        self.assertEqual(mock_process._ack,
+        self.assertEqual(mock_process.ack,
                          self.config['Consumers']['MockConsumer']['ack'])
 
     def test_setup_max_error_count(self):
         mock_process = self.mock_setup()
-        self.assertEqual(mock_process._max_error_count,
+        self.assertEqual(mock_process.max_error_count,
                          self.config['Consumers']['MockConsumer']['max_errors'])
 
     def test_setup_prefetch_count_no_config(self):
@@ -341,7 +293,7 @@ class TestProcess(test_state.TestState):
         with patch.object(process.Process, 'connect_to_rabbitmq',
                           return_value=mock_connection):
             mock_process = self.mock_setup()
-            self.assertEqual(mock_process._connection, mock_connection)
+            self.assertEqual(mock_process.connection, mock_connection)
 
     def test_is_idle_state_processing(self):
         self._obj.state = self._obj.STATE_PROCESSING
@@ -358,16 +310,6 @@ class TestProcess(test_state.TestState):
     def test_is_stopped_state_processing(self):
         self._obj.state = self._obj.STATE_PROCESSING
         self.assertFalse(self._obj.is_stopped)
-
-    def test_too_many_errors_true(self):
-        self._obj.max_error_count = 1
-        self._obj.stats[self._obj.ERROR] = 2
-        self.assertTrue(self._obj.too_many_errors)
-
-    def test_too_many_errors_false(self):
-        self._obj.max_error_count = 5
-        self._obj.stats[self._obj.ERROR] = 2
-        self.assertFalse(self._obj.too_many_errors)
 
     def test_state_processing_desc(self):
         self._obj.state = self._obj.STATE_PROCESSING

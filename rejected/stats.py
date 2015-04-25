@@ -12,15 +12,14 @@ from rejected import statsd
 
 class Stats(object):
 
-    def __init__(self, name, consumer_name, queue, statsd_cfg):
+    def __init__(self, name, consumer_name, statsd_cfg):
         self.name = name
-        self.consumer_name = name
+        self.consumer_name = consumer_name
         self.statsd = None
         if statsd_cfg.get('enabled', False):
             self.statsd = statsd.StatsdClient(consumer_name, statsd_cfg)
         self.counter = collections.Counter()
-        self.previous = collections.Counter()
-        self.reporting_queue = queue
+        self.previous = None
 
     def __getitem__(self, item):
         return self.counter.get(item)
@@ -45,14 +44,18 @@ class Stats(object):
 
     def report(self):
         """Submit the stats data to both the MCP stats queue and statsd"""
-        values = dict()
-        for item in self.counter.keys():
-            values[item] = self.diff(item)
-            if self.statsd:
-                self.statsd.incr(item, values[item])
-        self.previous.update(self.counter)
-        self.reporting_queue.put({
+        if not self.previous:
+            self.previous = dict()
+            for key in self.counter:
+                self.previous[key] = 0
+        if self.statsd:
+            for item in self.counter.keys():
+                self.statsd.incr(item, self.diff(item))
+        values = {
             'name': self.name,
             'consumer_name': self.consumer_name,
-            'counts': values
-        }, True)
+            'counts': dict(self.counter),
+            'previous': self.previous
+        }
+        self.previous = dict(self.counter)
+        return values

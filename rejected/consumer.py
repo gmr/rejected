@@ -142,7 +142,6 @@ class Consumer(object):
             raise RuntimeError("finish() called twice")
         self._finished = True
         self.on_finish()
-        self._clear()
 
     def require_setting(self, name, feature="this feature"):
         """Raises an exception if the given app setting is not defined."""

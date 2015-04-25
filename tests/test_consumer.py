@@ -1,16 +1,12 @@
 # coding=utf-8
 """Tests for rejected.consumer"""
-import bs4
-import bz2
-import csv
+from tornado import gen
 import json
 import mock
-import pickle
 try:
     import unittest2 as unittest
 except ImportError:
     import unittest
-import zlib
 
 from . import mocks
 
@@ -23,7 +19,7 @@ class ConsumerInitializationTests(unittest.TestCase):
     def test_configuration_is_assigned(self):
         cfg = {'foo': 'bar'}
         obj = consumer.Consumer(cfg)
-        self.assertDictEqual(obj._config, cfg)
+        self.assertDictEqual(obj._settings, cfg)
 
     def test_channel_is_none(self):
         obj = consumer.Consumer({})
@@ -51,7 +47,7 @@ class ConsumerSetChannelTests(unittest.TestCase):
     def test_set_channel_assigns_to_channel(self):
         obj = consumer.Consumer({})
         channel = mock.Mock()
-        obj.set_channel(channel)
+        obj._set_channel(channel)
         self.assertEqual(obj._channel, channel)
 
 
@@ -67,37 +63,39 @@ class ConsumerReceiveTests(unittest.TestCase):
         self.message = data.Message(mocks.CHANNEL, mocks.METHOD,
                                     mocks.PROPERTIES, mocks.BODY)
 
+    @gen.coroutine
     def test_receive_assigns_message(self):
-        self.obj.receive(self.message)
+        yield self.obj._execute(self.message)
         self.assertEqual(self.obj._message, self.message)
 
     def test_receive_invokes_process(self):
         with mock.patch.object(self.obj, 'process') as process:
-            self.obj.receive(self.message)
+            self.obj._execute(self.message)
             process.assert_called_once_with()
 
     def test_receive_drops_invalid_message_type(self):
         self.obj.MESSAGE_TYPE = 'foo'
         self.obj.DROP_INVALID_MESSAGES = True
         with mock.patch.object(self.obj, 'process') as process:
-            self.obj.receive(self.message)
+            self.obj._execute(self.message)
             process.assert_not_called()
 
     def test_raises_with_invalid_message_type(self):
         self.obj.MESSAGE_TYPE = 'foo'
         self.obj.DROP_INVALID_MESSAGES = False
-        self.assertRaises(consumer.ConsumerException, self.obj.receive,
-                          self.message)
+        result = yield self.obj._execute(self.message)
+        self.assertIsInstance(result.exception, consumer.ConsumerException)
 
 
 class ConsumerPropertyTests(unittest.TestCase):
 
+    @gen.coroutine
     def setUp(self):
         self.config = {'foo': 'bar', 'baz': 1, 'qux': True}
         self.message = data.Message(mocks.CHANNEL, mocks.METHOD,
                                     mocks.PROPERTIES, mocks.BODY)
         self.obj = TestConsumer(self.config)
-        self.obj.receive(self.message)
+        yield self.obj._execute(self.message)
 
     def test_app_id_property(self):
         self.assertEqual(self.obj.app_id, mocks.PROPERTIES.app_id)
@@ -172,7 +170,7 @@ class TestSmartConsumerWithJSON(unittest.TestCase):
         self.message = data.Message(mocks.CHANNEL, mocks.METHOD,
                                     mocks.PROPERTIES, json.dumps(self.body))
         self.obj = TestSmartConsumer({})
-        self.obj.receive(self.message)
+        self.obj._execute(self.message)
 
     def test_message_body_property(self):
         self.assertDictEqual(self.obj.body, self.body)

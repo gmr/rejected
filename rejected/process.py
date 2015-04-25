@@ -217,7 +217,6 @@ class Process(multiprocessing.Process, state.State):
         processed = (values['counts'].get(self.PROCESSED, 0) -
                      values['previous'].get(self.PROCESSED, 0))
         duration = time.time() - self.last_stats_time
-        LOGGER.debug("Processed: %s (%s)", processed, duration)
 
         # If there were no messages, do not calculate, use the base
         if not processed or not duration:
@@ -225,7 +224,7 @@ class Process(multiprocessing.Process, state.State):
 
         # Calculate the velocity as the basis for the calculation
         velocity = float(processed) / float(duration)
-        LOGGER.info('Message processing velocity: %.2f/s', velocity)
+        LOGGER.debug('Message processing velocity: %.2f/s', velocity)
         return velocity
 
     @property

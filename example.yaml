@@ -18,21 +18,18 @@ Application:
       vhost: /
       heartbeat_interval: 300
   Consumers:
-    example:
-      consumer: rejected.example.ExampleConsumer
+    async:
+      consumer: rejected.example.AsyncExampleConsumer
       connections: [rabbitmq]
       qty: 1
       queue: test
       dynamic_qos: True
       ack: True
       max_errors: 100
-      config:
-        foo: True
-        bar: baz
-    example2:
+    example:
       consumer: rejected.example.ExampleConsumer
       connections: [rabbitmq]
-      qty: 2
+      qty: 1
       queue: test
       dynamic_qos: True
       ack: True

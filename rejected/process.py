@@ -25,9 +25,10 @@ from tornado import ioloop
 import traceback
 
 from rejected import __version__
-from rejected import state
 from rejected import consumer
 from rejected import data
+from rejected import NullHandler
+from rejected import state
 from rejected import stats
 
 LOGGER = logging.getLogger(__name__)
@@ -677,6 +678,8 @@ class Process(multiprocessing.Process, state.State):
 
     def run(self):
         """Start the consumer"""
+        logger = logging.getLogger()
+        logger.addHandler(NullHandler())
         if self.profile_file:
             LOGGER.info('Profiling to %s', self.profile_file)
             profile.runctx('self._run()', globals(), locals(),
@@ -738,7 +741,6 @@ class Process(multiprocessing.Process, state.State):
         """
         LOGGER.info('Initializing for %s on %s connection', self.name,
                     connection_name)
-        self.logging_config = logging_config
         self.connection_name = connection_name
         self.consumer_name = consumer_name
         self.config = cfg['Consumers'][consumer_name]

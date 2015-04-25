@@ -13,7 +13,7 @@ available via the ``body`` attribute. Additionally, should one of the supported
 ``content_encoding`` types (``gzip`` or ``bzip2``) be specified in the
 message's property, it will automatically be decoded.
 
-Supported MIME types are:
+Supported `SmartConsumer` MIME types are:
 
  - application/json
  - application/pickle
@@ -29,7 +29,9 @@ Supported MIME types are:
 
 """
 import bz2
+from tornado import concurrent
 import csv
+from tornado import gen
 import json
 import logging
 import pickle
@@ -39,14 +41,14 @@ import StringIO as stringio
 import sys
 import time
 import uuid
+import warnings
 import yaml
 import zlib
 
 LOGGER = logging.getLogger(__name__)
 
 BS4_MIME_TYPES = ('text/html', 'text/xml')
-PICKLE_MIME_TYPES = ('application/pickle',
-                     'application/x-pickle',
+PICKLE_MIME_TYPES = ('application/pickle', 'application/x-pickle',
                      'application/x-vnd.python.pickle',
                      'application/vnd.python.pickle')
 YAML_MIME_TYPES = ('text/yaml', 'text/x-yaml')
@@ -75,23 +77,38 @@ class Consumer(object):
     DROP_INVALID_MESSAGES = False
     MESSAGE_TYPE = None
 
-    def __init__(self, configuration):
+    def __init__(self, settings):
         """Creates a new instance of a Consumer class. To perform
         initialization tasks, extend Consumer.initialize
 
-        :param dict configuration: The configuration from rejected
+        :param dict settings: The configuration from rejected
 
         """
-        self._config = configuration
         self._channel = None
+        self._finished = False
         self._message = None
         self._message_body = None
+        self._settings = settings
+        self._statsd = None
 
         # Run any child object specified initialization
         self.initialize()
 
     def initialize(self):
-        """Extend this method for any initialization tasks"""
+        """Extend this method for any initialization tasks that occur only when
+        the `Consumer` class is created."""
+        pass
+
+    def prepare(self):
+        """Called when a message is received before `process`.
+
+        Asynchronous support: Decorate this method with `.gen.coroutine`
+        or `.return_future` to make it asynchronous (the
+        `asynchronous` decorator cannot be used on `prepare`).
+
+        If this method returns a `.Future` execution will not proceed
+        until the `.Future` is done.
+        """
         pass
 
     def process(self):
@@ -106,41 +123,51 @@ class Consumer(object):
         """
         raise NotImplementedError
 
-    def receive(self, message_in):
-        """Process the message from RabbitMQ. To implement logic for processing
-        a message, extend Consumer._process, not this method.
+    def on_finish(self):
+        """Called after the end of a request.
+        Override this method to perform cleanup, logging, etc.
+        This method is a counterpart to `prepare`.  ``on_finish`` may
+        not produce any output, as it is called after the response
+        has been sent to the client.
+        """
+        pass
 
-        :param rejected.Consumer.Message message_in: The message to process
-        :rtype: bool
+    def shutdown(self):
+        """Override to cleanly shutdown when rejected is stopping"""
+        pass
+
+    def finish(self):
+        """Finishes message processing for the current message."""
+        if self._finished:
+            raise RuntimeError("finish() called twice")
+        self._finished = True
+        self.on_finish()
+
+    def require_setting(self, name, feature="this feature"):
+        """Raises an exception if the given app setting is not defined."""
+        if not self.settings.get(name):
+            raise Exception("You must define the '%s' setting in your "
+                            "application to use %s" % (name, feature))
+
+    def statsd_add_timing(self, key, duration):
+        """Add a timing to statsd
+
+        :param str key: The key to add the timing to
+        :param int|float duration: The timing value
 
         """
-        LOGGER.debug('Received: %r', message_in)
-        self._message = message_in
-        self._message_body = None
+        if self._statsd:
+            self._statsd.add_timing(key, duration)
 
-        # Validate the message type if the child sets _MESSAGE_TYPE
-        if self.MESSAGE_TYPE and self.MESSAGE_TYPE != self.message_type:
-            LOGGER.error('Received a non-supported message type: %s',
-                         self.message_type)
+    def statsd_incr(self, key, value=1):
+        """Increment the specified key in statsd if statsd is enabled.
 
-            # Should the message be dropped or returned to the broker?
-            if self.DROP_INVALID_MESSAGES:
-                LOGGER.debug('Dropping the invalid message')
-                return
-            else:
-                raise ConsumerException('Invalid message type')
-
-        # Let the child object process the message
-        self.process()
-
-    def set_channel(self, channel):
-        """Assign the _channel attribute to the channel that was passed in.
-        This should not be extended.
-
-        :param pika.channel.Channel channel: The channel to assign
+        :param str key: The key to increment
+        :param int value: The value to increment the key by
 
         """
-        self._channel = channel
+        if self._statsd:
+            self._statsd.incr(key, value)
 
     @property
     def app_id(self):
@@ -166,10 +193,16 @@ class Consumer(object):
         """Access the configuration stanza for the consumer as specified by
         the ``config`` section for the consumer in the rejected configuration.
 
+        .. deprecated:: 3.1
+            Use :property:`settings` instead.
+
         :rtype: dict
 
         """
-        return self._config
+        warnings.warn('Consumer.configuration is deprecated '
+                      'in favor of Consumer.settings',
+                      category=DeprecationWarning)
+        return self._settings
 
     @property
     def content_encoding(self):
@@ -307,6 +340,16 @@ class Consumer(object):
         return self._message.properties.type
 
     @property
+    def settings(self):
+        """Access the consumer settings as specified by the ``config`` section
+        for the consumer in the rejected configuration.
+
+        :rtype: dict
+
+        """
+        return self._settings
+
+    @property
     def timestamp(self):
         """Access the unix epoch timestamp value from the properties of the
         current message.
@@ -324,6 +367,69 @@ class Consumer(object):
 
         """
         return self._message.properties.user_id
+
+    def _clear(self):
+        """Resets all assigned data for the current message."""
+        self._finished = False
+        self._message = None
+        self._message_body = None
+
+    @gen.coroutine
+    def _execute(self, message_in):
+        """Process the message from RabbitMQ. To implement logic for processing
+        a message, extend Consumer._process, not this method.
+
+        :param rejected.Consumer.Message message_in: The message to process
+        :rtype: bool
+
+        """
+        LOGGER.debug('Received: %r', message_in)
+        self._clear()
+        self._message = message_in
+
+        # Validate the message type if the child sets _MESSAGE_TYPE
+        if self.MESSAGE_TYPE and self.MESSAGE_TYPE != self.message_type:
+            LOGGER.error('Received a non-supported message type: %s',
+                         self.message_type)
+
+            # Should the message be dropped or returned to the broker?
+            if not self.DROP_INVALID_MESSAGES:
+                LOGGER.debug('Dropping the invalid message')
+                return
+            else:
+                raise ConsumerException('Invalid message type')
+
+        result = self.prepare()
+        if concurrent.is_future(result):
+            result = yield result
+        if result is not None:
+            raise TypeError("Expected None, got %r" % result)
+        if self._finished:
+            return
+
+        result = self.process()
+        if concurrent.is_future(result):
+            result = yield result
+        if result is not None:
+            raise TypeError("Expected None, got %r" % result)
+        self.finish()
+
+    def _set_channel(self, channel):
+        """Assign the _channel attribute to the channel that was passed in.
+        This should not be extended.
+
+        :param pika.channel.Channel channel: The channel to assign
+
+        """
+        self._channel = channel
+
+    def _set_statsd(self, statsd):
+        """Assign a `StatsdClient` instance to the class.
+
+        :param pika.statsd.StatsdClient statsd: The StatsdClient instance
+
+        """
+        self._statsd = statsd
 
 
 class PublishingConsumer(Consumer):
@@ -344,6 +450,7 @@ class PublishingConsumer(Consumer):
     a :py:class:`ConsumerException` is raised.
 
     """
+
     def publish_message(self, exchange, routing_key, properties, body):
         """Publish a message to RabbitMQ on the same channel the original
         message was received on.
@@ -365,8 +472,10 @@ class PublishingConsumer(Consumer):
                                     properties=msg_props,
                                     body=body)
 
-    def reply(self, response_body, properties, auto_id=True,
-              exchange=None, reply_to=None):
+    def reply(self, response_body, properties,
+              auto_id=True,
+              exchange=None,
+              reply_to=None):
         """Reply to the received message.
 
         If auto_id is True, a new uuid4 value will be generated for the
@@ -409,10 +518,8 @@ class PublishingConsumer(Consumer):
         if properties.reply_to:
             properties.reply_to = None
 
-        self.publish_message(exchange or self._message.exchange,
-                             reply_to,
-                             dict(properties),
-                             response_body)
+        self.publish_message(exchange or self._message.exchange, reply_to,
+                             dict(properties), response_body)
 
     @staticmethod
     def _get_pika_properties(properties_in):
@@ -462,9 +569,9 @@ class SmartConsumer(Consumer):
     a :py:class:`ConsumerException` is raised.
 
     """
-    def __init__(self, configuration):
-        self._message_body = None
-        super(SmartConsumer, self).__init__(configuration)
+
+    def __init__(self, settings):
+        super(SmartConsumer, self).__init__(settings)
 
     @property
     def body(self):
@@ -613,8 +720,10 @@ class SmartPublishingConsumer(SmartConsumer, PublishingConsumer):
     """
 
     """
+
     def publish_message(self, exchange, routing_key, properties, body,
-                        no_serialization=False, no_encoding=False):
+                        no_serialization=False,
+                        no_encoding=False):
         """Publish a message to RabbitMQ on the same channel the original
         message was received on.
 
@@ -660,7 +769,6 @@ class SmartPublishingConsumer(SmartConsumer, PublishingConsumer):
                                     properties=properties_out,
                                     body=body)
 
-        
     def _auto_encode(self, content_encoding, value):
         """Based upon the value of the content_encoding, encode the value.
 
@@ -694,17 +802,17 @@ class SmartPublishingConsumer(SmartConsumer, PublishingConsumer):
             LOGGER.debug('Auto-serializing content as Pickle')
             return self._dump_pickle_value(value)
 
-        if content_type  == 'application/x-plist':
+        if content_type == 'application/x-plist':
             LOGGER.debug('Auto-serializing content as plist')
             return self._dump_plist_value(value)
 
-        if content_type  == 'text/csv':
+        if content_type == 'text/csv':
             LOGGER.debug('Auto-serializing content as csv')
             return self._dump_csv_value(value)
 
         # If it's XML or HTML auto
-        if (bs4 and isinstance(value, bs4.BeautifulSoup) and
-            content_type in ('text/html', 'text/xml')):
+        if (bs4 and isinstance(value, bs4.BeautifulSoup) and content_type in
+            ('text/html', 'text/xml')):
             LOGGER.debug('Dumping BS4 object into HTML or XML')
             return self._dump_bs4_value(value)
 
@@ -735,7 +843,7 @@ class SmartPublishingConsumer(SmartConsumer, PublishingConsumer):
 
         """
         buffer = stringio.StringIO()
-        writer = csv.writer(buffer,quotechar='"', quoting=csv.QUOTE_ALL)
+        writer = csv.writer(buffer, quotechar='"', quoting=csv.QUOTE_ALL)
         writer.writerows(value)
         buffer.seek(0)
         value = buffer.read()

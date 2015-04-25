@@ -30,7 +30,6 @@ class Data(object):
         return '<%s(%s)>' % (self.__class__.__name__, items)
 
 
-
 class Message(Data):
     """Class for containing all the attributes about a message object creating a
     flatter, move convenient way to access the data while supporting the legacy

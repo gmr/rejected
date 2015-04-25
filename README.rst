@@ -10,7 +10,7 @@ Rejected runs as a master process with multiple consumer configurations that are
 each run it an isolated process. It has the ability to collect statistical
 data from the consumer processes and report on it.
 
-|Version| |Downloads| |Status| |Coverage| |License|
+|Version| |Downloads| |Status| |License|
 
 Features
 --------
@@ -74,12 +74,12 @@ Example Configuration
           config:
             foo: True
             bar: baz
-    
+
      Daemon:
        user: rejected
        group: daemon
        pidfile: /var/run/rejected/example.%(pid)s.pid
-    
+
      Logging:
        version: 1
        formatters:
@@ -126,11 +126,8 @@ Available at https://rejected.readthedocs.org/en/latest/history.html
 .. |Status| image:: https://travis-ci.org/gmr/rejected.svg?branch=master
    :target: https://travis-ci.org/gmr/rejected
 
-.. |Coverage| image:: https://coveralls.io/repos/gmr/rejected/badge.png
-   :target: https://coveralls.io/r/gmr/rejected
-  
 .. |Downloads| image:: https://pypip.in/d/rejected/badge.svg?
    :target: https://pypi.python.org/pypi/rejected
-   
+
 .. |License| image:: https://pypip.in/license/rejected/badge.svg?
    :target: https://rejected.readthedocs.org

@@ -53,6 +53,7 @@ Example Configuration
         enabled: True
         host: localhost
         port: 8125
+        prefix: applications.rejected
       Connections:
         rabbitmq:
           host: localhost

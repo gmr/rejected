@@ -127,7 +127,7 @@ class MasterControlProgram(state.State):
                 self.process_count_by_consumer(name)
             for proc in data[name].keys():
                 for key in stats:
-                    value = data[name][proc]['counts'][key]
+                    value = data[name][proc]['counts'].get(key, 0)
                     stats[key] += value
                     consumer_stats[name][key] += value
 
@@ -139,20 +139,6 @@ class MasterControlProgram(state.State):
             'process_data': data,
             'counts': stats
         }
-
-    @staticmethod
-    def calculate_velocity(counts):
-        """Calculate the message velocity to determine how many messages are
-        processed per second.
-
-        :param dict counts: The count dictionary to use for calculation
-        :rtype: float
-
-        """
-        total_time = counts['idle_time'] + counts['processing_time']
-        if total_time and counts['processed']:
-            return float(counts['processed'] / float(total_time))
-        return 0
 
     def check_process_counts(self):
         """Check for the minimum consumer process levels and start up new
@@ -211,9 +197,7 @@ class MasterControlProgram(state.State):
         return {
             process.Process.ERROR: 0,
             process.Process.PROCESSED: 0,
-            process.Process.REDELIVERED: 0,
-            process.Process.TIME_SPENT: 0,
-            process.Process.TIME_WAITED: 0
+            process.Process.REDELIVERED: 0
         }
 
     def get_consumer_process(self, consumer, name):
@@ -297,28 +281,18 @@ class MasterControlProgram(state.State):
             LOGGER.info('Did not receive any stats data from children')
             return
 
-        LOGGER.info('%i total %s have processed %i messages with %i '
-                    'errors, waiting %.2f seconds and have spent %.2f seconds '
-                    'processing messages with an overall velocity of %.2f '
-                    'messages per second.', self.stats['counts']['processes'],
+        LOGGER.info('%i total %s have processed %i messages with %i errors',
+                    self.stats['counts']['processes'],
                     self.consumer_keyword(self.stats['counts']),
                     self.stats['counts']['processed'],
-                    self.stats['counts']['failed'],
-                    self.stats['counts']['idle_time'],
-                    self.stats['counts']['processing_time'],
-                    self.calculate_velocity(self.stats['counts']))
+                    self.stats['counts']['failed'])
         for key in self.stats['consumers'].keys():
             LOGGER.info('%i %s for %s have processed %i messages with %i '
-                        'errors, waiting %.2f seconds and have spent %.2f '
-                        'seconds processing messages with an overall velocity '
-                        'of %.2f messages per second.',
+                        'errors',
                         self.stats['consumers'][key]['processes'],
                         self.consumer_keyword(self.stats['consumers'][key]),
                         key, self.stats['consumers'][key]['processed'],
-                        self.stats['consumers'][key]['failed'],
-                        self.stats['consumers'][key]['idle_time'],
-                        self.stats['consumers'][key]['processing_time'],
-                        self.calculate_velocity(self.stats['consumers'][key]))
+                        self.stats['consumers'][key]['failed'])
         if self.poll_data['processes']:
             LOGGER.warning('%i process(es) did not respond with stats in '
                            'time: %r', len(self.poll_data['processes']),
@@ -444,16 +418,16 @@ class MasterControlProgram(state.State):
             LOGGER.warning('Did not receive results from %r',
                            self.poll_data['processes'])
 
-    def process(self, consumer_name, process_name):
+    def process(self, name, process_name):
         """Return the process handle for the given consumer name and process
         name.
 
-        :param str consumer_name: The consumer name from config
+        :param str name: The consumer name from config
         :param str process_name: The automatically assigned process name
         :rtype: rejected.process.Process
 
         """
-        return self.consumers[consumer_name].processes[process_name]
+        return self.consumers[name].processes[process_name]
 
     def process_count(self, name, connection):
         """Return the process count for the given consumer name and connection.
@@ -474,7 +448,7 @@ class MasterControlProgram(state.State):
         """
         count = 0
         for connection in self.consumers[name].connections:
-            count += len(self.consumers[name].connections[connection])
+            count += len(self.consumers[name].connections.get(connection))
         return count
 
     def process_spawn_qty(self, name, connection):

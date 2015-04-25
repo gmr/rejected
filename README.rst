@@ -27,8 +27,8 @@ Documentation
 
 https://rejected.readthedocs.org
 
-Example Consumer
-----------------
+Example Consumers
+-----------------
 .. code:: python
 
     from rejected import consumer
@@ -40,6 +40,39 @@ Example Consumer
     class Test(consumer.Consumer):
         def process(self, message):
             LOGGER.debug('In Test.process: %s' % message.body)
+
+Async Consumer
+^^^^^^^^^^^^^^
+To make a consumer async, you can decorate the `Consumer.prepare` and
+`Consumer.process` methods using Tornado's
+`@gen.coroutine <http://www.tornadoweb.org/en/stable/gen.html#tornado.gen.coroutine>`_.
+Asynchronous consumers to handle multiple messages in the same process, but
+rather allow you to use asynchronous clients like
+`Tornado's <http://tornadoweb.org>`_
+`AsyncHTTPClient <http://www.tornadoweb.org/en/stable/httpclient.html>`_ and the
+`Queries <http://queries.readthedocs.org/en/latest/tornado_session.html>`_
+PostgreSQL library to perform parallel tasks using coroutines.
+
+.. code:: python
+
+    import logging
+
+    from rejected import consumer
+
+    from tornado import gen
+    from tornado import httpclient
+
+
+    class AsyncExampleConsumer(consumer.Consumer):
+
+        @gen.coroutine
+        def process(self):
+            LOGGER.debug('Message: %r', self.body)
+            http_client = httpclient.AsyncHTTPClient()
+            results = yield [http_client.fetch('http://www.github.com'),
+                             http_client.fetch('http://www.reddit.com')]
+            LOGGER.info('Length: %r', [len(r.body) for r in results])
+
 
 Example Configuration
 ---------------------

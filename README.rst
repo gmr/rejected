@@ -20,6 +20,7 @@ Features
 - Smart consumer classes that can automatically decode and deserialize message bodies based upon message headers
 - Metrics logging and submission to statsd
 - Built-in profiling of consumer code
+- Ability to write asynchronous code in consumers allowing for parallel communication with external resources
 
 Documentation
 -------------
@@ -53,6 +54,7 @@ Example Configuration
         enabled: True
         host: localhost
         port: 8125
+        prefix: applications.rejected
       Connections:
         rabbitmq:
           host: localhost

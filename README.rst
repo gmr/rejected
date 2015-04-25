@@ -10,7 +10,7 @@ Rejected runs as a master process with multiple consumer configurations that are
 each run it an isolated process. It has the ability to collect statistical
 data from the consumer processes and report on it.
 
-|Version| |Downloads| |Status| |Coverage| |License|
+|Version| |Downloads| |Status| |License|
 
 Features
 --------
@@ -125,9 +125,6 @@ Available at https://rejected.readthedocs.org/en/latest/history.html
 
 .. |Status| image:: https://travis-ci.org/gmr/rejected.svg?branch=master
    :target: https://travis-ci.org/gmr/rejected
-
-.. |Coverage| image:: https://codecov.io/github/gmr/rejected/coverage.svg?branch=master
-   :target: https://codecov.io/github/gmr/rejected?branch=master
 
 .. |Downloads| image:: https://pypip.in/d/rejected/badge.svg?
    :target: https://pypi.python.org/pypi/rejected

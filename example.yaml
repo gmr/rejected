@@ -7,6 +7,7 @@ Application:
     enabled: True
     host: localhost
     port: 8125
+    prefix: application.rejected
   Connections:
     rabbitmq:
       host: localhost
@@ -21,13 +22,26 @@ Application:
       consumer: rejected.example.ExampleConsumer
       connections: [rabbitmq]
       qty: 1
-      queue: generated_messages
+      queue: test
       dynamic_qos: True
       ack: True
       max_errors: 100
       config:
         foo: True
         bar: baz
+    example2:
+      consumer: rejected.example.ExampleConsumer
+      connections: [rabbitmq]
+      qty: 2
+      queue: test
+      dynamic_qos: True
+      ack: True
+      max_errors: 100
+      config:
+        foo: True
+        bar: baz
+
+
 
 Daemon:
   user: rejected
@@ -38,7 +52,7 @@ Logging:
   version: 1
   formatters:
     verbose:
-      format: "%(levelname) -10s %(asctime)s %(process)-6d %(processName) -25s %(name) -30s %(funcName) -30s: %(message)s"
+      format: "%(levelname) -10s %(asctime)s %(process)-6d %(processName) -15s %(name) -20s %(funcName) -20s: %(message)s"
       datefmt: "%Y-%m-%d %H:%M:%S"
     syslog:
       format: "%(levelname)s <PID %(process)d:%(processName)s> %(name)s.%(funcName)s(): %(message)s"
@@ -62,10 +76,6 @@ Logging:
     rejected:
       level: INFO
       propagate: true
-      handlers: [console]
-    rejected.example:
-      level: INFO
-      propagate: false
       handlers: [console]
   ROOT:
     level: CRITICAL

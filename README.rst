@@ -43,8 +43,10 @@ Example Consumers
 
 Async Consumer
 ^^^^^^^^^^^^^^
-To make a consumer async, you can decorate the `Consumer.prepare` and
-`Consumer.process` methods using Tornado's
+To make a consumer async, you can decorate the
+`Consumer.prepare <http://rejected.readthedocs.org/en/latest/api_consumer.html#rejected.consumer.Consumer.prepare>`_
+and `Consumer.process <http://rejected.readthedocs.org/en/latest/api_consumer.html#rejected.consumer.Consumer.process>`_
+methods using Tornado's
 `@gen.coroutine <http://www.tornadoweb.org/en/stable/gen.html#tornado.gen.coroutine>`_.
 Asynchronous consumers to handle multiple messages in the same process, but
 rather allow you to use asynchronous clients like

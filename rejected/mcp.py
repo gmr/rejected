@@ -281,22 +281,23 @@ class MasterControlProgram(state.State):
             LOGGER.info('Did not receive any stats data from children')
             return
 
-        LOGGER.info('%i total %s have processed %i messages with %i errors',
-                    self.stats['counts']['processes'],
-                    self.consumer_keyword(self.stats['counts']),
-                    self.stats['counts']['processed'],
-                    self.stats['counts']['failed'])
-        for key in self.stats['consumers'].keys():
-            LOGGER.info('%i %s for %s have processed %i messages with %i '
-                        'errors',
-                        self.stats['consumers'][key]['processes'],
-                        self.consumer_keyword(self.stats['consumers'][key]),
-                        key, self.stats['consumers'][key]['processed'],
-                        self.stats['consumers'][key]['failed'])
         if self.poll_data['processes']:
-            LOGGER.warning('%i process(es) did not respond with stats in '
-                           'time: %r', len(self.poll_data['processes']),
+            LOGGER.warning('%i process(es) did not respond with stats: %r',
+                           len(self.poll_data['processes']),
                            self.poll_data['processes'])
+
+        if self.stats['counts']['processes'] > 1:
+            LOGGER.info('%i consumers processed %i messages with %i errors',
+                        self.stats['counts']['processes'],
+                        self.stats['counts']['processed'],
+                        self.stats['counts']['failed'])
+
+        for key in self.stats['consumers'].keys():
+            LOGGER.info('%i %s %s processed %i messages with %i errors',
+                        self.stats['consumers'][key]['processes'], key,
+                        self.consumer_keyword(self.stats['consumers'][key]),
+                        self.stats['consumers'][key]['processed'],
+                        self.stats['consumers'][key]['failed'])
 
     def new_consumer(self, config):
         """Return a consumer dict for the given name and configuration.

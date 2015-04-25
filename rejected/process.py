@@ -4,6 +4,7 @@ connection state and collects stats about the consuming process.
 
 """
 from pika import exceptions
+from tornado import gen
 import importlib
 import logging
 import math
@@ -347,7 +348,24 @@ class Process(multiprocessing.Process, state.State):
                 LOGGER.error(line)
             return
 
-    def invoke_consumer(self, message):
+    def on_processed(self, start_time, method, result):
+        LOGGER.debug('Post invoke consumer')
+        self.stats.add_timing(self.TIME_SPENT, time.time() - start_time)
+
+        if not result:
+            LOGGER.debug('Bypassing ack due to False return consumer')
+            return
+
+        self.stats.incr(self.PROCESSED)
+        if self.ack:
+            self.ack_message(method.delivery_tag)
+        if self.is_waiting_to_shutdown:
+            self.on_ready_to_stop()
+        else:
+            self.reset_state()
+
+    @gen.engine
+    def invoke_consumer(self, method, message):
         """Wrap the actual processor processing bits
 
         :param Message message: Message to process
@@ -355,44 +373,52 @@ class Process(multiprocessing.Process, state.State):
 
         """
         self.start_message_processing()
+        start_time = time.time()
 
         # Try and process the message
         try:
-            LOGGER.debug('Processing message')
-            self.consumer._execute(message)
+            result = self.consumer._execute(message)
+            yield result
+            possible_exception = result.exception()
+            if possible_exception:
+                raise possible_exception
+            self.on_processed(start_time, method, True)
+
         except KeyboardInterrupt:
+            LOGGER.debug('CTRL-C')
             self.reject(message.delivery_tag, True)
             self.stop()
-            return False
+            self.on_processed(start_time, method, False)
 
         except exceptions.ChannelClosed as error:
             LOGGER.critical('RabbitMQ closed the channel: %r', error)
             self.reconnect()
-            return False
+            self.on_processed(start_time, method, False)
 
         except exceptions.ConnectionClosed as error:
             LOGGER.critical('RabbitMQ closed the connection: %r', error)
             self.reconnect()
-            return False
+            self.on_processed(start_time, method, False)
 
         except consumer.ConsumerException as error:
+            LOGGER.debug('Consumer Exception')
             self.record_exception(error, True, sys.exc_info())
             self.reject(message.delivery_tag, True)
             self.processing_error()
-            return False
+            self.on_processed(start_time, method, False)
 
         except consumer.MessageException as error:
+            LOGGER.debug('Message Exception')
             self.record_exception(error, True, sys.exc_info())
             self.reject(message.delivery_tag, False)
-            return False
+            self.on_processed(start_time, method, False)
 
         except Exception as error:
+            LOGGER.debug('Exception')
             self.record_exception(error, True, sys.exc_info())
             self.reject(message.delivery_tag, True)
             self.processing_error()
-            return False
-
-        return True
+            self.on_processed(start_time, method, False)
 
     @property
     def is_processing(self):
@@ -537,32 +563,11 @@ class Process(multiprocessing.Process, state.State):
             LOGGER.critical('Received a message while in state: %s',
                             self.state_description)
             return self.reject(method.delivery_tag, True)
-
         self.set_state(self.STATE_PROCESSING)
-
-        LOGGER.debug('Received message #%s', method.delivery_tag)
         message = data.Message(channel, method, properties, body)
         if method.redelivered:
             self.stats.incr(self.REDELIVERED)
-
-        LOGGER.debug('Invoking consumer')
-
-        start_time = time.time()
-        result = self.invoke_consumer(message)
-        self.stats.add_timing(self.TIME_SPENT, time.time() - start_time)
-
-        if not result:
-            LOGGER.debug('Bypassing ack due to False return consumer')
-            return
-
-        LOGGER.debug('Post invoke consumer')
-
-        self.stats.incr(self.PROCESSED)
-        if self.ack:
-            self.ack_message(method.delivery_tag)
-        if self.is_waiting_to_shutdown:
-            return self.on_ready_to_stop()
-        self.reset_state()
+        self.invoke_consumer(method, message)
 
     def processing_error(self):
         """Called when message processing failure happens due to a

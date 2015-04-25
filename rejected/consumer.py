@@ -371,6 +371,7 @@ class Consumer(object):
 
     def _clear(self):
         """Resets all assigned data for the current message."""
+        self._finished = False
         self._message = None
         self._message_body = None
 
@@ -384,8 +385,8 @@ class Consumer(object):
 
         """
         LOGGER.debug('Received: %r', message_in)
+        self._clear()
         self._message = message_in
-        self._message_body = None
 
         # Validate the message type if the child sets _MESSAGE_TYPE
         if self.MESSAGE_TYPE and self.MESSAGE_TYPE != self.message_type:
@@ -393,7 +394,7 @@ class Consumer(object):
                          self.message_type)
 
             # Should the message be dropped or returned to the broker?
-            if self.DROP_INVALID_MESSAGES:
+            if not self.DROP_INVALID_MESSAGES:
                 LOGGER.debug('Dropping the invalid message')
                 return
             else:
@@ -407,16 +408,12 @@ class Consumer(object):
         if self._finished:
             return
 
-        # Let the child object process the message
         result = self.process()
         if concurrent.is_future(result):
             result = yield result
         if result is not None:
             raise TypeError("Expected None, got %r" % result)
-
-        result = self.finish()
-        if concurrent.is_future(result):
-            result = yield result
+        self.finish()
 
     def _set_channel(self, channel):
         """Assign the _channel attribute to the channel that was passed in.

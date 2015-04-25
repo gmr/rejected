@@ -76,7 +76,7 @@ Logging:
       handlers: [console]
   ROOT:
     level: CRITICAL
-    propagate: false
+    propagate: true
     handlers: [console]
   disable_existing_loggers: true
   incremental: false

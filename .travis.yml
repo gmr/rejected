@@ -1,3 +1,4 @@
+sudo: false
 language: python
 python:
   - 2.6
@@ -11,7 +12,6 @@ install:
 script: nosetests --with-coverage --cover-package=rejected
 after_success:
   - codecov
-  - coveralls
 services:
   - rabbitmq
 deploy:
@@ -24,3 +24,6 @@ deploy:
     all_branches: true
   password:
     secure: "QNndN99rD5boB/Sg3I0CzjkFUF1JmGrsQKZ7ONiA+obUWQDqOmggUoPEs1zN8xIExDcM4tPhlCQX0QiYJrKdLQwWiClvKo1wpYUxVm0s/W8SqvhV3IK9VxhMrbZUkmksO48TH4YKav06rEkVxke9g3U92XUJZ6cRAnYUKrjMYaQ="
+cache:
+  directories:
+    - $HOME/.pip-cache/

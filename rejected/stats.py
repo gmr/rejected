@@ -35,7 +35,7 @@ class Stats(object):
         return self.counter.get(item)
 
     def diff(self, item):
-        return self.counter[item] - self.previous[item]
+        return self.counter.get(item, 0) - self.previous.get(item, 0)
 
     def incr(self, key, value=1):
         self.counter[key] += value

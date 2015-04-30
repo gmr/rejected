@@ -39,4 +39,4 @@ setup(name='rejected',
       install_requires=install_requires,
       tests_require=['mock', 'nose', 'unittest2'],
       entry_points=dict(console_scripts=['rejected=rejected.controller:main']),
-      zip_safe=True)
+      zip_safe=False)

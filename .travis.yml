@@ -7,7 +7,7 @@ before_install:
   - pip install codecov
 install:
   - if [[ $TRAVIS_PYTHON_VERSION == '2.6' ]]; then pip install backport_collections unittest2 importlib; fi
-  - "pip install -r requirements.txt"
+  - "python setup.py install"
   - "pip install -r dev-requirements.txt"
 script: nosetests --with-coverage --cover-package=rejected
 after_success:

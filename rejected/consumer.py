@@ -397,7 +397,7 @@ class Consumer(object):
                 LOGGER.debug('Dropping the invalid message')
                 return
             else:
-                raise ConsumerException('Invalid message type')
+                raise MessageException('Invalid message type')
 
         result = self.prepare()
         if concurrent.is_future(result):

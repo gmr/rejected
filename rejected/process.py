@@ -498,7 +498,7 @@ class Process(multiprocessing.Process, state.State):
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
 
         # If the connection is still around, close it
-        if self.connection.is_open:
+        if self.connection and self.connection.is_open:
             LOGGER.debug('Closing connection to RabbitMQ')
             self.connection.close()
 

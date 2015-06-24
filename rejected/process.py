@@ -116,7 +116,6 @@ class Process(multiprocessing.Process, state.State):
         self.message_connection_id = None
         self.max_error_count = self.MAX_ERROR_COUNT
         self.max_frame_size = spec.FRAME_MAX_SIZE
-        self.qos_prefetch = None
         self.queue_name = None
         self.prepend_path = None
         self.state = self.STATE_INITIALIZING
@@ -156,58 +155,6 @@ class Process(multiprocessing.Process, state.State):
         """
         LOGGER.debug('Adding connection close callback')
         self.connection.add_on_close_callback(self.on_connection_closed)
-
-    @property
-    def base_qos_prefetch(self):
-        """Return the base, configured QoS prefetch value.
-
-        :rtype: int
-
-        """
-        return self.config.get('qos_prefetch', self.QOS_PREFETCH_COUNT)
-
-    def calc_qos_prefetch(self, values):
-        """Determine if the channel should use the dynamic QoS value, stay at
-        the same QoS or use the default QoS.
-
-        :rtype: bool or int
-
-        """
-        if not self.last_stats_time:
-            return
-
-        velocity = self.calc_velocity(values)
-        qos_prefetch = int(math.ceil(velocity *
-                                     float(self.QOS_PREFETCH_MULTIPLIER)))
-
-        # Don't change anything
-        if qos_prefetch == self.qos_prefetch:
-            LOGGER.debug('No change in QoS prefetch calculation of %i',
-                         self.qos_prefetch)
-            return False
-
-        # If calculated QoS exceeds max
-        if qos_prefetch > self.QOS_MAX:
-            LOGGER.debug('Hit QoS Max ceiling of %i', self.QOS_MAX)
-            return self.set_qos_prefetch(self.QOS_MAX)
-
-        # Set to base value if QoS calc is < than the base
-        if self.base_qos_prefetch > qos_prefetch:
-            LOGGER.debug('QoS calculation is lower than base: %i < %i',
-                         qos_prefetch, self.base_qos_prefetch)
-            return self.set_qos_prefetch()
-
-        # Increase the QoS setting
-        if qos_prefetch > self.qos_prefetch:
-            LOGGER.debug('QoS calculation is higher than previous: %i > %i',
-                         qos_prefetch, self.qos_prefetch)
-            return self.set_qos_prefetch(qos_prefetch)
-
-        # Lower the QoS value based upon the processed qty
-        if qos_prefetch < self.qos_prefetch:
-            LOGGER.debug('QoS calculation is lower than previous: %i < %i',
-                         qos_prefetch, self.qos_prefetch)
-            return self.set_qos_prefetch(qos_prefetch)
 
     def calc_velocity(self, values):
         """Return the message consuming velocity for the process.
@@ -308,8 +255,7 @@ class Process(multiprocessing.Process, state.State):
                                          socket_timeout=10,
                                          heartbeat_interval=heartbeat_interval)
 
-    @staticmethod
-    def get_consumer(cfg):
+    def get_consumer(self, cfg):
         """Import and create a new instance of the configured message consumer.
 
         :param dict cfg: The named consumer section of the configuration
@@ -333,14 +279,14 @@ class Process(multiprocessing.Process, state.State):
         else:
             LOGGER.info('Creating consumer %s', cfg['consumer'])
 
-        kwargs = {}
+        kwargs = {'process': self}
         if 'config' in cfg:
             kwargs['configuration'] = cfg.get('config', dict())
 
         try:
             return consumer_(**kwargs)
         except TypeError:
-            return consumer_(cfg.get('config', dict()))
+            return consumer_(cfg.get('config', dict()), process=self)
         except Exception as error:
             LOGGER.error('Error creating the consumer "%s": %s',
                          cfg['consumer'], error)
@@ -349,22 +295,6 @@ class Process(multiprocessing.Process, state.State):
             for line in lines:
                 LOGGER.error(line)
             return
-
-    def on_processed(self, start_time, method, result):
-        LOGGER.debug('Post invoke consumer')
-        self.stats.add_timing(self.TIME_SPENT, time.time() - start_time)
-
-        if not result:
-            LOGGER.debug('Bypassing ack due to False return consumer')
-            return
-
-        self.stats.incr(self.PROCESSED)
-        if self.ack:
-            self.ack_message(method.delivery_tag)
-        if self.is_waiting_to_shutdown:
-            self.on_ready_to_stop()
-        else:
-            self.reset_state()
 
     @gen.engine
     def invoke_consumer(self, method, message):
@@ -378,49 +308,8 @@ class Process(multiprocessing.Process, state.State):
         start_time = time.time()
 
         # Try and process the message
-        try:
-            result = self.consumer._execute(message)
-            yield result
-            possible_exception = result.exception()
-            if possible_exception:
-                raise possible_exception
-            self.on_processed(start_time, method, True)
-
-        except KeyboardInterrupt:
-            LOGGER.debug('CTRL-C')
-            self.reject(message.delivery_tag, True)
-            self.stop()
-            self.on_processed(start_time, method, False)
-
-        except exceptions.ChannelClosed as error:
-            LOGGER.critical('RabbitMQ closed the channel: %r', error)
-            self.reconnect()
-            self.on_processed(start_time, method, False)
-
-        except exceptions.ConnectionClosed as error:
-            LOGGER.critical('RabbitMQ closed the connection: %r', error)
-            self.reconnect()
-            self.on_processed(start_time, method, False)
-
-        except consumer.ConsumerException as error:
-            LOGGER.debug('Consumer Exception')
-            self.record_exception(error, True, sys.exc_info())
-            self.reject(message.delivery_tag, True)
-            self.processing_error()
-            self.on_processed(start_time, method, False)
-
-        except consumer.MessageException as error:
-            LOGGER.debug('Message Exception')
-            self.record_exception(error, True, sys.exc_info())
-            self.reject(message.delivery_tag, False)
-            self.on_processed(start_time, method, False)
-
-        except Exception as error:
-            LOGGER.debug('Exception')
-            self.record_exception(error, True, sys.exc_info())
-            self.reject(message.delivery_tag, True)
-            self.processing_error()
-            self.on_processed(start_time, method, False)
+        result = yield self.consumer._execute(message)
+        self.on_processed(start_time, method, result)
 
     @property
     def is_processing(self):
@@ -486,6 +375,45 @@ class Process(multiprocessing.Process, state.State):
         self.add_on_connection_close_callback()
         self.open_channel()
 
+    def on_processed(self, start_time, method, result):
+        self.stats.add_timing(self.TIME_SPENT, time.time() - start_time)
+
+        if result is False:
+            LOGGER.debug('Bypassing ack due to False return consumer')
+            self.reject(method.delivery_tag, True)
+            self.on_processing_error()
+            return
+
+        self.stats.incr(self.PROCESSED)
+
+        # Ack if the msg wasn't rejected by MessageException and self.ack = True
+        if result and self.ack:
+            self.ack_message(method.delivery_tag)
+
+        if self.is_waiting_to_shutdown:
+            return self.on_ready_to_stop()
+
+        self.reset_state()
+
+    def on_processing_error(self):
+        """Called when message processing failure happens due to a
+        ConsumerException or an unhandled exception.
+
+        """
+        duration = time.time() - self.last_failure
+        if duration > self.MAX_ERROR_WINDOW:
+            LOGGER.info('Resetting failure window, %i seconds since last',
+                        duration)
+            self.reset_error_counter()
+        self.stats.incr(self.ERROR)
+        self.last_failure = time.time()
+        if self.too_many_errors:
+            LOGGER.critical('Error threshold exceeded (%i), reconnecting',
+                            self.stats[self.ERROR])
+            self.cancel_consumer_with_rabbitmq()
+            self.close_connection()
+            self.reconnect()
+
     def on_ready_to_stop(self):
 
         # Set the state to shutting down if it wasn't set as that during loop
@@ -524,8 +452,6 @@ class Process(multiprocessing.Process, state.State):
         """
         values = self.stats.report()
         self.stats_queue.put(values, True)
-        if self.is_processing or self.is_idle:
-            self.calc_qos_prefetch(values)
         self.last_stats_time = time.time()
         signal.siginterrupt(signal.SIGPROF, False)
 
@@ -553,25 +479,6 @@ class Process(multiprocessing.Process, state.State):
             self.stats.incr(self.REDELIVERED)
         self.invoke_consumer(method, message)
 
-    def processing_error(self):
-        """Called when message processing failure happens due to a
-        ConsumerException or an unhandled exception.
-
-        """
-        duration = time.time() - self.last_failure
-        if duration > self.MAX_ERROR_WINDOW:
-            LOGGER.info('Resetting failure window, %i seconds since last',
-                        duration)
-            self.reset_error_counter()
-        self.stats.incr(self.ERROR)
-        self.last_failure = time.time()
-        if self.too_many_errors:
-            LOGGER.critical('Error threshold exceeded (%i), reconnecting',
-                            self.stats[self.ERROR])
-            self.cancel_consumer_with_rabbitmq()
-            self.close_connection()
-            self.reconnect()
-
     @property
     def profile_file(self):
         """Return the full path to write the cProfile data
@@ -587,6 +494,15 @@ class Process(multiprocessing.Process, state.State):
                                       os.getpid(),
                                       self._kwargs['consumer_name'])
         return None
+
+    @property
+    def qos_prefetch(self):
+        """Return the base, configured QoS prefetch value.
+
+        :rtype: int
+
+        """
+        return self.config.get('qos_prefetch', self.QOS_PREFETCH_COUNT)
 
     def reconnect(self):
         """Reconnect to RabbitMQ after sleeping for _RECONNECT_DELAY"""
@@ -711,19 +627,8 @@ class Process(multiprocessing.Process, state.State):
             except KeyboardInterrupt:
                 LOGGER.warning('CTRL-C while waiting for clean shutdown')
 
-    def set_qos_prefetch(self, value=None):
-        """Set the QOS Prefetch count for the channel.
-
-        :param int value: The value to set the prefetch to
-
-        """
-        qos_prefetch = int(value or self.base_qos_prefetch)
-        if qos_prefetch != self.qos_prefetch:
-            self.qos_prefetch = qos_prefetch
-            LOGGER.debug('Setting the QOS Prefetch to %i', qos_prefetch)
-            self.channel.basic_qos(self.on_qos_set, 0, qos_prefetch, False)
-
-    def on_qos_set(self, frame):
+    @staticmethod
+    def on_qos_set(frame):
         """Invoked by pika when the QoS is set"""
         LOGGER.debug("QoS was set: %r", frame)
 
@@ -792,7 +697,7 @@ class Process(multiprocessing.Process, state.State):
             LOGGER.info('Consumer does not support channel assignment')
 
         # Setup QoS, Send a Basic.Recover and then Basic.Consume
-        self.set_qos_prefetch()
+        self.channel.basic_qos(self.on_qos_set, 0, self.qos_prefetch, False)
         self.channel.basic_recover(requeue=True)
         self.channel.basic_consume(consumer_callback=self.process,
                                    queue=self.queue_name,

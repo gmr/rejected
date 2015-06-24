@@ -45,6 +45,8 @@ import warnings
 import yaml
 import zlib
 
+from pika import exceptions
+
 LOGGER = logging.getLogger(__name__)
 
 BS4_MIME_TYPES = ('text/html', 'text/xml')
@@ -77,17 +79,19 @@ class Consumer(object):
     DROP_INVALID_MESSAGES = False
     MESSAGE_TYPE = None
 
-    def __init__(self, settings):
+    def __init__(self, settings, process):
         """Creates a new instance of a Consumer class. To perform
         initialization tasks, extend Consumer.initialize
 
         :param dict settings: The configuration from rejected
+        :param rejected.process.Process: The controlling process
 
         """
         self._channel = None
         self._finished = False
         self._message = None
         self._message_body = None
+        self._process = process
         self._settings = settings
         self._statsd = None
 
@@ -389,30 +393,60 @@ class Consumer(object):
 
         # Validate the message type if the child sets _MESSAGE_TYPE
         if self.MESSAGE_TYPE and self.MESSAGE_TYPE != self.message_type:
-            LOGGER.error('Received a non-supported message type: %s',
-                         self.message_type)
-
+            LOGGER.warning('Received a non-supported message type: %s',
+                           self.message_type)
             # Should the message be dropped or returned to the broker?
-            if not self.DROP_INVALID_MESSAGES:
-                LOGGER.debug('Dropping the invalid message')
-                return
-            else:
-                raise MessageException('Invalid message type')
+            if self.DROP_INVALID_MESSAGES:
+                self._process.reject(message_in.delivery_tag, False)
+            raise gen.Return(True)
 
         result = self.prepare()
         if concurrent.is_future(result):
-            result = yield result
-        if result is not None:
-            raise TypeError("Expected None, got %r" % result)
+            yield result
         if self._finished:
-            return
+            raise gen.Return(True)
 
-        result = self.process()
-        if concurrent.is_future(result):
-            result = yield result
-        if result is not None:
-            raise TypeError("Expected None, got %r" % result)
+        try:
+            result = self.process()
+            if concurrent.is_future(result):
+                yield result
+        except KeyboardInterrupt:
+            LOGGER.debug('CTRL-C')
+            self._process.reject(message_in.delivery_tag, True)
+            self._process.stop()
+            raise gen.Return(False)
+
+        except exceptions.ChannelClosed as error:
+            LOGGER.critical('Channel closed while processing %s: %s',
+                            message_in.delivery_tag, error)
+            self._process.reconnect()
+            raise gen.Return(False)
+
+        except exceptions.ConnectionClosed as error:
+            LOGGER.critical('Connection closed while processing %s: %s',
+                            message_in.delivery_tag, error)
+            self._process.reconnect()
+            raise gen.Return(False)
+
+        except ConsumerException as error:
+            LOGGER.error('Consumer Exception processing delivery %s: %s',
+                         message_in.delivery_tag, error)
+            raise gen.Return(False)
+
+        except MessageException as error:
+            LOGGER.error('Message Exception processing delivery %s: %s',
+                         message_in.delivery_tag, error)
+            self._process.reject(message_in.delivery_tag, False)
+            raise gen.Return(None)
+
+        except Exception as error:
+            LOGGER.exception('Exception processing delivery %s: %s',
+                             message_in.delivery_tag, error)
+            self._process.record_exception(error, True, sys.exc_info())
+            raise gen.Return(False)
+
         self.finish()
+        raise gen.Return(True)
 
     def _set_channel(self, channel):
         """Assign the _channel attribute to the channel that was passed in.
@@ -569,10 +603,6 @@ class SmartConsumer(Consumer):
     a :py:class:`ConsumerException` is raised.
 
     """
-
-    def __init__(self, settings):
-        super(SmartConsumer, self).__init__(settings)
-
     @property
     def body(self):
         """Return the message body, unencoded if needed,

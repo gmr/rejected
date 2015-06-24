@@ -3,11 +3,9 @@ Consumer process management. Imports consumer code, manages RabbitMQ
 connection state and collects stats about the consuming process.
 
 """
-from pika import exceptions
 from tornado import gen
 import importlib
 import logging
-import math
 import multiprocessing
 import os
 from os import path
@@ -27,7 +25,6 @@ import traceback
 from rejected import __version__
 from rejected import consumer
 from rejected import data
-from rejected import NullHandler
 from rejected import state
 from rejected import stats
 
@@ -594,8 +591,6 @@ class Process(multiprocessing.Process, state.State):
 
     def run(self):
         """Start the consumer"""
-        logger = logging.getLogger()
-        logger.addHandler(NullHandler())
         if self.profile_file:
             LOGGER.info('Profiling to %s', self.profile_file)
             profile.runctx('self._run()', globals(), locals(),

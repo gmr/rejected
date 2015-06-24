@@ -709,7 +709,7 @@ class Process(multiprocessing.Process, state.State):
             exit(1)
 
         # Setup the Sentry client
-        if raven and cfg['sentry_dsn']:
+        if raven and 'sentry_dsn' in cfg:
             self.sentry_client = raven.Client(cfg['sentry_dsn'])
 
         # Setup the stats counter instance

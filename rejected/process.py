@@ -621,7 +621,6 @@ class Process(multiprocessing.Process, state.State):
         or shutting down based upon the current state.
 
         """
-        self.delivery_time = None
         self.message = None
         if self.is_waiting_to_shutdown:
             self.set_state(self.STATE_SHUTTING_DOWN)

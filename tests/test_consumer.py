@@ -18,34 +18,34 @@ class ConsumerInitializationTests(unittest.TestCase):
 
     def test_configuration_is_assigned(self):
         cfg = {'foo': 'bar'}
-        obj = consumer.Consumer(cfg)
+        obj = consumer.Consumer(cfg, None)
         self.assertDictEqual(obj._settings, cfg)
 
     def test_channel_is_none(self):
-        obj = consumer.Consumer({})
+        obj = consumer.Consumer({}, None)
         self.assertIsNone(obj._channel)
 
     def test_message_is_none(self):
-        obj = consumer.Consumer({})
+        obj = consumer.Consumer({}, None)
         self.assertIsNone(obj._message)
 
     def test_initialize_is_invoked(self):
         with mock.patch('rejected.consumer.Consumer.initialize') as init:
-            consumer.Consumer({})
+            consumer.Consumer({}, None)
             init.assert_called_once_with()
 
 
 class ConsumerDefaultProcessTests(unittest.TestCase):
 
     def test_process_raises_exception(self):
-        obj = consumer.Consumer({})
+        obj = consumer.Consumer({}, None)
         self.assertRaises(NotImplementedError, obj.process)
 
 
 class ConsumerSetChannelTests(unittest.TestCase):
 
     def test_set_channel_assigns_to_channel(self):
-        obj = consumer.Consumer({})
+        obj = consumer.Consumer({}, None)
         channel = mock.Mock()
         obj._set_channel(channel)
         self.assertEqual(obj._channel, channel)
@@ -59,7 +59,7 @@ class TestConsumer(consumer.Consumer):
 class ConsumerReceiveTests(unittest.TestCase):
 
     def setUp(self):
-        self.obj = TestConsumer({})
+        self.obj = TestConsumer({}, None)
         self.message = data.Message(mocks.CHANNEL, mocks.METHOD,
                                     mocks.PROPERTIES, mocks.BODY)
 
@@ -94,7 +94,7 @@ class ConsumerPropertyTests(unittest.TestCase):
         self.config = {'foo': 'bar', 'baz': 1, 'qux': True}
         self.message = data.Message(mocks.CHANNEL, mocks.METHOD,
                                     mocks.PROPERTIES, mocks.BODY)
-        self.obj = TestConsumer(self.config)
+        self.obj = TestConsumer(self.config, None)
         yield self.obj._execute(self.message)
 
     def test_app_id_property(self):
@@ -169,7 +169,7 @@ class TestSmartConsumerWithJSON(unittest.TestCase):
         self.body = {'foo': 'bar', 'baz': 1, 'qux': True}
         self.message = data.Message(mocks.CHANNEL, mocks.METHOD,
                                     mocks.PROPERTIES, json.dumps(self.body))
-        self.obj = TestSmartConsumer({})
+        self.obj = TestSmartConsumer({}, None)
         self.obj._execute(self.message)
 
     def test_message_body_property(self):

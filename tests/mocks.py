@@ -1,8 +1,8 @@
 import mock
 from pika import spec
-from pika import frame
 import time
 
+__version__ = '99.99.99'
 
 CHANNEL = mock.Mock('pika.channel.Channel')
 METHOD = spec.Basic.Deliver('ctag0', 1, False, 'exchange', 'routing_key')
@@ -24,10 +24,11 @@ BODY = '{"qux": true, "foo": "bar", "baz": 1}'
 
 class MockConsumer(object):
 
-    def __init__(self, configuration):
+    def __init__(self, configuration, process):
         """Creates a new instance of a Mock Consumer class. To perform
         initialization tasks, extend Consumer._initialize
         :param dict configuration: The configuration from rejected
         """
         # Carry the configuration for use elsewhere
         self._configuration = configuration
+        self._process = process

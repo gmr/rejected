@@ -19,6 +19,7 @@ from rejected import process
 from rejected import __version__
 
 from . import test_state
+from . import mocks
 
 
 class TestImportNamspacedClass(unittest.TestCase):
@@ -191,15 +192,15 @@ class TestProcess(test_state.TestState):
         self.assertIsNone(self._obj.get_consumer(cfg))
 
     def test_get_consumer_version_output(self):
-        config = {'consumer': 'optparse.OptionParser'}
+        config = {'consumer': 'tests.mocks.MockConsumer'}
         with patch('logging.Logger.info') as info:
-            import optparse
             self._obj.get_consumer(config)
             info.assert_called_with('Creating consumer %s v%s',
-                                    config['consumer'], optparse.__version__)
+                                    config['consumer'],
+                                    mocks.__version__)
 
     def test_get_consumer_no_version_output(self):
-        config = {'consumer': 'StringIO.StringIO'}
+        config = {'consumer': 'rejected.consumer.Consumer'}
         with patch('logging.Logger.info') as info:
             self._obj.get_consumer(config)
             info.assert_called_with('Creating consumer %s', config['consumer'])
@@ -272,13 +273,13 @@ class TestProcess(test_state.TestState):
         del args['cfg']['Consumers']['MockConsumer']['qos_prefetch']
         mock_process = self.new_process()
         mock_process.setup(**args)
-        self.assertEqual(mock_process.base_qos_prefetch,
+        self.assertEqual(mock_process.qos_prefetch,
                          process.Process.QOS_PREFETCH_COUNT)
 
     def test_setup_prefetch_count_with_config(self):
         mock_process = self.mock_setup()
         self.assertEqual(
-            mock_process.base_qos_prefetch,
+            mock_process.qos_prefetch,
             self.config['Consumers']['MockConsumer']['qos_prefetch'])
 
     def test_setup_connection_arguments(self):

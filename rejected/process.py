@@ -6,21 +6,29 @@ connection state and collects stats about the consuming process.
 from tornado import gen
 import importlib
 import logging
+import math
 import multiprocessing
 import os
+import pkg_resources
 from os import path
-import pika
 try:
     import cProfile as profile
 except ImportError:
     import profile
-from pika import spec
-from pika.adapters import tornado_connection
+import re
 import signal
 import sys
 import time
-from tornado import ioloop
 import traceback
+
+from tornado import ioloop
+import pika
+try:
+    import raven
+except ImportError:
+    raven = None
+from pika import spec
+from pika.adapters import tornado_connection
 
 from rejected import __version__
 from rejected import consumer
@@ -29,6 +37,8 @@ from rejected import state
 from rejected import stats
 
 LOGGER = logging.getLogger(__name__)
+
+URI_RE = re.compile(r'^[\w\+\-]+://.*:(\w+)@.*')
 
 
 def import_consumer(value):
@@ -105,16 +115,19 @@ class Process(multiprocessing.Process, state.State):
         self.connections = None
         self.consumer = None
         self.consumer_name = None
+        self.delivery_time = None
         self.dynamic_qos = True
         self.ioloop = None
         self.last_failure = 0
         self.last_stats_time = None
         self.logging_config = dict()
+        self.message = None
         self.message_connection_id = None
         self.max_error_count = self.MAX_ERROR_COUNT
         self.max_frame_size = spec.FRAME_MAX_SIZE
         self.queue_name = None
         self.prepend_path = None
+        self.sentry_client = None
         self.state = self.STATE_INITIALIZING
         self.state_start = time.time()
         self.stats = None
@@ -293,20 +306,41 @@ class Process(multiprocessing.Process, state.State):
                 LOGGER.error(line)
             return
 
+    def get_module_data(self):
+        modules = {}
+        for module_name in sys.modules.keys():
+            module = sys.modules[module_name]
+            if hasattr(module, '__version__'):
+                modules[module_name] = module.__version__
+            elif hasattr(module, 'version'):
+                modules[module_name] = module.version
+            else:
+                try:
+                    version = self.get_version(module_name)
+                    if version:
+                        modules[module_name] = version
+                except Exception:
+                    pass
+        return modules
+
+    @staticmethod
+    def get_version(module_name):
+        try:
+            return pkg_resources.get_distribution(module_name).version
+        except pkg_resources.DistributionNotFound:
+            return None
+
     @gen.engine
-    def invoke_consumer(self, method, message):
+    def invoke_consumer(self):
         """Wrap the actual processor processing bits
 
+        :param pika.frame.Method method: The Basic.Deliver method frame
         :param Message message: Message to process
-        :raises: consumer.ConsumerException
 
         """
         self.start_message_processing()
-        start_time = time.time()
-
-        # Try and process the message
-        result = yield self.consumer._execute(message)
-        self.on_processed(start_time, method, result)
+        result = yield self.consumer._execute(self.message)
+        self.on_processed(result)
 
     @property
     def is_processing(self):
@@ -372,12 +406,32 @@ class Process(multiprocessing.Process, state.State):
         self.add_on_connection_close_callback()
         self.open_channel()
 
-    def on_processed(self, start_time, method, result):
-        self.stats.add_timing(self.TIME_SPENT, time.time() - start_time)
+    def on_message(self, channel=None, method=None, properties=None, body=None):
+        """Process a message from Rabbit
+
+        :param pika.channel.Channel channel: The channel the message was sent on
+        :param pika.frames.MethodFrame method: The method frame
+        :param pika.spec.BasicProperties properties: The message properties
+        :param str body: The message body
+
+        """
+        self.delivery_time = time.time()
+        if not self.is_idle:
+            LOGGER.critical('Received a message while in state: %s',
+                            self.state_description)
+            return self.reject(method.delivery_tag, True)
+        self.set_state(self.STATE_PROCESSING)
+        self.message = data.Message(channel, method, properties, body)
+        if method.redelivered:
+            self.stats.incr(self.REDELIVERED)
+        self.invoke_consumer()
+
+    def on_processed(self, result):
+        self.stats.add_timing(self.TIME_SPENT, time.time() - self.delivery_time)
 
         if result is False:
             LOGGER.debug('Bypassing ack due to False return consumer')
-            self.reject(method.delivery_tag, True)
+            self.reject(self.message.delivery_tag, True)
             self.on_processing_error()
             return
 
@@ -385,7 +439,7 @@ class Process(multiprocessing.Process, state.State):
 
         # Ack if the msg wasn't rejected by MessageException and self.ack = True
         if result and self.ack:
-            self.ack_message(method.delivery_tag)
+            self.ack_message(self.message.delivery_tag)
 
         if self.is_waiting_to_shutdown:
             return self.on_ready_to_stop()
@@ -410,6 +464,11 @@ class Process(multiprocessing.Process, state.State):
             self.cancel_consumer_with_rabbitmq()
             self.close_connection()
             self.reconnect()
+
+    @staticmethod
+    def on_qos_set(frame):
+        """Invoked by pika when the QoS is set"""
+        LOGGER.debug("QoS was set: %r", frame)
 
     def on_ready_to_stop(self):
 
@@ -456,25 +515,6 @@ class Process(multiprocessing.Process, state.State):
         """Open a channel on the existing open connection to RabbitMQ"""
         LOGGER.debug('Opening a channel on %r', self.connection)
         self.connection.channel(self.on_channel_open)
-
-    def process(self, channel=None, method=None, properties=None, body=None):
-        """Process a message from Rabbit
-
-        :param pika.channel.Channel channel: The channel the message was sent on
-        :param pika.frames.MethodFrame method: The method frame
-        :param pika.spec.BasicProperties properties: The message properties
-        :param str body: The message body
-
-        """
-        if not self.is_idle:
-            LOGGER.critical('Received a message while in state: %s',
-                            self.state_description)
-            return self.reject(method.delivery_tag, True)
-        self.set_state(self.STATE_PROCESSING)
-        message = data.Message(channel, method, properties, body)
-        if method.redelivered:
-            self.stats.incr(self.REDELIVERED)
-        self.invoke_consumer(method, message)
 
     @property
     def profile_file(self):
@@ -545,6 +585,8 @@ class Process(multiprocessing.Process, state.State):
             for offset, line in enumerate(formatted_lines):
                 LOGGER.debug('(%s) %i: %s', error.__class__.__name__, offset,
                              line.strip())
+        if self.sentry_client:
+            self.send_exception_to_sentry(exc_info)
 
     def reject(self, delivery_tag, requeue=True):
         """Reject the message on the broker and log it. We should move this to
@@ -579,6 +621,8 @@ class Process(multiprocessing.Process, state.State):
         or shutting down based upon the current state.
 
         """
+        self.delivery_time = None
+        self.message = None
         if self.is_waiting_to_shutdown:
             self.set_state(self.STATE_SHUTTING_DOWN)
             self.on_ready_to_stop()
@@ -622,10 +666,21 @@ class Process(multiprocessing.Process, state.State):
             except KeyboardInterrupt:
                 LOGGER.warning('CTRL-C while waiting for clean shutdown')
 
-    @staticmethod
-    def on_qos_set(frame):
-        """Invoked by pika when the QoS is set"""
-        LOGGER.debug("QoS was set: %r", frame)
+    def send_exception_to_sentry(self, exc_info):
+        """
+
+        """
+        duration = math.ceil(time.time() - self.delivery_time) * 1000
+        kwargs = {'logger': 'rejected.processs',
+                  'modules': self.get_module_data(),
+                  'extra': {
+                      'consumer': self.consumer_name,
+                      'connection': self.connection_name,
+                      'env': self.strip_uri_passwords(dict(os.environ)),
+                      'message': dict(self.message)},
+                  'time_spent': duration}
+        LOGGER.debug('Sending exception to sentry: %r', kwargs)
+        self.sentry_client.captureException(exc_info, **kwargs)
 
     def setup(self, cfg, consumer_name, connection_name, stats_queue,
               logging_config):
@@ -653,6 +708,10 @@ class Process(multiprocessing.Process, state.State):
             self.set_state(self.STATE_STOPPED)
             exit(1)
 
+        # Setup the Sentry client
+        if raven and cfg['sentry_dsn']:
+            self.sentry_client = raven.Client(cfg['sentry_dsn'])
+
         # Setup the stats counter instance
         self.stats = stats.Stats(self.name, consumer_name, cfg['statsd'] or {})
 
@@ -665,7 +724,6 @@ class Process(multiprocessing.Process, state.State):
 
         # Consumer settings
         self.ack = self.config.get('ack', True)
-        self.dynamic_qos = self.config.get('dynamic_qos', False)
         self.max_error_count = int(self.config.get('max_errors',
                                                    self.MAX_ERROR_COUNT))
         self.max_frame_size = self.config.get('max_frame_size',
@@ -694,7 +752,7 @@ class Process(multiprocessing.Process, state.State):
         # Setup QoS, Send a Basic.Recover and then Basic.Consume
         self.channel.basic_qos(self.on_qos_set, 0, self.qos_prefetch, False)
         self.channel.basic_recover(requeue=True)
-        self.channel.basic_consume(consumer_callback=self.process,
+        self.channel.basic_consume(consumer_callback=self.on_message,
                                    queue=self.queue_name,
                                    no_ack=not self.ack,
                                    consumer_tag=self.name)
@@ -717,6 +775,14 @@ class Process(multiprocessing.Process, state.State):
 
         """
         self.message_connection_id = self.connection_id
+
+    @staticmethod
+    def strip_uri_passwords(values):
+        for key in values.keys():
+            matches = URI_RE.search(values[key])
+            if matches:
+                values[key] = values[key].replace(matches.group(1), '****')
+        return values
 
     def stop(self, signum=None, _frame_unused=None):
         """Stop the consumer from consuming by calling BasicCancel and setting

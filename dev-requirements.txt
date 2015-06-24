@@ -2,3 +2,4 @@ beautifulsoup4
 mock
 nose
 sphinx
+raven

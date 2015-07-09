@@ -40,6 +40,7 @@ import plistlib
 import StringIO as stringio
 import sys
 import time
+import traceback
 import uuid
 import warnings
 import yaml
@@ -445,9 +446,8 @@ class Consumer(object):
             raise gen.Return(data.MESSAGE_DROP)
 
         except Exception as error:
-            LOGGER.exception('Exception processing delivery %s: %s',
-                             message_in.delivery_tag, error)
-            self._process.record_exception(error, True, sys.exc_info())
+            self.log_exception('Exception processing delivery %s: %s',
+                               message_in.delivery_tag, error)
             raise gen.Return(data.MESSAGE_REQUEUE)
 
         self.finish()
@@ -470,6 +470,33 @@ class Consumer(object):
 
         """
         self._statsd = statsd
+
+    def log_exception(self, msg_format, *args, **kwargs):
+        """Customize the logging of uncaught exceptions.
+
+        :param str msg_format: format of message to log with ``LOGGER.error``
+        :param args: positional arguments to pass to ``LOGGER.error``
+        :keyword bool send_to_sentry: if omitted or *truthy*, this keyword
+            will send the captured exception to Sentry (if enabled).
+
+        By default, this method will log the message using
+        :meth:`logging.Logger.error` and send the exception to Sentry.
+        If an exception is currently active, then the traceback will be
+        logged at the debug level.
+
+        """
+        LOGGER.error(msg_format, *args)
+        exc_info = sys.exc_info()
+        if all(exc_info):
+            exc_type, exc_value, tb = exc_info
+            exc_name = exc_type.__name__
+            LOGGER.error('Processor handled %s: %s', exc_name, exc_value)
+            formatted_lines = traceback.format_exception(*exc_info)
+            for offset, line in enumerate(formatted_lines):
+                LOGGER.debug('(%s) %i: %s', exc_name, offset, line.strip())
+
+        if kwargs.get('send_to_sentry', True):
+            self._process.send_exception_to_sentry(exc_info)
 
 
 class PublishingConsumer(Consumer):

@@ -576,30 +576,6 @@ class Process(multiprocessing.Process, state.State):
                                                    self.connection_name)
         self.setup_signal_handlers()
 
-    def record_exception(self, error, handled=False, exc_info=None):
-        """Record an exception
-
-        :param exception error: The exception to record
-        :param bool handled: Was the exception handled
-
-        """
-        self.stats.incr(self.ERROR)
-        if handled:
-            if not isinstance(error, consumer.MessageException):
-                LOGGER.exception('Processor handled %s: %s',
-                                 error.__class__.__name__, error)
-        else:
-            LOGGER.exception('Processor threw an uncaught exception %s: %s',
-                             error.__class__.__name__, error)
-            self.stats.incr(self.UNHANDLED_EXCEPTIONS)
-        if not isinstance(error, consumer.MessageException) and exc_info:
-            formatted_lines = traceback.format_exception(*exc_info)
-            for offset, line in enumerate(formatted_lines):
-                LOGGER.debug('(%s) %i: %s', error.__class__.__name__, offset,
-                             line.strip())
-        if self.sentry_client:
-            self.send_exception_to_sentry(exc_info)
-
     def reject(self, delivery_tag, requeue=True):
         """Reject the message on the broker and log it. We should move this to
          use to nack when Pika supports it in a released version.
@@ -678,9 +654,15 @@ class Process(multiprocessing.Process, state.State):
                 LOGGER.warning('CTRL-C while waiting for clean shutdown')
 
     def send_exception_to_sentry(self, exc_info):
-        """
+        """Send an exception to Sentry if enabled.
+
+        :param tuple exc_info: exception information as returned from
+            :func:`sys.exc_info`
 
         """
+        if not self.sentry_client:
+            return
+
         duration = math.ceil(time.time() - self.delivery_time) * 1000
         kwargs = {'logger': 'rejected.processs',
                   'modules': self.get_module_data(),

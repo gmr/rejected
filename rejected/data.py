@@ -4,6 +4,11 @@ Rejected data objects
 """
 import copy
 
+MESSAGE_ACK = 1
+MESSAGE_DROP = 2
+MESSAGE_REQUEUE = 3
+MESSAGE_INVALID = 4
+
 
 class Data(object):
 

@@ -429,17 +429,29 @@ class Process(multiprocessing.Process, state.State):
     def on_processed(self, result):
         self.stats.add_timing(self.TIME_SPENT, time.time() - self.delivery_time)
 
-        if result is False:
-            LOGGER.debug('Bypassing ack due to False return consumer')
-            self.reject(self.message.delivery_tag, True)
-            self.on_processing_error()
+        if result == data.MESSAGE_DROP:
+            LOGGER.debug('Bypassing ack due to drop return from consumer')
+            self.reject(self.message.delivery_tag, False)
+            self.stats.incr(self.REJECTED)
             return
 
-        self.stats.incr(self.PROCESSED)
+        elif result == data.MESSAGE_INVALID:
+            LOGGER.debug('Bypassing ack due to invalid return from consumer')
+            self.reject(self.message.delivery_tag, False)
+            self.stats.incr(self.REJECTED)
+            return
+
+        elif result == data.MESSAGE_REQUEUE:
+            LOGGER.debug('Bypassing ack due to requeue return from consumer')
+            self.reject(self.message.delivery_tag, True)
+            self.on_processing_error()
+            self.stats.incr(self.REQUEUED)
+            return
 
         # Ack if the msg wasn't rejected by MessageException and self.ack = True
-        if result and self.ack:
+        elif result == data.MESSAGE_ACK and self.ack:
             self.ack_message(self.message.delivery_tag)
+            self.stats.incr(self.PROCESSED)
 
         if self.is_waiting_to_shutdown:
             return self.on_ready_to_stop()

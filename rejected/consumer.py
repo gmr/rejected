@@ -47,6 +47,8 @@ import zlib
 
 from pika import exceptions
 
+from rejected import data
+
 LOGGER = logging.getLogger(__name__)
 
 BS4_MIME_TYPES = ('text/html', 'text/xml')
@@ -143,7 +145,8 @@ class Consumer(object):
     def finish(self):
         """Finishes message processing for the current message."""
         if self._finished:
-            raise RuntimeError("finish() called twice")
+            LOGGER.warning('Finished called when already finished')
+            return
         self._finished = True
         self.on_finish()
 
@@ -397,57 +400,59 @@ class Consumer(object):
                            self.message_type)
             # Should the message be dropped or returned to the broker?
             if self.DROP_INVALID_MESSAGES:
-                self._process.reject(message_in.delivery_tag, False)
-            raise gen.Return(True)
+                raise gen.Return(data.MESSAGE_DROP)
+            raise gen.Return(data.MESSAGE_INVALID)
 
         result = self.prepare()
         if concurrent.is_future(result):
             yield result
         if self._finished:
-            raise gen.Return(True)
+            LOGGER.debug('Returning from finished in prepare')
+            raise gen.Return(data.MESSAGE_ACK)
 
         try:
             result = self.process()
             if concurrent.is_future(result):
                 yield result
+                LOGGER.debug('Post yield of future process')
         except KeyboardInterrupt:
             LOGGER.debug('CTRL-C')
             self._process.reject(message_in.delivery_tag, True)
             self._process.stop()
-            raise gen.Return(False)
+            raise gen.Return(data.MESSAGE_REQUEUE)
 
         except exceptions.ChannelClosed as error:
             LOGGER.critical('Channel closed while processing %s: %s',
                             message_in.delivery_tag, error)
             self._process.reconnect()
-            raise gen.Return(False)
+            raise gen.Return(None)
 
         except exceptions.ConnectionClosed as error:
             LOGGER.critical('Connection closed while processing %s: %s',
                             message_in.delivery_tag, error)
             self._process.reconnect()
-            raise gen.Return(False)
+            raise gen.Return(None)
 
         except ConsumerException as error:
             LOGGER.error('Consumer Exception processing delivery %s: %s',
                          message_in.delivery_tag, error)
             self._process.record_exception(error, True, sys.exc_info())
-            raise gen.Return(False)
+            raise gen.Return(data.MESSAGE_REQUEUE)
 
         except MessageException as error:
             LOGGER.error('Message Exception processing delivery %s: %s',
                          message_in.delivery_tag, error)
-            self._process.reject(message_in.delivery_tag, False)
-            raise gen.Return(None)
+            raise gen.Return(data.MESSAGE_DROP)
 
         except Exception as error:
             LOGGER.exception('Exception processing delivery %s: %s',
                              message_in.delivery_tag, error)
             self._process.record_exception(error, True, sys.exc_info())
-            raise gen.Return(False)
+            raise gen.Return(data.MESSAGE_REQUEUE)
 
         self.finish()
-        raise gen.Return(True)
+        LOGGER.debug('Post finish')
+        raise gen.Return(data.MESSAGE_ACK)
 
     def _set_channel(self, channel):
         """Assign the _channel attribute to the channel that was passed in.

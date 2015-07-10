@@ -201,7 +201,7 @@ class Consumer(object):
         the ``config`` section for the consumer in the rejected configuration.
 
         .. deprecated:: 3.1
-            Use :property:`settings` instead.
+            Use :attr:`.settings` instead.
 
         :rtype: dict
 

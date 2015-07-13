@@ -703,7 +703,8 @@ class Process(multiprocessing.Process, state.State):
 
         # Setup the Sentry client
         if raven and 'sentry_dsn' in cfg:
-            self.sentry_client = raven.Client(cfg['sentry_dsn'])
+            options = {'tags': {'consumer_type': consumer_name}}
+            self.sentry_client = raven.Client(cfg['sentry_dsn'], **options)
 
         # Setup the stats counter instance
         self.stats = stats.Stats(self.name, consumer_name, cfg['statsd'] or {})

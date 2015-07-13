@@ -663,6 +663,7 @@ class Process(multiprocessing.Process, state.State):
         if not self.sentry_client:
             return
 
+        message = dict(self.message)
         duration = math.ceil(time.time() - self.delivery_time) * 1000
         kwargs = {'logger': 'rejected.processs',
                   'modules': self.get_module_data(),
@@ -670,7 +671,9 @@ class Process(multiprocessing.Process, state.State):
                       'consumer': self.consumer_name,
                       'connection': self.connection_name,
                       'env': self.strip_uri_passwords(dict(os.environ)),
-                      'message': dict(self.message)},
+                      'message': message},
+                  'tags': {
+                      'message_type': message.get('type', 'none')},
                   'time_spent': duration}
         LOGGER.debug('Sending exception to sentry: %r', kwargs)
         self.sentry_client.captureException(exc_info, **kwargs)

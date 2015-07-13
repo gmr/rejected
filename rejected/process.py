@@ -706,7 +706,11 @@ class Process(multiprocessing.Process, state.State):
 
         # Setup the Sentry client
         if raven and 'sentry_dsn' in cfg:
-            options = {'tags': {'consumer_type': consumer_name}}
+            options = {
+                'tags': {'consumer_type': consumer_name},
+                'include_paths': ['pika', 'rejected', 'tornado',
+                                  self.config['consumer']],
+            }
             self.sentry_client = raven.Client(cfg['sentry_dsn'], **options)
 
         # Setup the stats counter instance

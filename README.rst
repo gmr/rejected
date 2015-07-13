@@ -157,14 +157,18 @@ Version History
 ---------------
 Available at https://rejected.readthedocs.org/en/latest/history.html
 
-.. |Version| image:: https://badge.fury.io/py/rejected.svg?
-   :target: http://badge.fury.io/py/rejected
-
-.. |Status| image:: https://travis-ci.org/gmr/rejected.svg?branch=master
-   :target: https://travis-ci.org/gmr/rejected
-
-.. |Downloads| image:: https://pypip.in/d/rejected/badge.svg?
+.. |Version| image:: https://img.shields.io/pypi/v/rejected.svg?
    :target: https://pypi.python.org/pypi/rejected
 
-.. |License| image:: https://pypip.in/license/rejected/badge.svg?
+.. |Status| image:: https://img.shields.io/travis/gmr/rejected.svg?
+   :target: https://travis-ci.org/gmr/rejected
+
+.. |Coverage| image:: https://img.shields.io/codecov/c/github/gmr/rejected.svg?
+   :target: https://codecov.io/github/gmr/rejected?branch=master
+
+.. |Downloads| image:: https://img.shields.io/pypi/dm/rejected.svg?
+   :target: https://pypi.python.org/pypi/rejected
+
+.. |License| image:: https://img.shields.io/pypi/l/rejected.svg?
    :target: https://rejected.readthedocs.org
+

@@ -673,7 +673,7 @@ class Process(multiprocessing.Process, state.State):
                       'env': self.strip_uri_passwords(dict(os.environ)),
                       'message': message},
                   'tags': {
-                      'message_type': message.get('type', 'none')},
+                      'message_type': message['properties'].type or 'none'},
                   'time_spent': duration}
         LOGGER.debug('Sending exception to sentry: %r', kwargs)
         self.sentry_client.captureException(exc_info, **kwargs)

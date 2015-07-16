@@ -14,7 +14,7 @@ Rejected runs as a master process with multiple consumer configurations that are
 each run it an isolated process. It has the ability to collect statistical
 data from the consumer processes and report on it.
 
-|Version| |Downloads| |License|
+|Version| |Downloads| |Status| |Climate| |License|
 
 Features
 --------
@@ -57,8 +57,6 @@ Source
 ------
 rejected source is available on Github at  `https://github.com/gmr/rejected <https://github.com/gmr/rejected>`_
 
-|Status|
-
 Version History
 ---------------
 See :doc:`history`
@@ -71,14 +69,17 @@ Indices and tables
 * :ref:`search`
 
 
-.. |Version| image:: https://badge.fury.io/py/rejected.svg?
-   :target: http://badge.fury.io/py/rejected
-
-.. |Status| image:: https://travis-ci.org/gmr/rejected.svg?branch=master
-   :target: https://travis-ci.org/gmr/rejected
-
-.. |Downloads| image:: https://pypip.in/d/rejected/badge.svg?
+.. |Version| image:: https://img.shields.io/pypi/v/rejected.svg?
    :target: https://pypi.python.org/pypi/rejected
 
-.. |License| image:: https://pypip.in/license/rejected/badge.svg?
+.. |Status| image:: https://img.shields.io/travis/gmr/rejected.svg?
+   :target: https://travis-ci.org/gmr/rejected
+
+.. |Downloads| image:: https://img.shields.io/pypi/dm/rejected.svg?
+   :target: https://pypi.python.org/pypi/rejected
+
+.. |License| image:: https://img.shields.io/pypi/l/rejected.svg?
    :target: https://rejected.readthedocs.org
+
+.. |Climate| image:: https://img.shields.io/codeclimate/github/gmr/rejected.svg?
+   :target: https://codeclimate.com/github/gmr/rejected

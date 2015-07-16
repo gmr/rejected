@@ -673,7 +673,7 @@ class Process(multiprocessing.Process, state.State):
                       'env': self.strip_uri_passwords(dict(os.environ)),
                       'message': message},
                   'tags': {
-                      'message_type': message.get('type', 'none')},
+                      'message_type': message['properties'].type or 'none'},
                   'time_spent': duration}
         LOGGER.debug('Sending exception to sentry: %r', kwargs)
         self.sentry_client.captureException(exc_info, **kwargs)
@@ -692,6 +692,16 @@ class Process(multiprocessing.Process, state.State):
         """
         LOGGER.info('Initializing for %s on %s connection', self.name,
                     connection_name)
+
+        # Setup the Sentry client
+        if raven and 'sentry_dsn' in cfg:
+            options = {
+                'tags': {'consumer_type': consumer_name},
+                'include_paths': ['pika', 'rejected', 'tornado',
+                                  cfg['Consumers'][consumer_name]['consumer']],
+            }
+            self.sentry_client = raven.Client(cfg['sentry_dsn'], **options)
+
         self.connection_name = connection_name
         self.consumer_name = consumer_name
         self.config = cfg['Consumers'][consumer_name]
@@ -703,15 +713,6 @@ class Process(multiprocessing.Process, state.State):
             LOGGER.critical('Could not import and start processor')
             self.set_state(self.STATE_STOPPED)
             exit(1)
-
-        # Setup the Sentry client
-        if raven and 'sentry_dsn' in cfg:
-            options = {
-                'tags': {'consumer_type': consumer_name},
-                'include_paths': ['pika', 'rejected', 'tornado',
-                                  self.config['consumer']],
-            }
-            self.sentry_client = raven.Client(cfg['sentry_dsn'], **options)
 
         # Setup the stats counter instance
         self.stats = stats.Stats(self.name, consumer_name, cfg['statsd'] or {})

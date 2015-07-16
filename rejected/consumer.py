@@ -376,6 +376,21 @@ class Consumer(object):
         """
         return self._message.properties.user_id
 
+    @property
+    def sentry_client(self):
+        """
+        Access the raven ``Client`` instance or ``None``
+
+        :rtype: :class:`raven.base.Client`
+
+        Use this object to add tags or additional context to Sentry
+        error reports (see :meth:`raven.base.Client.tags_context`) or
+        to report messages (via :meth:`raven.base.Client.captureMessage`)
+        directly to Sentry.
+
+        """
+        return self._process.sentry_client
+
     def _clear(self):
         """Resets all assigned data for the current message."""
         self._finished = False

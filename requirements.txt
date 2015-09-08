@@ -3,3 +3,4 @@ pika
 psutil
 pyyaml
 tornado
+toro

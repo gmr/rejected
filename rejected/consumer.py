@@ -40,6 +40,7 @@ import plistlib
 import StringIO as stringio
 import sys
 import time
+import toro
 import traceback
 import uuid
 import warnings
@@ -532,6 +533,16 @@ class PublishingConsumer(Consumer):
     a :py:class:`ConsumerException` is raised.
 
     """
+    def initialize(self):
+        super(PublishingConsumer, self).initialize()
+        self.condition = toro.Condition()
+
+    @gen.coroutine
+    def yield_to_ioloop(self):
+        try:
+            yield self.condition.wait(deadline=self._channel.connection.ioloop.time() + 0.001)
+        except toro.Timeout:
+            pass
 
     def publish_message(self, exchange, routing_key, properties, body):
         """Publish a message to RabbitMQ on the same channel the original

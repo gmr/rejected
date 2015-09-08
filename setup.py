@@ -14,6 +14,7 @@ install_requires = ['helper',
                     'pika',
                     'psutil',
                     'pyyaml',
+                    'toro',
                     'tornado']
 
 extras_require = {'html': ['beautifulsoup4']}
@@ -23,7 +24,7 @@ if sys.version_info < (2, 7, 0):
     install_requires.append('importlib')
 
 setup(name='rejected',
-      version='3.6.3',
+      version='3.6.4',
       description='Rejected is a Python RabbitMQ Consumer Framework and '
                   'Controller Daemon',
       long_description=open('README.rst').read(),

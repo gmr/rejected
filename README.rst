@@ -15,7 +15,6 @@ data from the consumer processes and report on it.
 Features
 --------
 
-- Dynamic QoS
 - Automatic exception handling including connection management and consumer restarting
 - Smart consumer classes that can automatically decode and deserialize message bodies based upon message headers
 - Metrics logging and submission to statsd
@@ -105,7 +104,7 @@ Example Configuration
           connections: [rabbitmq]
           qty: 2
           queue: generated_messages
-          dynamic_qos: True
+          qos_prefetch: 100
           ack: True
           max_errors: 100
           config:
@@ -143,6 +142,10 @@ Example Configuration
            propagate: true
            handlers: [console, syslog]
          rejected:
+           level: INFO
+           propagate: true
+           handlers: [console, syslog]
+         tornado:
            level: INFO
            propagate: true
            handlers: [console, syslog]

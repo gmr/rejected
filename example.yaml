@@ -16,28 +16,27 @@ Application:
       pass: guest
       ssl: False
       vhost: /
-      heartbeat_interval: 300
+      heartbeat_interval: 60
   Consumers:
     async:
       consumer: rejected.example.AsyncExampleConsumer
       connections: [rabbitmq]
       qty: 1
       queue: test
-      dynamic_qos: True
       ack: True
+      qos_prefetch: 100
       max_errors: 100
-    example:
+    sync:
       consumer: rejected.example.ExampleConsumer
       connections: [rabbitmq]
       qty: 1
       queue: test
-      dynamic_qos: True
       ack: True
       max_errors: 100
+      qos_prefetch: 1
       config:
         foo: True
         bar: baz
-
 
 
 Daemon:
@@ -74,9 +73,9 @@ Logging:
       level: INFO
       propagate: true
       handlers: [console]
-  ROOT:
-    level: CRITICAL
-    propagate: true
-    handlers: [console]
+    tornado:
+      level: INFO
+      propagate: true
+      handlers: [console]
   disable_existing_loggers: true
   incremental: false

@@ -1,5 +1,6 @@
 """Example Rejected Consumer"""
 from rejected import consumer
+
 import logging
 import random
 
@@ -28,6 +29,6 @@ class AsyncExampleConsumer(consumer.Consumer):
     def process(self):
         LOGGER.debug('Message: %r', self.body)
         http_client = httpclient.AsyncHTTPClient()
-        results = yield [http_client.fetch('http://www.github.com'),
-                         http_client.fetch('http://www.reddit.com')]
+        results = yield [http_client.fetch('http://www.google.com'),
+                         http_client.fetch('http://www.bing.com')]
         LOGGER.info('Length: %r', [len(r.body) for r in results])

@@ -2,5 +2,4 @@ helper
 pika
 psutil
 pyyaml
-tornado
-toro
+tornado>=4.2

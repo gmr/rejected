@@ -68,6 +68,9 @@ class MasterControlProgram(state.State):
         self.stats_queue = multiprocessing.Queue()
         self.polled = False
 
+        # Flag to indicate child creation error
+        self.child_abort = False
+
         # Carry for logging internal stats collection data
         self.log_stats_enabled = config.application.get('log_stats', False)
         LOGGER.debug('Stats logging enabled: %s', self.log_stats_enabled)
@@ -239,15 +242,14 @@ class MasterControlProgram(state.State):
         :rtype: bool
 
         """
+        status = proc.status()
+        LOGGER.debug('Process status (%r): %r', proc.pid, status)
         try:
-            if proc.status == psutil.STATUS_DEAD:
-                try:
-                    LOGGER.debug('Found dead process with %s fds',
-                                 proc.get_num_fds())
-                except psutil.AccessDenied as error:
-                    LOGGER.debug('Found dead process, could not get '
-                                 'fd count: %s', error)
-                    return True
+            if status == psutil.STATUS_ZOMBIE:
+                proc.terminate()
+                return True
+            elif status == psutil.STATUS_DEAD:
+                return True
         except psutil.NoSuchProcess:
             LOGGER.debug('Process is dead and does not exist')
             return True
@@ -344,8 +346,17 @@ class MasterControlProgram(state.State):
         self.consumers[name].last_proc_num += 1
         return self.consumers[name].last_proc_num
 
+    def on_abort(self, _signum, _unused_frame):
+        LOGGER.debug('Abort signal received from child')
+        time.sleep(1)
+        if not self.active_processes:
+            LOGGER.info('Stopping with no active processes and child error')
+            self.set_state(self.STATE_STOPPED)
+
     def on_timer(self, _signum, _unused_frame):
-        LOGGER.debug('Timer fired')
+        if self.is_shutting_down:
+            LOGGER.debug('Polling timer fired while shutting down')
+            return
         if not self.polled:
             self.poll()
             self.polled = True
@@ -367,10 +378,10 @@ class MasterControlProgram(state.State):
         """
         self.set_state(self.STATE_ACTIVE)
 
-        # If we don't have any active consumers, shutdown
+        # If we don't have any active consumers, spawn new ones
         if not self.total_process_count:
             LOGGER.debug('Did not find any active consumers in poll')
-            return self.set_state(self.STATE_STOPPED)
+            return self.check_process_counts()
 
         # Start our data collection dict
         self.poll_data = {'timestamp': time.time(), 'processes': list()}
@@ -470,14 +481,20 @@ class MasterControlProgram(state.State):
         :param str name: The process name
 
         """
+        my_pid = os.getpid()
         for conn in self.consumers[consumer].connections:
             if name in self.consumers[consumer].connections[conn]:
                 self.consumers[consumer].connections[conn].remove(name)
         if name in self.consumers[consumer].processes:
-            try:
-                self.consumers[consumer].processes[name].terminate()
-            except OSError:
-                pass
+            child = self.consumers[consumer].processes[name]
+            if child.is_alive():
+                if child.pid != my_pid:
+                    try:
+                        child.terminate()
+                    except OSError:
+                        pass
+                else:
+                    LOGGER.debug('Child has my pid? %r, %r', my_pid, child.pid)
             del self.consumers[consumer].processes[name]
 
     def run(self):
@@ -488,6 +505,9 @@ class MasterControlProgram(state.State):
         self.set_state(self.STATE_ACTIVE)
         self.setup_consumers()
 
+        # Set the SIGABRT handler for child creation errors
+        signal.signal(signal.SIGABRT, self.on_abort)
+
         # Set the SIGALRM handler for poll interval
         signal.signal(signal.SIGALRM, self.on_timer)
 
@@ -495,7 +515,7 @@ class MasterControlProgram(state.State):
         signal.setitimer(signal.ITIMER_REAL, self.poll_interval, 0)
 
         # Loop for the lifetime of the app, pausing for a signal to pop up
-        while self.is_running and self.total_process_count:
+        while self.is_running:
             if not self.is_sleeping:
                 self.set_state(self.STATE_SLEEPING)
             signal.pause()
@@ -574,6 +594,7 @@ class MasterControlProgram(state.State):
         self.set_state(self.STATE_SHUTTING_DOWN)
         LOGGER.info('Stopping consumer processes')
 
+        signal.signal(signal.SIGABRT, signal.SIG_IGN)
         signal.signal(signal.SIGALRM, signal.SIG_IGN)
         signal.signal(signal.SIGCHLD, signal.SIG_IGN)
         signal.signal(signal.SIGPROF, signal.SIG_IGN)

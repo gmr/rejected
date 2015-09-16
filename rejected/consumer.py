@@ -466,7 +466,6 @@ class Consumer(object):
         except ConsumerException as error:
             LOGGER.error('Consumer Exception processing delivery %s: %s',
                          message_in.delivery_tag, error)
-            self._process.record_exception(error, True, sys.exc_info())
             raise gen.Return(data.MESSAGE_REQUEUE)
 
         except MessageException as error:

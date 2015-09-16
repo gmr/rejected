@@ -1,5 +1,5 @@
 helper
-pika
+pika>=0.10.0
 psutil
 pyyaml
 tornado>=4.2

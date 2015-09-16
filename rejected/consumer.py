@@ -33,6 +33,7 @@ from tornado import concurrent
 import csv
 from tornado import gen
 import json
+from tornado import locks
 import logging
 import pickle
 import pika
@@ -40,7 +41,6 @@ import plistlib
 import StringIO as stringio
 import sys
 import time
-import toro
 import traceback
 import uuid
 import warnings
@@ -98,6 +98,7 @@ class Consumer(object):
         self._process = process
         self._settings = settings
         self._statsd = None
+        self._yield_condition = locks.Condition()
 
         # Run any child object specified initialization
         self.initialize()
@@ -177,6 +178,18 @@ class Consumer(object):
         """
         if self._statsd:
             self._statsd.incr(key, value)
+
+    @gen.coroutine
+    def yield_to_ioloop(self):
+        """Function that will allow Rejected to process IOLoop events while
+        in a tight-loop inside an asynchronous consumer.
+
+        """
+        deadline = self._channel.connection.ioloop.time() + 0.001
+        try:
+            yield self._yield_condition.wait(deadline)
+        except gen.TimeoutError:
+            pass
 
     @property
     def app_id(self):
@@ -535,14 +548,6 @@ class PublishingConsumer(Consumer):
     """
     def initialize(self):
         super(PublishingConsumer, self).initialize()
-        self.condition = toro.Condition()
-
-    @gen.coroutine
-    def yield_to_ioloop(self):
-        try:
-            yield self.condition.wait(deadline=self._channel.connection.ioloop.time() + 0.001)
-        except toro.Timeout:
-            pass
 
     def publish_message(self, exchange, routing_key, properties, body):
         """Publish a message to RabbitMQ on the same channel the original

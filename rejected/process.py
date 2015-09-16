@@ -617,7 +617,6 @@ class Process(multiprocessing.Process, state.State):
         """Run method that can be profiled"""
         self.ioloop = ioloop.IOLoop.current()
         self.consumer_lock = locks.Lock()
-        self.yield_condition = locks.Condition()
         try:
             self.setup(self._kwargs['config'],
                        self._kwargs['consumer_name'],

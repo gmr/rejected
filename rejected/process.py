@@ -22,16 +22,15 @@ import time
 import traceback
 
 from tornado import ioloop
+from tornado import locks
 import pika
 try:
     import raven
 except ImportError:
     raven = None
 from pika import spec
-from pika.adapters import tornado_connection
 
 from rejected import __version__
-from rejected import consumer
 from rejected import data
 from rejected import state
 from rejected import stats
@@ -78,7 +77,6 @@ class Process(multiprocessing.Process, state.State):
     ERROR = 'failed'
     FAILURES = 'failures_until_stop'
     PROCESSED = 'processed'
-    RECONNECTED = 'reconnected'
     REDELIVERED = 'redelivered_messages'
     REJECTED = 'rejected_messages'
     REQUEUED = 'requeued_messages'
@@ -95,7 +93,6 @@ class Process(multiprocessing.Process, state.State):
     MAX_ERROR_COUNT = 5
     MAX_ERROR_WINDOW = 60
     MAX_SHUTDOWN_WAIT = 5
-    RECONNECT_DELAY = 10
 
     def __init__(self,
                  group=None,
@@ -107,6 +104,7 @@ class Process(multiprocessing.Process, state.State):
             kwargs = {}
         super(Process, self).__init__(group, target, name, args, kwargs)
         self.ack = True
+        self.active_message = None
         self.channel = None
         self.config = None
         self.connection = None
@@ -114,14 +112,13 @@ class Process(multiprocessing.Process, state.State):
         self.connection_name = None
         self.connections = None
         self.consumer = None
+        self.consumer_lock = None
         self.consumer_name = None
         self.delivery_time = None
-        self.dynamic_qos = True
         self.ioloop = None
         self.last_failure = 0
         self.last_stats_time = None
         self.logging_config = dict()
-        self.message = None
         self.message_connection_id = None
         self.max_error_count = self.MAX_ERROR_COUNT
         self.max_frame_size = spec.FRAME_MAX_SIZE
@@ -157,14 +154,6 @@ class Process(multiprocessing.Process, state.State):
         """
         LOGGER.debug('Adding channel close callback')
         self.channel.add_on_close_callback(self.on_channel_closed)
-
-    def add_on_connection_close_callback(self):
-        """This method adds an on close callback that will be invoked by pika
-        when RabbitMQ closes the connection to the publisher unexpectedly.
-
-        """
-        LOGGER.debug('Adding connection close callback')
-        self.connection.add_on_close_callback(self.on_connection_closed)
 
     def calc_velocity(self, values):
         """Return the message consuming velocity for the process.
@@ -208,25 +197,25 @@ class Process(multiprocessing.Process, state.State):
         LOGGER.info('Closing connection')
         self.connection.close()
 
-    def connect_to_rabbitmq(self, cfg, name):
+    def connect_to_rabbitmq(self, config, name):
         """Connect to RabbitMQ returning the connection handle.
 
-        :param dict cfg: The Connections section of the configuration
+        :param dict config: The Connections section of the configuration
         :param str name: The name of the connection
-        :rtype: pika.adapters.tornado_connection.TornadoConnection
 
         """
-        LOGGER.debug('Connecting to %s:%i:%s as %s', cfg[name]['host'],
-                     cfg[name]['port'], cfg[name]['vhost'], cfg[name]['user'])
         self.set_state(self.STATE_CONNECTING)
         self.connection_id += 1
-        hb_interval = cfg[name].get('heartbeat_interval', self.HB_INTERVAL)
-        parameters = self.get_connection_parameters(
-            cfg[name]['host'], cfg[name]['port'], cfg[name]['vhost'],
-            cfg[name]['user'], cfg[name]['pass'], hb_interval)
-        return tornado_connection.TornadoConnection(parameters,
-                                                    self.on_connection_open,
-                                                    stop_ioloop_on_close=False)
+        params = self.get_connection_parameters(config[name])
+        LOGGER.debug('Connecting to %s:%i:%s as %s',
+                     params.host, params.port, params.virtual_host,
+                     params.credentials.username)
+        return pika.TornadoConnection(params,
+                                      self.on_connect_open,
+                                      self.on_connect_failed,
+                                      self.on_closed,
+                                      False,
+                                      self.ioloop)
 
     @staticmethod
     def get_config(cfg, number, name, connection):
@@ -246,21 +235,21 @@ class Process(multiprocessing.Process, state.State):
             'process_name': '%s_%i_tag_%i' % (name, os.getpid(), number)
         }
 
-    def get_connection_parameters(self, host, port, vhost, username, password,
-                                  heartbeat_interval):
+    def get_connection_parameters(self, config):
         """Return connection parameters for a pika connection.
 
-        :param str host: The RabbitMQ host to connect to
-        :param int port: The port to connect on
-        :param str vhost: The virtual host
-        :param str username: The username to use
-        :param str password: The password to use
-        :param int heartbeat_interval: AMQP Heartbeat interval
+        :param dict config: Rejected connection configuration
         :rtype: pika.ConnectionParameters
 
         """
-        credentials = pika.PlainCredentials(username, password)
-        return pika.ConnectionParameters(host, port, vhost, credentials,
+        heartbeat_interval = config.get('heartbeat_interval', self.HB_INTERVAL)
+        password = config.get('password', config.get('pass', 'guest'))
+        credentials = pika.PlainCredentials(config.get('user', 'guest'),
+                                            password)
+        return pika.ConnectionParameters(config.get('host', 'localhost'),
+                                         config.get('port', 5672),
+                                         config.get('vhost', '/'),
+                                         credentials,
                                          frame_max=self.max_frame_size,
                                          socket_timeout=10,
                                          heartbeat_interval=heartbeat_interval)
@@ -331,16 +320,34 @@ class Process(multiprocessing.Process, state.State):
             return None
 
     @gen.engine
-    def invoke_consumer(self):
-        """Wrap the actual processor processing bits
+    def invoke_consumer(self, message):
+        """Wrap the actual processor processing bits"""
+        # Only allow for a single message to be processed at a time
+        with (yield self.consumer_lock.acquire()):
+            if self.is_idle:
+                self.set_state(self.STATE_PROCESSING)
+                start_time = time.time()
+                self.active_message = message
+                self.start_message_processing()
+                try:
+                    result = yield self.consumer._execute(message)
+                except Exception as error:
+                    LOGGER.critical('Handled exception from consumer in '
+                                    'process. This should not happen. %s',
+                                    error)
+                    result = data.MESSAGE_REQUEUE
 
-        :param pika.frame.Method method: The Basic.Deliver method frame
-        :param Message message: Message to process
+                LOGGER.debug('Finished processing message: %r', result)
+                self.on_processed(message, result, start_time)
 
-        """
-        self.start_message_processing()
-        result = yield self.consumer._execute(self.message)
-        self.on_processed(result)
+            elif self.is_waiting_to_shutdown or self.is_shutting_down:
+                LOGGER.info('Requeueing pending message due to shutdown')
+                self.reject(message.delivery_tag, True)
+                self.on_ready_to_stop()
+            else:
+                LOGGER.warning('Exiting invoke_consumer without processing, '
+                               'this should not happen. State: %s',
+                               self.state_description)
 
     @property
     def is_processing(self):
@@ -365,7 +372,7 @@ class Process(multiprocessing.Process, state.State):
                         method_frame.method.reply_code,
                         method_frame.method.reply_text)
         del self.channel
-        raise ReconnectConnection
+        self.on_ready_to_stop()
 
     def on_channel_open(self, channel):
         """This method is invoked by pika when the channel has been opened. It
@@ -380,10 +387,9 @@ class Process(multiprocessing.Process, state.State):
         self.add_on_channel_close_callback()
         self.setup_channel()
 
-    def on_connection_closed(self, _unused, code, text):
+    def on_closed(self, _unused, code, text):
         """This method is invoked by pika when the connection to RabbitMQ is
-        closed unexpectedly. Since it is unexpected, we will reconnect to
-        RabbitMQ if it disconnects.
+        closed unexpectedly. Shutdown if not already doing so.
 
         :param pika.connection.Connection _unused: The closed connection
 
@@ -392,18 +398,22 @@ class Process(multiprocessing.Process, state.State):
                         self.state_description, code, text)
         self.channel = None
         if not self.is_shutting_down and not self.is_waiting_to_shutdown:
-            self.reconnect()
+            self.on_ready_to_stop()
 
-    def on_connection_open(self, _unused):
+    def on_connect_failed(self, *args, **kwargs):
+        LOGGER.critical('Could not connect to RabbitMQ: %r', (args, kwargs))
+        self.on_ready_to_stop()
+
+    def on_connect_open(self, connection):
         """This method is called by pika once the connection to RabbitMQ has
         been established. It passes the handle to the connection object in
         case we need it, but in this case, we'll just mark it unused.
 
-        :type _unused: pika.adapters.tornado_connection.TornadoConnection
+        :type connection: pika.adapters.tornado_connection.TornadoConnection
 
         """
         LOGGER.debug('Connection opened')
-        self.add_on_connection_close_callback()
+        self.connection = connection
         self.open_channel()
 
     def on_message(self, channel=None, method=None, properties=None, body=None):
@@ -415,42 +425,35 @@ class Process(multiprocessing.Process, state.State):
         :param str body: The message body
 
         """
-        self.delivery_time = time.time()
-        if not self.is_idle:
-            LOGGER.critical('Received a message while in state: %s',
-                            self.state_description)
-            return self.reject(method.delivery_tag, True)
-        self.set_state(self.STATE_PROCESSING)
-        self.message = data.Message(channel, method, properties, body)
         if method.redelivered:
             self.stats.incr(self.REDELIVERED)
-        self.invoke_consumer()
+        self.invoke_consumer(data.Message(channel, method, properties, body))
 
-    def on_processed(self, result):
-        self.stats.add_timing(self.TIME_SPENT, time.time() - self.delivery_time)
+    def on_processed(self, message, result, start_time):
+        self.stats.add_timing(self.TIME_SPENT, time.time() - start_time)
 
         if result == data.MESSAGE_DROP:
             LOGGER.debug('Bypassing ack due to drop return from consumer')
-            self.reject(self.message.delivery_tag, False)
+            self.reject(message.delivery_tag, False)
             self.stats.incr(self.REJECTED)
             return
 
         elif result == data.MESSAGE_INVALID:
             LOGGER.debug('Bypassing ack due to invalid return from consumer')
-            self.reject(self.message.delivery_tag, False)
+            self.reject(message.delivery_tag, False)
             self.stats.incr(self.REJECTED)
             return
 
         elif result == data.MESSAGE_REQUEUE:
             LOGGER.debug('Bypassing ack due to requeue return from consumer')
-            self.reject(self.message.delivery_tag, True)
+            self.reject(message.delivery_tag, True)
             self.on_processing_error()
             self.stats.incr(self.REQUEUED)
             return
 
         # Ack if the msg wasn't rejected by MessageException and self.ack = True
         elif result == data.MESSAGE_ACK and self.ack:
-            self.ack_message(self.message.delivery_tag)
+            self.ack_message(message.delivery_tag)
             self.stats.incr(self.PROCESSED)
 
         if self.is_waiting_to_shutdown:
@@ -471,11 +474,11 @@ class Process(multiprocessing.Process, state.State):
         self.stats.incr(self.ERROR)
         self.last_failure = time.time()
         if self.too_many_errors:
-            LOGGER.critical('Error threshold exceeded (%i), reconnecting',
+            LOGGER.critical('Error threshold exceeded (%i), shutting down',
                             self.stats[self.ERROR])
             self.cancel_consumer_with_rabbitmq()
             self.close_connection()
-            self.reconnect()
+            self.on_ready_to_stop()
 
     @staticmethod
     def on_qos_set(frame):
@@ -501,6 +504,9 @@ class Process(multiprocessing.Process, state.State):
         # Allow the consumer to gracefully stop and then stop the IOLoop
         self.stop_consumer()
 
+        # Clear IOLoop constructs
+        self.consumer_lock = None
+
         # Stop the IOLoop
         LOGGER.debug('Stopping IOLoop')
         self.ioloop.stop()
@@ -508,7 +514,6 @@ class Process(multiprocessing.Process, state.State):
         # Note that shutdown is complete and set the state accordingly
         self.set_state(self.STATE_STOPPED)
         LOGGER.info('Shutdown complete')
-        os.kill(os.getppid(), signal.SIGALRM)
 
     def on_sigprof(self, _unused_signum, _unused_frame):
         """Called when SIGPROF is sent to the process, will dump the stats, in
@@ -553,29 +558,6 @@ class Process(multiprocessing.Process, state.State):
         """
         return self.config.get('qos_prefetch', self.QOS_PREFETCH_COUNT)
 
-    def reconnect(self):
-        """Reconnect to RabbitMQ after sleeping for _RECONNECT_DELAY"""
-        LOGGER.info('Reconnecting to RabbitMQ in %i seconds',
-                    self.RECONNECT_DELAY)
-        self.stats.incr(self.RECONNECTED)
-        self.set_state(self.STATE_INITIALIZING)
-        if self.connection:
-            if self.connection.socket:
-                fd = self.connection.socket.fileno()
-                self.ioloop.remove_handler(fd)
-            self.connection = None
-
-        self.ioloop.add_timeout(time.time() + self.RECONNECT_DELAY,
-                                self._reconnect)
-
-    def _reconnect(self):
-        """Create and set the RabbitMQ connection"""
-        LOGGER.info('Connecting to RabbitMQ')
-        self.reset_error_counter()
-        self.connection = self.connect_to_rabbitmq(self.connections,
-                                                   self.connection_name)
-        self.setup_signal_handlers()
-
     def reject(self, delivery_tag, requeue=True):
         """Reject the message on the broker and log it. We should move this to
          use to nack when Pika supports it in a released version.
@@ -609,7 +591,7 @@ class Process(multiprocessing.Process, state.State):
         or shutting down based upon the current state.
 
         """
-        self.message = None
+        self.active_message = None
         if self.is_waiting_to_shutdown:
             self.set_state(self.STATE_SHUTTING_DOWN)
             self.on_ready_to_stop()
@@ -633,19 +615,26 @@ class Process(multiprocessing.Process, state.State):
 
     def _run(self):
         """Run method that can be profiled"""
-        self.ioloop = ioloop.IOLoop.instance()
+        self.ioloop = ioloop.IOLoop.current()
+        self.consumer_lock = locks.Lock()
+        self.yield_condition = locks.Condition()
         try:
             self.setup(self._kwargs['config'],
                        self._kwargs['consumer_name'],
                        self._kwargs['connection_name'],
-                       self._kwargs['stats_queue'],
-                       self._kwargs['logging_config'])
-        except ImportError as error:
+                       self._kwargs['stats_queue'])
+        except (AttributeError, ImportError) as error:
             name = self._kwargs['consumer_name']
             class_name = self._kwargs['config']['Consumers'][name]['consumer']
             LOGGER.critical('Could not import %s, stopping process: %r',
                             class_name, error)
-            return
+            os.kill(os.getppid(), signal.SIGABRT)
+            sys.exit(1)
+
+        # Connect to RabbitMQ after the IOLoop has started
+        self.ioloop.add_callback(self.connect_to_rabbitmq,
+                                 self.connections,
+                                 self.connection_name)
 
         if not self.is_stopped:
             try:
@@ -663,7 +652,7 @@ class Process(multiprocessing.Process, state.State):
         if not self.sentry_client:
             return
 
-        message = dict(self.message)
+        message = dict(self.active_message)
         duration = math.ceil(time.time() - self.delivery_time) * 1000
         kwargs = {'logger': 'rejected.processs',
                   'modules': self.get_module_data(),
@@ -678,8 +667,7 @@ class Process(multiprocessing.Process, state.State):
         LOGGER.debug('Sending exception to sentry: %r', kwargs)
         self.sentry_client.captureException(exc_info, **kwargs)
 
-    def setup(self, cfg, consumer_name, connection_name, stats_queue,
-              logging_config):
+    def setup(self, cfg, consumer_name, connection_name, stats_queue):
         """Initialize the consumer, setting up needed attributes and connecting
         to RabbitMQ.
 
@@ -687,7 +675,6 @@ class Process(multiprocessing.Process, state.State):
         :param str consumer_name: Consumer name for config
         :param str connection_name: The name of the connection
         :param multiprocessing.Queue stats_queue: Queue to MCP
-        :param dict logging_config: Logging config from YAML file
 
         """
         LOGGER.info('Initializing for %s on %s connection', self.name,
@@ -712,7 +699,8 @@ class Process(multiprocessing.Process, state.State):
         if not self.consumer:
             LOGGER.critical('Could not import and start processor')
             self.set_state(self.STATE_STOPPED)
-            exit(1)
+            self.on_ready_to_stop()
+            return
 
         # Setup the stats counter instance
         self.stats = stats.Stats(self.name, consumer_name, cfg['statsd'] or {})
@@ -733,9 +721,7 @@ class Process(multiprocessing.Process, state.State):
         self.queue_name = self.config['queue']
 
         self.reset_error_counter()
-        self.setup_signal_handlers()
-        self.connection = self.connect_to_rabbitmq(self.connections,
-                                                   self.connection_name)
+        self.setup_sighandlers()
 
     def setup_channel(self):
         """Setup the channel that will be used to communicate with RabbitMQ and
@@ -753,13 +739,13 @@ class Process(multiprocessing.Process, state.State):
 
         # Setup QoS, Send a Basic.Recover and then Basic.Consume
         self.channel.basic_qos(self.on_qos_set, 0, self.qos_prefetch, False)
-        self.channel.basic_recover(requeue=True)
+        # self.channel.basic_recover(requeue=True)
         self.channel.basic_consume(consumer_callback=self.on_message,
                                    queue=self.queue_name,
                                    no_ack=not self.ack,
                                    consumer_tag=self.name)
 
-    def setup_signal_handlers(self):
+    def setup_sighandlers(self):
         """Setup the stats and stop signal handlers."""
         signal.signal(signal.SIGINT, signal.SIG_IGN)
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
@@ -834,7 +820,3 @@ class Process(multiprocessing.Process, state.State):
 
         """
         return self.stats[self.ERROR] >= self.max_error_count
-
-
-class ReconnectConnection(Exception):
-    pass

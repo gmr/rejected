@@ -97,8 +97,7 @@ class TestProcess(test_state.TestState):
         'cfg': config,
         'connection_name': 'MockConnection',
         'consumer_name': 'MockConsumer',
-        'stats_queue': 'StatsQueue',
-        'logging_config': logging_config
+        'stats_queue': 'StatsQueue'
     }
 
     def setUp(self):
@@ -226,7 +225,7 @@ class TestProcess(test_state.TestState):
         signals = [mock.call(signal.SIGPROF, self._obj.on_sigprof),
                    mock.call(signal.SIGABRT, self._obj.stop)]
         with patch('signal.signal') as signal_signal:
-            self._obj.setup_signal_handlers()
+            self._obj.setup_sighandlers()
             signal_signal.assert_has_calls(signals, any_order=True)
 
     def mock_setup(self, new_process=None, side_effect=None):
@@ -281,20 +280,6 @@ class TestProcess(test_state.TestState):
         self.assertEqual(
             mock_process.qos_prefetch,
             self.config['Consumers']['MockConsumer']['qos_prefetch'])
-
-    def test_setup_connection_arguments(self):
-        with patch.object(process.Process,
-                          'connect_to_rabbitmq') as mock_method:
-            self.mock_setup()
-            mock_method.assert_called_once_with(self.config['Connections'],
-                                                'MockConnection')
-
-    def test_setup_connection_value(self):
-        mock_connection = mock.Mock()
-        with patch.object(process.Process, 'connect_to_rabbitmq',
-                          return_value=mock_connection):
-            mock_process = self.mock_setup()
-            self.assertEqual(mock_process.connection, mock_connection)
 
     def test_is_idle_state_processing(self):
         self._obj.state = self._obj.STATE_PROCESSING

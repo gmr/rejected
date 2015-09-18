@@ -10,10 +10,10 @@ Application:
     prefix: application.rejected
   Connections:
     rabbitmq:
-      host: localhost
+      host: rabbit1.int.csh
       port: 5672
-      user: guest
-      pass: guest
+      user: rejected
+      pass: rabbitmq
       ssl: False
       vhost: /
       heartbeat_interval: 60
@@ -22,10 +22,11 @@ Application:
       consumer: rejected.example.AsyncExampleConsumer
       connections: [rabbitmq]
       qty: 1
-      queue: test
+      queue: gmr-test
       ack: True
       qos_prefetch: 100
       max_errors: 100
+
     sync:
       consumer: rejected.example.ExampleConsumer
       connections: [rabbitmq]

@@ -326,7 +326,7 @@ class Process(multiprocessing.Process, state.State):
         with (yield self.consumer_lock.acquire()):
             if self.is_idle:
                 self.set_state(self.STATE_PROCESSING)
-                start_time = time.time()
+                self.delivery_time = start_time = time.time()
                 self.active_message = message
                 self.start_message_processing()
                 try:
@@ -652,7 +652,10 @@ class Process(multiprocessing.Process, state.State):
             return
 
         message = dict(self.active_message)
-        duration = math.ceil(time.time() - self.delivery_time) * 1000
+        try:
+            duration = math.ceil(time.time() - self.delivery_time) * 1000
+        except TypeError:
+            duration = 0
         kwargs = {'logger': 'rejected.processs',
                   'modules': self.get_module_data(),
                   'extra': {

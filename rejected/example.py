@@ -1,6 +1,8 @@
 """Example Rejected Consumer"""
 from rejected import consumer
 
+import avroconsumer
+
 import logging
 import random
 
@@ -23,12 +25,8 @@ class ExampleConsumer(consumer.Consumer):
             raise consumer.MessageException('reject')
 
 
-class AsyncExampleConsumer(consumer.Consumer):
+class AsyncExampleConsumer(avroconsumer.HTTPLoaderMixin,
+                           avroconsumer.DatumConsumer):
 
-    @gen.coroutine
     def process(self):
-        LOGGER.debug('Message: %r', self.body)
-        http_client = httpclient.AsyncHTTPClient()
-        results = yield [http_client.fetch('http://www.google.com'),
-                         http_client.fetch('http://www.bing.com')]
-        LOGGER.info('Length: %r', [len(r.body) for r in results])
+        LOGGER.info('Message: %r', self.body)

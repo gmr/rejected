@@ -111,50 +111,69 @@ Example Configuration
             foo: True
             bar: baz
 
-     Daemon:
-       user: rejected
-       group: daemon
-       pidfile: /var/run/rejected/example.%(pid)s.pid
+    Daemon:
+      user: rejected
+      group: daemon
+      pidfile: /var/run/rejected/example.%(pid)s.pid
 
-     Logging:
-       version: 1
-       formatters:
-         verbose:
-           format: "%(levelname) -10s %(asctime)s %(process)-6d %(processName) -15s %(name) -25s %(funcName) -20s: %(message)s"
-           datefmt: "%Y-%m-%d %H:%M:%S"
-         syslog:
-           format: "%(levelname)s <PID %(process)d:%(processName)s> %(name)s.%(funcName)s(): %(message)s"
-       filters: []
-       handlers:
-         console:
-           class: logging.StreamHandler
-           formatter: verbose
-           debug_only: true
-         syslog:
-           class: logging.handlers.SysLogHandler
-           facility: local6
-           address: /var/run/syslog
-           #address: /dev/log
-           formatter: syslog
-       loggers:
-         my_consumer:
-           level: INFO
-           propagate: true
-           handlers: [console, syslog]
-         rejected:
-           level: INFO
-           propagate: true
-           handlers: [console, syslog]
-         tornado:
-           level: INFO
-           propagate: true
-           handlers: [console, syslog]
-         urllib3:
-           level: ERROR
-           propagate: true
-       disable_existing_loggers: false
-       incremental: false
-
+    Logging:
+      version: 1
+      formatters:
+        verbose:
+          format: "%(levelname) -10s %(asctime)s %(process)-6d %(processName) -25s %(name) -20s %(funcName) -25s: %(message)s"
+          datefmt: "%Y-%m-%d %H:%M:%S"
+        verbose_correlation:
+          format: "%(levelname) -10s %(asctime)s %(process)-6d %(processName) -25s %(name) -20s %(funcName) -25s: %(message)s {CID %(correlation_id)s}"
+          datefmt: "%Y-%m-%d %H:%M:%S"
+        syslog:
+          format: "%(levelname)s <PID %(process)d:%(processName)s> %(name)s.%(funcName)s: %(message)s"
+        syslog_correlation:
+          format: "%(levelname)s <PID %(process)d:%(processName)s> %(name)s.%(funcName)s: %(message)s {CID %(correlation_id)s)"
+      filters:
+        correlation:
+          '()': rejected.log.CorrelationFilter
+          'exists': True
+        no_correlation:
+          '()': rejected.log.CorrelationFilter
+          'exists': False
+      handlers:
+        console:
+          class: logging.StreamHandler
+          formatter: verbose
+          debug_only: false
+          filters: [no_correlation]
+        console_correlation:
+          class: logging.StreamHandler
+          formatter: verbose_correlation
+          debug_only: false
+          filters: [correlation]
+        syslog:
+          class: logging.handlers.SysLogHandler
+          facility: daemon
+          address: /var/run/syslog
+          formatter: syslog
+          filters: [no_correlation]
+        syslog_correlation:
+          class: logging.handlers.SysLogHandler
+          facility: daemon
+          address: /var/run/syslog
+          formatter: syslog
+          filters: [correlation]
+      loggers:
+        helper:
+          level: INFO
+          propagate: true
+          handlers: [console, console_correlation, syslog, syslog_correlation]
+        rejected:
+          level: INFO
+          propagate: true
+          handlers: [console, console_correlation, syslog, syslog_correlation]
+        tornado:
+          level: INFO
+          propagate: true
+          handlers: [console, console_correlation, syslog, syslog_correlation]
+      disable_existing_loggers: true
+      incremental: false
 
 Version History
 ---------------

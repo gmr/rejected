@@ -50,6 +50,7 @@ import zlib
 from pika import exceptions
 
 from rejected import data
+from rejected import log
 
 LOGGER = logging.getLogger(__name__)
 
@@ -100,6 +101,9 @@ class Consumer(object):
         self._statsd = None
         self._yield_condition = locks.Condition()
 
+        # Create a logger that attaches correlation ID to the record
+        self.logger = log.CorrelationAdapter(LOGGER, self)
+
         # Run any child object specified initialization
         self.initialize()
 
@@ -148,7 +152,7 @@ class Consumer(object):
     def finish(self):
         """Finishes message processing for the current message."""
         if self._finished:
-            LOGGER.warning('Finished called when already finished')
+            self.logger.warning('Finished called when already finished')
             return
         self._finished = True
         self.on_finish()
@@ -420,14 +424,14 @@ class Consumer(object):
         :rtype: bool
 
         """
-        LOGGER.debug('Received: %r', message_in)
+        self.logger.debug('Received: %r', message_in)
         self._clear()
         self._message = message_in
 
         # Validate the message type if the child sets _MESSAGE_TYPE
         if self.MESSAGE_TYPE and self.MESSAGE_TYPE != self.message_type:
-            LOGGER.warning('Received a non-supported message type: %s',
-                           self.message_type)
+            self.logger.warning('Received a non-supported message type: %s',
+                                self.message_type)
             # Should the message be dropped or returned to the broker?
             if self.DROP_INVALID_MESSAGES:
                 raise gen.Return(data.MESSAGE_DROP)
@@ -437,40 +441,45 @@ class Consumer(object):
         if concurrent.is_future(result):
             yield result
         if self._finished:
-            LOGGER.debug('Returning from finished in prepare')
+            self.logger.debug('Returning from finished in prepare')
             raise gen.Return(data.MESSAGE_ACK)
 
         try:
             result = self.process()
             if concurrent.is_future(result):
                 yield result
-                LOGGER.debug('Post yield of future process')
+                self.logger.debug('Post yield of future process')
         except KeyboardInterrupt:
-            LOGGER.debug('CTRL-C')
+            self.logger.debug('CTRL-C')
             self._process.reject(message_in.delivery_tag, True)
             self._process.stop()
             raise gen.Return(data.MESSAGE_REQUEUE)
 
         except exceptions.ChannelClosed as error:
-            LOGGER.critical('Channel closed while processing %s: %s',
-                            message_in.delivery_tag, error)
+            self.logger.critical('Channel closed while processing %s: %s',
+                                 message_in.delivery_tag, error)
             self._process.reconnect()
             raise gen.Return(None)
 
         except exceptions.ConnectionClosed as error:
-            LOGGER.critical('Connection closed while processing %s: %s',
-                            message_in.delivery_tag, error)
+            self.logger.critical('Connection closed while processing %s: %s',
+                                 message_in.delivery_tag, error)
             self._process.reconnect()
             raise gen.Return(None)
 
         except ConsumerException as error:
-            LOGGER.error('Consumer Exception processing delivery %s: %s',
-                         message_in.delivery_tag, error)
+            self.logger.error('Consumer Exception processing delivery %s: %s',
+                              message_in.delivery_tag, error)
             raise gen.Return(data.MESSAGE_REQUEUE)
 
         except MessageException as error:
-            LOGGER.error('Message Exception processing delivery %s: %s',
-                         message_in.delivery_tag, error)
+            self.logger.error('Message Exception processing delivery %s: %s',
+                              message_in.delivery_tag, error)
+            raise gen.Return(data.MESSAGE_DROP)
+
+        except ProcessingException as error:
+            self.logger.error('Processing Exception processing delivery %s: %s',
+                              message_in.delivery_tag, error)
             raise gen.Return(data.MESSAGE_DROP)
 
         except Exception as error:
@@ -479,7 +488,7 @@ class Consumer(object):
             raise gen.Return(data.MESSAGE_REQUEUE)
 
         self.finish()
-        LOGGER.debug('Post finish')
+        self.logger.debug('Post finish')
         raise gen.Return(data.MESSAGE_ACK)
 
     def _set_channel(self, channel):
@@ -502,8 +511,8 @@ class Consumer(object):
     def log_exception(self, msg_format, *args, **kwargs):
         """Customize the logging of uncaught exceptions.
 
-        :param str msg_format: format of message to log with ``LOGGER.error``
-        :param args: positional arguments to pass to ``LOGGER.error``
+        :param str msg_format: format of message to log with ``self.logger.error``
+        :param args: positional arguments to pass to ``self.logger.error``
         :keyword bool send_to_sentry: if omitted or *truthy*, this keyword
             will send the captured exception to Sentry (if enabled).
 
@@ -513,18 +522,27 @@ class Consumer(object):
         logged at the debug level.
 
         """
-        LOGGER.error(msg_format, *args)
+        self.logger.error(msg_format, *args)
         exc_info = sys.exc_info()
         if all(exc_info):
             exc_type, exc_value, tb = exc_info
             exc_name = exc_type.__name__
-            LOGGER.error('Processor handled %s: %s', exc_name, exc_value)
+            self.logger.error('Processor handled %s: %s', exc_name, exc_value)
             formatted_lines = traceback.format_exception(*exc_info)
             for offset, line in enumerate(formatted_lines):
-                LOGGER.debug('(%s) %i: %s', exc_name, offset, line.strip())
+                self.logger.debug('(%s) %i: %s', exc_name, offset, line.strip())
 
         if kwargs.get('send_to_sentry', True):
             self._process.send_exception_to_sentry(exc_info)
+
+    def send_exception_to_sentry(self, exc_info):
+        """Send an exception to Sentry if enabled.
+
+        :param tuple exc_info: exception information as returned from
+            :func:`sys.exc_info`
+
+        """
+        self._process.send_exception_to_sentry(exc_info)
 
 
 class PublishingConsumer(Consumer):
@@ -545,6 +563,7 @@ class PublishingConsumer(Consumer):
     a :py:class:`ConsumerException` is raised.
 
     """
+
     def initialize(self):
         super(PublishingConsumer, self).initialize()
 
@@ -559,11 +578,11 @@ class PublishingConsumer(Consumer):
 
         """
         # Convert the dict to pika.BasicProperties
-        LOGGER.debug('Converting properties')
+        self.logger.debug('Converting properties')
         msg_props = self._get_pika_properties(properties)
 
         # Publish the message
-        LOGGER.debug('Publishing message to %s:%s', exchange, routing_key)
+        self.logger.debug('Publishing message to %s:%s', exchange, routing_key)
         self._channel.basic_publish(exchange=exchange,
                                     routing_key=routing_key,
                                     properties=msg_props,
@@ -605,8 +624,8 @@ class PublishingConsumer(Consumer):
             properties.correlation_id = properties.message_id
             properties.message_id = str(uuid.uuid4())
             properties.timestamp = int(time.time())
-            LOGGER.debug('New message_id: %s', properties.message_id)
-            LOGGER.debug('Correlation_id: %s', properties.correlation_id)
+            self.logger.debug('New message_id: %s', properties.message_id)
+            self.logger.debug('Correlation_id: %s', properties.correlation_id)
 
         # Redefine the reply to if needed
         reply_to = reply_to or properties.reply_to
@@ -666,6 +685,7 @@ class SmartConsumer(Consumer):
     a :py:class:`ConsumerException` is raised.
 
     """
+
     @property
     def body(self):
         """Return the message body, unencoded if needed,
@@ -759,8 +779,7 @@ class SmartConsumer(Consumer):
         csv_buffer.seek(0)
         return csv.DictReader(csv_buffer, dialect=dialect)
 
-    @staticmethod
-    def _load_json_value(value):
+    def _load_json_value(self, value):
         """Deserialize a JSON string returning the native Python data type
         for the value.
 
@@ -771,8 +790,8 @@ class SmartConsumer(Consumer):
         try:
             return json.loads(value, encoding='utf-8')
         except ValueError as error:
-            LOGGER.error('Could not decode message body: %s', error,
-                         exc_info=sys.exc_info())
+            self.logger.error('Could not decode message body: %s', error,
+                              exc_info=sys.exc_info())
             raise MessageException(error)
 
     @staticmethod
@@ -810,9 +829,7 @@ class SmartConsumer(Consumer):
 
 
 class SmartPublishingConsumer(SmartConsumer, PublishingConsumer):
-    """
-
-    """
+    """PublishingConsumer with serialization built in"""
 
     def publish_message(self, exchange, routing_key, properties, body,
                         no_serialization=False,
@@ -841,22 +858,22 @@ class SmartPublishingConsumer(SmartConsumer, PublishingConsumer):
 
         """
         # Convert the rejected.data.Properties object to a pika.BasicProperties
-        LOGGER.debug('Converting properties')
+        self.logger.debug('Converting properties')
         properties_out = self._get_pika_properties(properties)
 
         # Auto-serialize the content if needed
         if (not no_serialization and not isinstance(body, basestring) and
             properties.get('content_type')):
-            LOGGER.debug('Auto-serializing message body')
+            self.logger.debug('Auto-serializing message body')
             body = self._auto_serialize(properties.get('content_type'), body)
 
         # Auto-encode the message body if needed
         if not no_encoding and properties.get('content_encoding'):
-            LOGGER.debug('Auto-encoding message body')
+            self.logger.debug('Auto-encoding message body')
             body = self._auto_encode(properties.get('content_encoding'), body)
 
         # Publish the message
-        LOGGER.debug('Publishing message to %s:%s', exchange, routing_key)
+        self.logger.debug('Publishing message to %s:%s', exchange, routing_key)
         self._channel.basic_publish(exchange=exchange,
                                     routing_key=routing_key,
                                     properties=properties_out,
@@ -876,7 +893,8 @@ class SmartPublishingConsumer(SmartConsumer, PublishingConsumer):
         if content_encoding == 'bzip2':
             return self._encode_bz2(value)
 
-        LOGGER.warning('Invalid content-encoding specified for auto-encoding')
+        self.logger.warning(
+            'Invalid content-encoding specified for auto-encoding')
         return value
 
     def _auto_serialize(self, content_type, value):
@@ -888,33 +906,34 @@ class SmartPublishingConsumer(SmartConsumer, PublishingConsumer):
 
         """
         if content_type == 'application/json':
-            LOGGER.debug('Auto-serializing content as JSON')
+            self.logger.debug('Auto-serializing content as JSON')
             return self._dump_json_value(value)
 
         if content_type in PICKLE_MIME_TYPES:
-            LOGGER.debug('Auto-serializing content as Pickle')
+            self.logger.debug('Auto-serializing content as Pickle')
             return self._dump_pickle_value(value)
 
         if content_type == 'application/x-plist':
-            LOGGER.debug('Auto-serializing content as plist')
+            self.logger.debug('Auto-serializing content as plist')
             return self._dump_plist_value(value)
 
         if content_type == 'text/csv':
-            LOGGER.debug('Auto-serializing content as csv')
+            self.logger.debug('Auto-serializing content as csv')
             return self._dump_csv_value(value)
 
         # If it's XML or HTML auto
         if (bs4 and isinstance(value, bs4.BeautifulSoup) and content_type in
             ('text/html', 'text/xml')):
-            LOGGER.debug('Dumping BS4 object into HTML or XML')
+            self.logger.debug('Dumping BS4 object into HTML or XML')
             return self._dump_bs4_value(value)
 
         # If it's YAML, load the content via pyyaml into a dict
         if self.content_type in YAML_MIME_TYPES:
-            LOGGER.debug('Auto-serializing content as YAML')
+            self.logger.debug('Auto-serializing content as YAML')
             return self._dump_yaml_value(value)
 
-        LOGGER.warning('Invalid content-type specified for auto-serialization')
+        self.logger.warning(
+            'Invalid content-type specified for auto-serialization')
         return value
 
     @staticmethod
@@ -1015,6 +1034,16 @@ class ConsumerException(Exception):
 class MessageException(Exception):
     """Invoke when a message should be rejected and not requeued, but not due
     to a processing error that should cause the consumer to stop.
+
+    """
+    pass
+
+
+class ProcessingException(Exception):
+    """Invoke when a message should be rejected and not requeued, but not due
+    to a processing error that should cause the consumer to stop. This should
+    be used for when you want to reject a message which will send it to a retry
+    DLX setup, without anything being stated about the exception.
 
     """
     pass

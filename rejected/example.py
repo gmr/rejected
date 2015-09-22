@@ -1,9 +1,6 @@
 """Example Rejected Consumer"""
 from rejected import consumer
 
-import avroconsumer
-
-import logging
 import random
 
 from tornado import gen
@@ -11,13 +8,11 @@ from tornado import httpclient
 
 __version__ = '1.0.0'
 
-LOGGER = logging.getLogger(__name__)
-
 
 class ExampleConsumer(consumer.Consumer):
 
     def process(self):
-        LOGGER.debug('Message: %r', self.body)
+        self.logger.debug('Message: %r', self.body)
         action = random.randint(0, 10000)
         if action == 0:
             raise consumer.ConsumerException('zomg')
@@ -25,8 +20,12 @@ class ExampleConsumer(consumer.Consumer):
             raise consumer.MessageException('reject')
 
 
-class AsyncExampleConsumer(avroconsumer.HTTPLoaderMixin,
-                           avroconsumer.DatumConsumer):
+class AsyncExampleConsumer(consumer.Consumer):
 
+    @gen.coroutine
     def process(self):
-        LOGGER.info('Message: %r', self.body)
+        self.logger.info('Message: %r', self.body)
+        http_client = httpclient.AsyncHTTPClient()
+        results = yield [http_client.fetch('http://www.google.com'),
+                         http_client.fetch('http://www.bing.com')]
+        self.logger.info('Length: %r', [len(r.body) for r in results])

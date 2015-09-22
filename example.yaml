@@ -10,7 +10,7 @@ Application:
     prefix: application.rejected
   Connections:
     rabbitmq:
-      host: rabbit1.int.csh
+      host: localhost
       port: 5672
       user: rejected
       pass: rabbitmq
@@ -49,34 +49,57 @@ Logging:
   version: 1
   formatters:
     verbose:
-      format: "%(levelname) -10s %(asctime)s %(process)-6d %(processName) -15s %(name) -20s %(funcName) -20s: %(message)s"
+      format: "%(levelname) -10s %(asctime)s %(process)-6d %(processName) -25s %(name) -20s %(funcName) -25s: %(message)s"
+      datefmt: "%Y-%m-%d %H:%M:%S"
+    verbose_correlation:
+      format: "%(levelname) -10s %(asctime)s %(process)-6d %(processName) -25s %(name) -20s %(funcName) -25s: %(message)s {CID %(correlation_id)s}"
       datefmt: "%Y-%m-%d %H:%M:%S"
     syslog:
-      format: "%(levelname)s <PID %(process)d:%(processName)s> %(name)s.%(funcName)s(): %(message)s"
-  filters: []
+      format: "%(levelname)s <PID %(process)d:%(processName)s> %(name)s.%(funcName)s: %(message)s"
+    syslog_correlation:
+      format: "%(levelname)s <PID %(process)d:%(processName)s> %(name)s.%(funcName)s: %(message)s {CID %(correlation_id)s)"
+  filters:
+    correlation:
+      '()': rejected.log.CorrelationFilter
+      'exists': True
+    no_correlation:
+      '()': rejected.log.CorrelationFilter
+      'exists': False
   handlers:
     console:
       class: logging.StreamHandler
       formatter: verbose
       debug_only: false
-    #syslog:
-    #  class: logging.handlers.SysLogHandler
-    #  facility: daemon
-    #  address: /var/run/syslog
-    #  #address: /dev/log
-    #  formatter: syslog
+      filters: [no_correlation]
+    console_correlation:
+      class: logging.StreamHandler
+      formatter: verbose_correlation
+      debug_only: false
+      filters: [correlation]
+    syslog:
+      class: logging.handlers.SysLogHandler
+      facility: daemon
+      address: /var/run/syslog
+      formatter: syslog
+      filters: [no_correlation]
+    syslog_correlation:
+      class: logging.handlers.SysLogHandler
+      facility: daemon
+      address: /var/run/syslog
+      formatter: syslog
+      filters: [correlation]
   loggers:
     helper:
       level: INFO
       propagate: true
-      handlers: [console]
+      handlers: [console, console_correlation, syslog, syslog_correlation]
     rejected:
       level: INFO
       propagate: true
-      handlers: [console]
+      handlers: [console, console_correlation, syslog, syslog_correlation]
     tornado:
       level: INFO
       propagate: true
-      handlers: [console]
+      handlers: [console, console_correlation, syslog, syslog_correlation]
   disable_existing_loggers: true
   incremental: false

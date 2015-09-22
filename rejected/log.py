@@ -22,8 +22,8 @@ class CorrelationAdapter(logging.LoggerAdapter):
 
     """
     def __init__(self, logger, consumer):
-        super(CorrelationAdapter, self).__init__(logger, {})
-        self._consumer = consumer
+        self.logger = logger
+        self.consumer = consumer
 
     def process(self, msg, kwargs):
         """Process the logging message and keyword arguments passed in to
@@ -34,6 +34,5 @@ class CorrelationAdapter(logging.LoggerAdapter):
         :rtype: (str, dict)
 
         """
-        kwargs['extra'] = kwargs.get('extra', {})
-        kwargs['extra']['correlation_id'] = self._consumer.correlation_id
+        kwargs['extra'] = {'correlation_id': self.consumer.correlation_id}
         return msg, kwargs

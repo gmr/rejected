@@ -9,6 +9,7 @@ except ImportError:
     import unittest
 
 from . import mocks
+from tornado import testing
 
 from rejected import consumer
 from rejected import data
@@ -56,41 +57,46 @@ class TestConsumer(consumer.Consumer):
         pass
 
 
-class ConsumerReceiveTests(unittest.TestCase):
+class ConsumerReceiveTests(testing.AsyncTestCase):
 
     def setUp(self):
+        super(ConsumerReceiveTests, self).setUp()
         self.obj = TestConsumer({}, None)
         self.message = data.Message(mocks.CHANNEL, mocks.METHOD,
                                     mocks.PROPERTIES, mocks.BODY)
 
-    @gen.coroutine
+    @testing.gen_test
     def test_receive_assigns_message(self):
         yield self.obj._execute(self.message)
         self.assertEqual(self.obj._message, self.message)
 
+    @testing.gen_test
     def test_receive_invokes_process(self):
         with mock.patch.object(self.obj, 'process') as process:
-            self.obj._execute(self.message)
+            yield self.obj._execute(self.message)
             process.assert_called_once_with()
 
+    @testing.gen_test
     def test_receive_drops_invalid_message_type(self):
-        self.obj.MESSAGE_TYPE = 'foo'
+        self.obj.MESSAGE_TYPE = 'fooz'
         self.obj.DROP_INVALID_MESSAGES = True
         with mock.patch.object(self.obj, 'process') as process:
-            self.obj._execute(self.message)
+            yield self.obj._execute(self.message)
             process.assert_not_called()
 
-    def test_raises_with_invalid_message_type(self):
+    @testing.gen_test
+    def test_raises_with_drop(self):
         self.obj.MESSAGE_TYPE = 'foo'
-        self.obj.DROP_INVALID_MESSAGES = False
+        self.obj.DROP_INVALID_MESSAGES = True
         result = yield self.obj._execute(self.message)
-        self.assertIsInstance(result.exception, consumer.ConsumerException)
+        self.assertEqual(result, data.MESSAGE_DROP)
 
 
-class ConsumerPropertyTests(unittest.TestCase):
+class ConsumerPropertyTests(testing.AsyncTestCase):
 
     @gen.coroutine
     def setUp(self):
+        super(ConsumerPropertyTests, self).setUp()
         self.config = {'foo': 'bar', 'baz': 1, 'qux': True}
         self.message = data.Message(mocks.CHANNEL, mocks.METHOD,
                                     mocks.PROPERTIES, mocks.BODY)

@@ -424,7 +424,7 @@ class Consumer(object):
         :rtype: bool
 
         """
-        self.logger.debug('Received: %r', message_in)
+        LOGGER.debug('Received: %r', message_in)
         self._clear()
         self._message = message_in
 
@@ -468,17 +468,17 @@ class Consumer(object):
             raise gen.Return(None)
 
         except ConsumerException as error:
-            self.logger.error('Consumer Exception processing delivery %s: %s',
+            self.logger.error('ConsumerException processing delivery %s: %r',
                               message_in.delivery_tag, error)
             raise gen.Return(data.MESSAGE_REQUEUE)
 
         except MessageException as error:
-            self.logger.error('Message Exception processing delivery %s: %s',
+            self.logger.error('MessageException processing delivery %s: %r',
                               message_in.delivery_tag, error)
             raise gen.Return(data.MESSAGE_DROP)
 
         except ProcessingException as error:
-            self.logger.error('Processing Exception processing delivery %s: %s',
+            self.logger.error('ProcessingException processing delivery %s: %r',
                               message_in.delivery_tag, error)
             raise gen.Return(data.MESSAGE_DROP)
 

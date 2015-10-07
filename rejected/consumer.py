@@ -54,18 +54,26 @@ from rejected import log
 
 LOGGER = logging.getLogger(__name__)
 
-BS4_MIME_TYPES = ('text/html', 'text/xml')
-PICKLE_MIME_TYPES = ('application/pickle', 'application/x-pickle',
-                     'application/x-vnd.python.pickle',
-                     'application/vnd.python.pickle')
-YAML_MIME_TYPES = ('text/yaml', 'text/x-yaml')
-
 # Optional imports
 try:
     import bs4
 except ImportError:
     LOGGER.warning('BeautifulSoup not found, disabling html and xml support')
     bs4 = None
+
+try:
+    import msgpack
+except ImportError:
+    LOGGER.warning('msgpack not found, disabling msgpack support')
+    msgpack = None
+
+_PROCESSING_EXCEPTIONS = 'X-Processing-Exceptions'
+
+BS4_MIME_TYPES = ('text/html', 'text/xml')
+PICKLE_MIME_TYPES = ('application/pickle', 'application/x-pickle',
+                     'application/x-vnd.python.pickle',
+                     'application/vnd.python.pickle')
+YAML_MIME_TYPES = ('text/yaml', 'text/x-yaml')
 
 
 class Consumer(object):
@@ -80,9 +88,22 @@ class Consumer(object):
     ``DROP_INVALID_MESSAGES`` attribute is set to ``True``. If it is ``False``,
     a :py:class:`ConsumerException` is raised.
 
+    If a consumer raises a :py:class:`ProcessingException`, the message that
+    was being processed will be republished to the exchange specified by the
+    ``ERROR_EXCHANGE`` attribute of the consumer's class using the routing key
+    that was last used for the message. The original message body and
+    properties will be used and an additional header ``X-Processing-Exceptions``
+    will be added that will contain the number of times the message has had
+    a ``ProcessingException`` raised for it. In combination with a queue that
+    has ``x-message-ttl`` set and ``x-dead-letter-exchange`` that points to
+    the original exchange for the queue the consumer is consuming off of, you
+    can implement a delayed retry cycle for messages that are failing to
+    process due to external resource or service issues.
+
     """
     DROP_INVALID_MESSAGES = False
     MESSAGE_TYPE = None
+    ERROR_EXCHANGE = 'errors'
 
     def __init__(self, settings, process):
         """Creates a new instance of a Consumer class. To perform
@@ -203,6 +224,8 @@ class Consumer(object):
         :rtype: str
 
         """
+        if not self._message:
+            return None
         return self._message.properties.app_id
 
     @property
@@ -212,6 +235,8 @@ class Consumer(object):
         :rtype: str
 
         """
+        if not self._message:
+            return None
         return self._message.body
 
     @property
@@ -238,6 +263,8 @@ class Consumer(object):
         :rtype: str
 
         """
+        if not self._message:
+            return None
         return (self._message.properties.content_encoding or '').lower() or None
 
     @property
@@ -247,6 +274,8 @@ class Consumer(object):
         :rtype: str
 
         """
+        if not self._message:
+            return None
         return (self._message.properties.content_type or '').lower() or None
 
     @property
@@ -257,6 +286,8 @@ class Consumer(object):
         :rtype: str
 
         """
+        if not self._message:
+            return None
         return self._message.properties.correlation_id
 
     @property
@@ -267,6 +298,8 @@ class Consumer(object):
         :rtype: str
 
         """
+        if not self._message:
+            return None
         return self._message.exchange
 
     @property
@@ -277,6 +310,8 @@ class Consumer(object):
         :rtype: str
 
         """
+        if not self._message:
+            return None
         return self._message.properties.expiration
 
     @property
@@ -287,6 +322,8 @@ class Consumer(object):
         :rtype: dict
 
         """
+        if not self._message:
+            return None
         return self._message.properties.headers or dict()
 
     @property
@@ -296,6 +333,8 @@ class Consumer(object):
         :rtype: str
 
         """
+        if not self._message:
+            return None
         return self._message.properties.message_id
 
     @property
@@ -315,6 +354,8 @@ class Consumer(object):
         :rtype: int
 
         """
+        if not self._message:
+            return None
         return self._message.properties.priority
 
     @property
@@ -325,6 +366,8 @@ class Consumer(object):
         :rtype: dict
 
         """
+        if not self._message:
+            return None
         return dict(self._message.properties)
 
     @property
@@ -334,6 +377,8 @@ class Consumer(object):
         :rtype: bool
 
         """
+        if not self._message:
+            return None
         return self._message.redelivered
 
     @property
@@ -344,6 +389,8 @@ class Consumer(object):
         :rtype: str
 
         """
+        if not self._message:
+            return None
         return self._message.properties.reply_to
 
     @property
@@ -353,6 +400,8 @@ class Consumer(object):
         :rtype: str
 
         """
+        if not self._message:
+            return None
         return self._message.routing_key
 
     @property
@@ -363,6 +412,8 @@ class Consumer(object):
         :rtype: str
 
         """
+        if not self._message:
+            return None
         return self._message.properties.type
 
     @property
@@ -383,6 +434,8 @@ class Consumer(object):
         :rtype: int
 
         """
+        if not self._message:
+            return None
         return self._message.properties.timestamp
 
     @property
@@ -392,6 +445,8 @@ class Consumer(object):
         :rtype: str
 
         """
+        if not self._message:
+            return None
         return self._message.properties.user_id
 
     @property
@@ -480,6 +535,7 @@ class Consumer(object):
         except ProcessingException as error:
             self.logger.error('ProcessingException processing delivery %s: %r',
                               message_in.delivery_tag, error)
+            self._republish_processing_error()
             raise gen.Return(data.MESSAGE_DROP)
 
         except Exception as error:
@@ -490,6 +546,32 @@ class Consumer(object):
         self.finish()
         self.logger.debug('Post finish')
         raise gen.Return(data.MESSAGE_ACK)
+
+    def _republish_processing_error(self):
+        """Republish the original message that was received because a
+        ProcessingException was raised.
+
+        Add a header that keeps track of how many times this has happened
+        for this message.
+
+        """
+        self.logger.debug('Republishing due to ProcessingException')
+        properties = dict(self._message.properties) or {}
+        if 'headers' not in properties or not properties['headers']:
+            properties['headers'] = {}
+
+        if _PROCESSING_EXCEPTIONS not in properties['headers']:
+            properties['headers'][_PROCESSING_EXCEPTIONS] = 1
+        else:
+            try:
+                properties['headers'][_PROCESSING_EXCEPTIONS] += 1
+            except TypeError:
+                properties['headers'][_PROCESSING_EXCEPTIONS] = 1
+
+        self._channel.basic_publish(self.ERROR_EXCHANGE,
+                                    self._message.routing_key,
+                                    self._message.body,
+                                    pika.BasicProperties(**properties))
 
     def _set_channel(self, channel):
         """Assign the _channel attribute to the channel that was passed in.
@@ -714,6 +796,9 @@ class SmartConsumer(Consumer):
         if self.content_type == 'application/json':
             self._message_body = self._load_json_value(self._message_body)
 
+        elif msgpack and self.content_type == 'application/msgpack':
+            self._message_body = self._load_msgpack_value(self._message_body)
+
         elif self.content_type in PICKLE_MIME_TYPES:
             self._message_body = self._load_pickle_value(self._message_body)
 
@@ -789,6 +874,21 @@ class SmartConsumer(Consumer):
         """
         try:
             return json.loads(value, encoding='utf-8')
+        except ValueError as error:
+            self.logger.error('Could not decode message body: %s', error,
+                              exc_info=sys.exc_info())
+            raise MessageException(error)
+
+    def _load_msgpack_value(self, value):
+        """Deserialize a msgpack string returning the native Python data type
+        for the value.
+
+        :param str value: The msgpack string
+        :rtype: object
+
+        """
+        try:
+            return msgpack.unpackb(value)
         except ValueError as error:
             self.logger.error('Could not decode message body: %s', error,
                               exc_info=sys.exc_info())
@@ -909,26 +1009,30 @@ class SmartPublishingConsumer(SmartConsumer, PublishingConsumer):
             self.logger.debug('Auto-serializing content as JSON')
             return self._dump_json_value(value)
 
-        if content_type in PICKLE_MIME_TYPES:
+        elif msgpack and content_type == 'application/msgpack':
+            self.logger.debug('Auto-serializing content as msgpack')
+            return self._dump_msgpack_value(value)
+
+        elif content_type in PICKLE_MIME_TYPES:
             self.logger.debug('Auto-serializing content as Pickle')
             return self._dump_pickle_value(value)
 
-        if content_type == 'application/x-plist':
+        elif content_type == 'application/x-plist':
             self.logger.debug('Auto-serializing content as plist')
             return self._dump_plist_value(value)
 
-        if content_type == 'text/csv':
+        elif content_type == 'text/csv':
             self.logger.debug('Auto-serializing content as csv')
             return self._dump_csv_value(value)
 
         # If it's XML or HTML auto
-        if (bs4 and isinstance(value, bs4.BeautifulSoup) and content_type in
+        elif (bs4 and isinstance(value, bs4.BeautifulSoup) and content_type in
             ('text/html', 'text/xml')):
             self.logger.debug('Dumping BS4 object into HTML or XML')
             return self._dump_bs4_value(value)
 
         # If it's YAML, load the content via pyyaml into a dict
-        if self.content_type in YAML_MIME_TYPES:
+        elif self.content_type in YAML_MIME_TYPES:
             self.logger.debug('Auto-serializing content as YAML')
             return self._dump_yaml_value(value)
 
@@ -971,6 +1075,16 @@ class SmartPublishingConsumer(SmartConsumer, PublishingConsumer):
 
         """
         return json.dumps(value, ensure_ascii=False)
+
+    @staticmethod
+    def _dump_msgpack_value(value):
+        """Serialize a value into MessagePack
+
+        :param str|dict|list: The value to serialize as msgpack
+        :rtype: str
+
+        """
+        return msgpack.packb(value)
 
     @staticmethod
     def _dump_pickle_value(value):
@@ -1042,8 +1156,8 @@ class MessageException(Exception):
 class ProcessingException(Exception):
     """Invoke when a message should be rejected and not requeued, but not due
     to a processing error that should cause the consumer to stop. This should
-    be used for when you want to reject a message which will send it to a retry
-    DLX setup, without anything being stated about the exception.
+    be used for when you want to reject a message which will be republished to
+    a retry queue, without anything being stated about the exception.
 
     """
     pass

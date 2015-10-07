@@ -332,9 +332,9 @@ class Process(multiprocessing.Process, state.State):
                 try:
                     result = yield self.consumer._execute(message)
                 except Exception as error:
-                    LOGGER.critical('Handled exception from consumer in '
-                                    'process. This should not happen. %s',
-                                    error)
+                    LOGGER.exception('Unhandled exception from consumer in '
+                                     'process. This should not happen. %s',
+                                     error)
                     result = data.MESSAGE_REQUEUE
 
                 LOGGER.debug('Finished processing message: %r', result)

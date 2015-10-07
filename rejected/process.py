@@ -621,7 +621,7 @@ class Process(multiprocessing.Process, state.State):
         except (AttributeError, ImportError) as error:
             name = self._kwargs['consumer_name']
             class_name = self._kwargs['config']['Consumers'][name]['consumer']
-            LOGGER.critical('Could not import %s, stopping process: %r',
+            LOGGER.exception('Could not start %s, stopping process: %r',
                             class_name, error)
             os.kill(os.getppid(), signal.SIGABRT)
             sys.exit(1)

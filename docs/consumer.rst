@@ -61,10 +61,25 @@ the message. This should be done when there is a problem with the message itself
 such as a malformed payload or non-supported properties like ``content-type``
 or ``type``.
 
+If a consumer raises a :py:class:`ProcessingException <rejected.consumer.ProcessingException>`,
+the message that was being processed will be republished to the exchange specified
+by the ``ERROR_EXCHANGE`` attribute of the :py:class:`consumer's class <rejected.consumer.Consumer>`
+using the routing key that was last used for the message. The original message body
+and properties will be used and an additional header ``X-Processing-Exceptions``
+will be added that will contain the number of times the message has had a
+``ProcessingException`` raised for it. In combination with a queue that has
+``x-message-ttl`` set and ``x-dead-letter-exchange`` that points to the original
+exchange for the queue the consumer is consuming off of, you can implement a
+delayed retry cycle for messages that are failing to process due to external
+resource or service issues.
+
 .. note:: If unhandled exceptions are raised by a consumer, they will be caught by rejected, logged, and turned into a :py:class:`ConsumerException <rejected.consumer.ConsumerException>`.
 
 .. autoclass:: rejected.consumer.ConsumerException
    :members:
 
 .. autoclass:: rejected.consumer.MessageException
+   :members:
+
+.. autoclass:: rejected.consumer.ProcessingException
    :members:

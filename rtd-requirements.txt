@@ -1,6 +1,7 @@
 beautifulsoup4
 helper
-pika==0.9.13
+msgpack-python
+pika>=0.10.0
 psutil
 pyyaml
-tornado
+tornado>=4.2.0

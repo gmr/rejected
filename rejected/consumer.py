@@ -185,6 +185,16 @@ class Consumer(object):
             raise Exception("You must define the '%s' setting in your "
                             "application to use %s" % (name, feature))
 
+    def set_sentry_context(self, tag, value):
+        """Set a context tag in Sentry for the given key and value.
+
+        :param str tag: The context tag name
+        :param str value: The context value
+
+        """
+        if self.sentry_client:
+            self.sentry_client.tags_context(tag, value)
+
     def statsd_add_timing(self, key, duration):
         """Add a timing to statsd
 
@@ -218,6 +228,15 @@ class Consumer(object):
         finally:
             finish_time = max(start_time, time.time())
             self.statsd_add_timing(key, finish_time - start_time)
+
+    def unset_sentry_context(self, tag):
+        """Remove a context tag from sentry
+
+        :param str tag: The context tag to remove
+
+        """
+        if self.sentry_client:
+            self.sentry_client.tags.pop(tag, None)
 
     @gen.coroutine
     def yield_to_ioloop(self):

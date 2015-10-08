@@ -29,14 +29,11 @@ Supported `SmartConsumer` MIME types are:
 
 """
 import bz2
-from tornado import concurrent
+import contextlib
 import csv
-from tornado import gen
 import json
-from tornado import locks
 import logging
 import pickle
-import pika
 import plistlib
 import StringIO as stringio
 import sys
@@ -44,10 +41,14 @@ import time
 import traceback
 import uuid
 import warnings
-import yaml
 import zlib
 
+import pika
+from tornado import concurrent
 from pika import exceptions
+from tornado import gen
+from tornado import locks
+import yaml
 
 from rejected import data
 from rejected import log
@@ -203,6 +204,20 @@ class Consumer(object):
         """
         if self._statsd:
             self._statsd.incr(key, value)
+
+    @contextlib.contextmanager
+    def statsd_track_duration(self, key):
+        """Time around a context and emit a statsd metric.
+
+        :param str key: The key for the timing to track
+
+        """
+        start_time = time.time()
+        try:
+            yield
+        finally:
+            finish_time = max(start_time, time.time())
+            self.statsd_add_timing(key, finish_time - start_time)
 
     @gen.coroutine
     def yield_to_ioloop(self):

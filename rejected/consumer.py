@@ -193,7 +193,7 @@ class Consumer(object):
 
         """
         if self.sentry_client:
-            self.sentry_client.tags_context(tag, value)
+            self.sentry_client.tags_context({tag: value})
 
     def statsd_add_timing(self, key, duration):
         """Add a timing to statsd

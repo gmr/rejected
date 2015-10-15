@@ -126,6 +126,9 @@ class Consumer(object):
         # Create a logger that attaches correlation ID to the record
         self.logger = log.CorrelationAdapter(LOGGER, self)
 
+        # Set a Sentry context for the consumer
+        self.set_sentry_context('consumer', self.name)
+
         # Run any child object specified initialization
         self.initialize()
 
@@ -485,18 +488,18 @@ class Consumer(object):
 
     @property
     def sentry_client(self):
-        """
-        Access the raven ``Client`` instance or ``None``
-
-        :rtype: :class:`raven.base.Client`
+        """Access the Sentry raven ``Client`` instance or ``None``
 
         Use this object to add tags or additional context to Sentry
         error reports (see :meth:`raven.base.Client.tags_context`) or
         to report messages (via :meth:`raven.base.Client.captureMessage`)
         directly to Sentry.
 
+        :rtype: :class:`raven.base.Client`
+
         """
-        return self._process.sentry_client
+        if hasattr(self._process, 'sentry_client'):
+            return self._process.sentry_client
 
     def _clear(self):
         """Resets all assigned data for the current message."""

@@ -202,8 +202,8 @@ class TestProcess(test_state.TestState):
         config = {'consumer': 'rejected.consumer.Consumer'}
         with patch('logging.Logger.info') as info:
             self._obj.get_consumer(config)
-            info.assert_called_with('Creating consumer %s', config['consumer'],
-                                    __version__)
+            info.assert_called_with('Creating consumer %s v%s',
+                                    config['consumer'], __version__)
 
     @patch.object(consumer.Consumer, '__init__', side_effect=ImportError)
     def test_get_consumer_with_config_is_none(self, mock_method):

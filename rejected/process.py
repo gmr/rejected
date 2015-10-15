@@ -52,10 +52,13 @@ def import_consumer(value):
     parts = value.split('.')
     import_name = '.'.join(parts[0:-1])
     import_handle = importlib.import_module(import_name)
+    version = None
     if hasattr(import_handle, '__version__'):
         version = import_handle.__version__
-    else:
-        version = None
+    elif len(parts) > 2:
+        package_handle = importlib.import_module(parts[0])
+        if hasattr(package_handle, '__version__'):
+            version = package_handle.__version__
 
     # Return the class handle
     return getattr(import_handle, parts[-1]), version

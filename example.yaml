@@ -3,6 +3,7 @@
 Application:
   poll_interval: 10.0
   log_stats: True
+  sentry_dsn: https://[YOUR-SENTRY-DSN]
   statsd:
     enabled: True
     host: localhost

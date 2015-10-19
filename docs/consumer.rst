@@ -73,6 +73,11 @@ exchange for the queue the consumer is consuming off of, you can implement a
 delayed retry cycle for messages that are failing to process due to external
 resource or service issues.
 
+If ``ERROR_MAX_RETRY`` is set on the class, the headers for each method
+will be inspected and if the value of ``X-Processing-Exceptions`` is
+greater than or equal to the ``ERROR_MAX_RETRY`` value, the message will
+be dropped.
+
 .. note:: If unhandled exceptions are raised by a consumer, they will be caught by rejected, logged, and turned into a :py:class:`ConsumerException <rejected.consumer.ConsumerException>`.
 
 .. autoclass:: rejected.consumer.ConsumerException

@@ -81,11 +81,16 @@ class Process(multiprocessing.Process, state.State):
     FAILURES = 'failures_until_stop'
     PROCESSED = 'processed'
     REDELIVERED = 'redelivered_messages'
-    REJECTED = 'rejected_messages'
-    REQUEUED = 'requeued_messages'
     TIME_SPENT = 'processing_time'
     TIME_WAITED = 'idle_time'
-    UNHANDLED_EXCEPTIONS = 'unhandled_exceptions'
+
+    MESSAGE_DROPPED = 'message_dropped'
+    MESSAGE_REQUEUED = 'message_requeued'
+
+    CONSUMER_EXCEPTION = 'consumer_exception'
+    MESSAGE_EXCEPTION = 'message_exception'
+    PROCESSING_EXCEPTION = 'processing_exception'
+    UNHANDLED_EXCEPTION = 'unhandled_exception'
 
     HB_INTERVAL = 300
 
@@ -432,22 +437,41 @@ class Process(multiprocessing.Process, state.State):
         self.stats.add_timing(self.TIME_SPENT, time.time() - start_time)
 
         if result == data.MESSAGE_DROP:
-            LOGGER.debug('Bypassing ack due to drop return from consumer')
+            LOGGER.debug('Rejecting message due to drop return from consumer')
             self.reject(message.delivery_tag, False)
-            self.stats.incr(self.REJECTED)
+            self.stats.incr(self.MESSAGE_DROPPED)
             return
 
-        elif result == data.MESSAGE_INVALID:
-            LOGGER.debug('Bypassing ack due to invalid return from consumer')
+        elif result == data.MESSAGE_EXCEPTION:
+            LOGGER.debug('Rejecteting due to MessageException')
             self.reject(message.delivery_tag, False)
-            self.stats.incr(self.REJECTED)
+            self.stats.incr(self.MESSAGE_EXCEPTION)
+            return
+
+        elif result == data.PROCESSING_EXCEPTION:
+            LOGGER.debug('Rejecting message due to ProcessingException')
+            self.reject(message.delivery_tag, False)
+            self.stats.incr(self.PROCESSING_EXCEPTION)
+            return
+
+        elif result == data.CONSUMER_EXCEPTION:
+            LOGGER.debug('Re-queueing message due to ConsumerException')
+            self.reject(message.delivery_tag, True)
+            self.on_processing_error()
+            self.stats.incr(self.CONSUMER_EXCEPTION)
+            return
+
+        elif result == data.UNHANDLED_EXCEPTION:
+            LOGGER.debug('Re-queueing message due to UnhandledException')
+            self.reject(message.delivery_tag, True)
+            self.on_processing_error()
+            self.stats.incr(self.UNHANDLED_EXCEPTION)
             return
 
         elif result == data.MESSAGE_REQUEUE:
-            LOGGER.debug('Bypassing ack due to requeue return from consumer')
+            LOGGER.debug('Re-queueing message due Consumer request')
             self.reject(message.delivery_tag, True)
-            self.on_processing_error()
-            self.stats.incr(self.REQUEUED)
+            self.stats.incr(self.MESSAGE_REQUEUED)
             return
 
         # Ack if the msg wasn't rejected by MessageException and self.ack = True
@@ -576,7 +600,6 @@ class Process(multiprocessing.Process, state.State):
         LOGGER.warning('Rejecting message %s %s requeue', delivery_tag, 'with'
                        if requeue else 'without')
         self.channel.basic_nack(delivery_tag=delivery_tag, requeue=requeue)
-        self.stats.incr(self.REQUEUED if requeue else self.REJECTED)
         if self.is_processing:
             self.reset_state()
 
@@ -658,12 +681,10 @@ class Process(multiprocessing.Process, state.State):
         kwargs = {'logger': 'rejected.processs',
                   'modules': self.get_module_data(),
                   'extra': {
-                      'consumer': self.consumer_name,
+                      'consumer_name': self.consumer_name,
                       'connection': self.connection_name,
                       'env': self.strip_uri_passwords(dict(os.environ)),
                       'message': message},
-                  'tags': {
-                      'message_type': message['properties'].type or 'none'},
                   'time_spent': duration}
         LOGGER.debug('Sending exception to sentry: %r', kwargs)
         self.sentry_client.captureException(exc_info, **kwargs)
@@ -684,7 +705,6 @@ class Process(multiprocessing.Process, state.State):
         # Setup the Sentry client
         if raven and 'sentry_dsn' in cfg:
             options = {
-                'tags': {'consumer_type': consumer_name},
                 'include_paths': ['pika', 'rejected', 'tornado',
                                   cfg['Consumers'][consumer_name]['consumer']],
             }

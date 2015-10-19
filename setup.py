@@ -24,7 +24,7 @@ if sys.version_info < (2, 7, 0):
     install_requires.append('importlib')
 
 setup(name='rejected',
-      version='3.9.4',
+      version='3.10.0',
       description='Rejected is a Python RabbitMQ Consumer Framework and '
                   'Controller Daemon',
       long_description=open('README.rst').read(),

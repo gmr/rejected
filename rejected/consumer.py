@@ -87,24 +87,38 @@ class Consumer(object):
     ``MESSAGE_TYPE`` attribute. If they are not matched, the consumer will not
     process the message and will drop the message without an exception if the
     ``DROP_INVALID_MESSAGES`` attribute is set to ``True``. If it is ``False``,
-    a :py:class:`ConsumerException` is raised.
+    a :py:class:`MessageException` is raised.
 
     If a consumer raises a :py:class:`ProcessingException`, the message that
     was being processed will be republished to the exchange specified by the
     ``ERROR_EXCHANGE`` attribute of the consumer's class using the routing key
     that was last used for the message. The original message body and
-    properties will be used and an additional header ``X-Processing-Exceptions``
-    will be added that will contain the number of times the message has had
-    a ``ProcessingException`` raised for it. In combination with a queue that
-    has ``x-message-ttl`` set and ``x-dead-letter-exchange`` that points to
-    the original exchange for the queue the consumer is consuming off of, you
-    can implement a delayed retry cycle for messages that are failing to
-    process due to external resource or service issues.
+    properties will be used and an additional header
+    ``X-Processing-Exceptions`` will be added that will contain the number of
+    times the message has had a ``ProcessingException`` raised for it. In
+    combination with a queue that has ``x-message-ttl`` set and
+    ``x-dead-letter-exchange`` that points to the original exchange for the
+    queue the consumer is consuming off of, you can implement a delayed retry
+    cycle for messages that are failing to process due to external resource or
+    service issues.
+
+    If ``ERROR_MAX_RETRY`` is set on the class, the headers for each method
+    will be inspected and if the value of ``X-Processing-Exceptions`` is
+    greater than or equal to the ``ERROR_MAX_RETRY`` value, the message will
+    be dropped.
 
     """
     DROP_INVALID_MESSAGES = False
+    """Drop a message if its type property doesn't match ``MESSAGE_TYPE``"""
+
     MESSAGE_TYPE = None
+    """Used to validate the message type of a message before processing"""
+
     ERROR_EXCHANGE = 'errors'
+    """The exchange to publish ProcessingErrors to"""
+
+    ERROR_MAX_RETRY = None
+    """The number of ``ProcessingErrors` before a message is dropped"""
 
     def __init__(self, settings, process):
         """Creates a new instance of a Consumer class. To perform
@@ -128,6 +142,12 @@ class Consumer(object):
 
         # Set a Sentry context for the consumer
         self.set_sentry_context('consumer', self.name)
+
+        try:
+            self.set_sentry_context('version',
+                                    sys.modules[self.__module__].__version__)
+        except (NameError, AttributeError):
+            pass
 
         # Run any child object specified initialization
         self.initialize()
@@ -196,6 +216,7 @@ class Consumer(object):
 
         """
         if self.sentry_client:
+            self.logger.debug('Setting sentry context for %s to %s', tag, value)
             self.sentry_client.tags_context({tag: value})
 
     def statsd_add_timing(self, key, duration):
@@ -520,6 +541,9 @@ class Consumer(object):
         self._clear()
         self._message = message_in
 
+        if self.message_type:
+            self.set_sentry_context('type', self.message_type)
+
         # Validate the message type if the child sets _MESSAGE_TYPE
         if self.MESSAGE_TYPE and self.MESSAGE_TYPE != self.message_type:
             self.logger.warning('Received a non-supported message type: %s',
@@ -527,16 +551,25 @@ class Consumer(object):
             # Should the message be dropped or returned to the broker?
             if self.DROP_INVALID_MESSAGES:
                 raise gen.Return(data.MESSAGE_DROP)
-            raise gen.Return(data.MESSAGE_INVALID)
+            raise gen.Return(data.MESSAGE_EXCEPTION)
 
-        result = self.prepare()
-        if concurrent.is_future(result):
-            yield result
-        if self._finished:
-            self.logger.debug('Returning from finished in prepare')
-            raise gen.Return(data.MESSAGE_ACK)
+        # Check the number of ProcessingErrors and possibly drop the message
+        if (self.ERROR_MAX_RETRY and
+                _PROCESSING_EXCEPTIONS in self.headers):
+            if self.headers[_PROCESSING_EXCEPTIONS] >= self.ERROR_MAX_RETRY:
+                self.logger.warning('Dropping message with %i deaths due to '
+                                    'ERROR_MAX_RETRY',
+                                    self.headers[_PROCESSING_EXCEPTIONS])
+                raise gen.Return(data.MESSAGE_DROP)
 
         try:
+            result = self.prepare()
+            if concurrent.is_future(result):
+                yield result
+            if self._finished:
+                self.logger.debug('Returning from finished in prepare')
+                raise gen.Return(data.MESSAGE_ACK)
+
             result = self.process()
             if concurrent.is_future(result):
                 yield result
@@ -562,23 +595,23 @@ class Consumer(object):
         except ConsumerException as error:
             self.logger.error('ConsumerException processing delivery %s: %r',
                               message_in.delivery_tag, error)
-            raise gen.Return(data.MESSAGE_REQUEUE)
+            raise gen.Return(data.CONSUMER_EXCEPTION)
 
         except MessageException as error:
             self.logger.error('MessageException processing delivery %s: %r',
                               message_in.delivery_tag, error)
-            raise gen.Return(data.MESSAGE_DROP)
+            raise gen.Return(data.MESSAGE_EXCEPTION)
 
         except ProcessingException as error:
             self.logger.error('ProcessingException processing delivery %s: %r',
                               message_in.delivery_tag, error)
             self._republish_processing_error()
-            raise gen.Return(data.MESSAGE_DROP)
+            raise gen.Return(data.PROCESSING_EXCEPTION)
 
         except Exception as error:
             self.log_exception('Exception processing delivery %s: %s',
                                message_in.delivery_tag, error)
-            raise gen.Return(data.MESSAGE_REQUEUE)
+            raise gen.Return(data.UNHANDLED_EXCEPTION)
 
         self.finish()
         self.logger.debug('Post finish')

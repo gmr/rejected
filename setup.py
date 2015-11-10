@@ -17,14 +17,15 @@ install_requires = ['helper',
                     'tornado>=4.2.0']
 
 extras_require = {'html': ['beautifulsoup4'],
-                  'msgpack': ['msgpack-python']}
+                  'msgpack': ['msgpack-python'],
+                  'sentry': ['raven']}
 
 if sys.version_info < (2, 7, 0):
     install_requires.append('backport_collections')
     install_requires.append('importlib')
 
 setup(name='rejected',
-      version='3.10.0',
+      version='3.11.0',
       description='Rejected is a Python RabbitMQ Consumer Framework and '
                   'Controller Daemon',
       long_description=open('README.rst').read(),

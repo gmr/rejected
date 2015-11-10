@@ -3,13 +3,11 @@ language: python
 python:
   - 2.6
   - 2.7
-before_install:
-  - pip install codecov
+  - pypy
 install:
-  - if [[ $TRAVIS_PYTHON_VERSION == '2.6' ]]; then pip install backport_collections unittest2 importlib; fi
-  - "pip install -r requirements.txt"
-  - "pip install -r dev-requirements.txt"
-script: nosetests --with-coverage --cover-package=rejected
+  - python setup.py develop
+  - pip install codecov
+script: nosetests
 after_success:
   - codecov
 services:

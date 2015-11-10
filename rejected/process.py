@@ -84,6 +84,7 @@ class Process(multiprocessing.Process, state.State):
     TIME_SPENT = 'processing_time'
     TIME_WAITED = 'idle_time'
 
+    MESSAGE_AGE = 'message_age'
     MESSAGE_DROPPED = 'message_dropped'
     MESSAGE_REQUEUED = 'message_requeued'
 
@@ -166,6 +167,7 @@ class Process(multiprocessing.Process, state.State):
     def calc_velocity(self, values):
         """Return the message consuming velocity for the process.
 
+        :param dict values: The dict with velocity data
         :rtype: float
 
         """
@@ -329,13 +331,24 @@ class Process(multiprocessing.Process, state.State):
 
     @gen.engine
     def invoke_consumer(self, message):
-        """Wrap the actual processor processing bits"""
+        """Wrap the actual processor processing bits
+
+        :param rejected.data.Message message: The message to process
+
+        """
         # Only allow for a single message to be processed at a time
         with (yield self.consumer_lock.acquire()):
             if self.is_idle:
                 self.set_state(self.STATE_PROCESSING)
                 self.delivery_time = start_time = time.time()
                 self.active_message = message
+
+                # Track the message age
+                if message.properties.timestamp:
+                    self.stats.add_timing(self.MESSAGE_AGE,
+                                          start_time -
+                                          message.properties.timestamp)
+
                 self.start_message_processing()
                 try:
                     result = yield self.consumer._execute(message)
@@ -372,6 +385,10 @@ class Process(multiprocessing.Process, state.State):
         violates the protocol, such as re-declare an exchange or queue with
         different parameters. In this case, we'll close the connection
         to shutdown the object.
+
+        :param pika.channel.Channel _channel: The AMQP Channel
+        :param int reply_code: The AMQP reply code
+        :param str reply_text: The AMQP reply text
 
         """
         LOGGER.critical('Channel was closed: (%s) %s', reply_code, reply_text)
@@ -505,7 +522,11 @@ class Process(multiprocessing.Process, state.State):
 
     @staticmethod
     def on_qos_set(frame):
-        """Invoked by pika when the QoS is set"""
+        """Invoked by pika when the QoS is set
+
+        :param pika.frame.Frame frame: The QoS Frame
+
+        """
         LOGGER.debug("QoS was set: %r", frame)
 
     def on_ready_to_stop(self):
@@ -819,6 +840,10 @@ class Process(multiprocessing.Process, state.State):
             if signum == signal.SIGTERM:
                 signal.siginterrupt(signal.SIGTERM, False)
             return
+
+        # Stop and flush the statds data
+        if self.stats.statsd:
+            self.stats.statsd.stop()
 
         self.on_ready_to_stop()
 

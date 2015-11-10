@@ -23,7 +23,7 @@ class CorrelationAdapter(logging.LoggerAdapter):
 
     """
     def __init__(self, logger, consumer):
-        super(CorrelationAdapter, self).__init__(logger, {})
+        super(CorrelationAdapter, self).__init__(logger, None)
         self.logger = logger
         self.consumer = consumer
 

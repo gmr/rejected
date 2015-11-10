@@ -30,7 +30,8 @@ class Controller(helper.Controller):
                                         profile=self.args.profile,
                                         quantity=self.args.quantity)
 
-    def _prepend_python_path(self, path):  #pragma: no cover
+    @staticmethod
+    def _prepend_python_path(path):  # pragma: no cover
         """Add the specified value to the python path.
 
         :param str path: The path to append

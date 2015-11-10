@@ -18,6 +18,9 @@ class Controller(helper.Controller):
     of the OS level concerns.
 
     """
+    def __init__(self, *args, **kwargs):
+        super(Controller, self).__init__(*args, **kwargs)
+        self._mcp = None
 
     def _master_control_program(self):
         """Return an instance of the MasterControlProgram.

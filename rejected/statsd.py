@@ -4,12 +4,15 @@ file, falling back to environment variables, and finally default values.
 
 Environment Variables:
 
-- STATSD_HOST
-- STATSD_PORT
-- STATSD_PREFIX
+ - STATSD_HOST
+ - STATSD_PORT
+ - STATSD_PREFIX
 
 """
-import collections
+try:
+    import backport_collections as collections
+except ImportError:
+    import collections
 import logging
 import os
 import socket
@@ -33,7 +36,8 @@ class StatsdClient(object):
     def __init__(self, consumer_name, settings):
         """
 
-        :param cfg:
+        :param str consumer_name: The name of the consumer for this client
+        :param dict settings: statsd Settings
 
         """
         self._counters = collections.Counter()
@@ -41,8 +45,8 @@ class StatsdClient(object):
         self._hostname = socket.gethostname().split('.')[0]
         self._settings = settings
 
-        self._addr = (self._setting('host', self.DEFAULT_HOST),
-                      int(self._setting('port', self.DEFAULT_PORT)))
+        self._address = (self._setting('host', self.DEFAULT_HOST),
+                         int(self._setting('port', self.DEFAULT_PORT)))
         self._prefix = self._setting('prefix', self.DEFAULT_PREFIX)
         self._socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM,
                                      socket.IPPROTO_UDP)
@@ -104,6 +108,6 @@ class StatsdClient(object):
             payload = self.PAYLOAD_FORMAT.format(self._prefix, self._hostname,
                                                  self._consumer_name, key,
                                                  value, metric_type).encode()
-            self._socket.sendto(payload, self._addr)
+            self._socket.sendto(payload, self._address)
         except socket.error:
             LOGGER.exception('Error sending statsd metric')

@@ -202,8 +202,13 @@ class Consumer(object):
         self._finished = True
         self.on_finish()
 
-    def require_setting(self, name, feature="this feature"):
-        """Raises an exception if the given app setting is not defined."""
+    def require_setting(self, name, feature='this feature'):
+        """Raises an exception if the given app setting is not defined.
+
+        :param str name: The parameter name
+        :param str feature: A friendly name for the setting feature
+
+        """
         if not self.settings.get(name):
             raise Exception("You must define the '%s' setting in your "
                             "application to use %s" % (name, feature))
@@ -663,8 +668,9 @@ class Consumer(object):
     def log_exception(self, msg_format, *args, **kwargs):
         """Customize the logging of uncaught exceptions.
 
-        :param str msg_format: format of message to log with ``self.logger.error``
+        :param str msg_format: format of msg to log with ``self.logger.error``
         :param args: positional arguments to pass to ``self.logger.error``
+        :param kwargs: keyword args to pass into ``self.logger.error``
         :keyword bool send_to_sentry: if omitted or *truthy*, this keyword
             will send the captured exception to Sentry (if enabled).
 
@@ -765,7 +771,8 @@ class PublishingConsumer(Consumer):
 
         :param any response_body: The message body to send
         :param rejected.data.Properties properties: Message properties to use
-        :param bool auto_id: Automatically shuffle message_id and correlation_id
+        :param bool auto_id: Automatically shuffle message_id & correlation_id
+        :param str exchange: Override the exchange to publish to
         :param str reply_to: Override the reply_to in the properties
         :raises: ValueError
 
@@ -1025,6 +1032,7 @@ class SmartPublishingConsumer(SmartConsumer, PublishingConsumer):
         :param str exchange: The exchange to publish to
         :param str routing_key: The routing key to publish with
         :param dict properties: The message properties
+        :param mixed body: The message body to publish
         :param no_serialization: Turn off auto-serialization of the body
         :param no_encoding: Turn off auto-encoding of the body
 
@@ -1035,7 +1043,7 @@ class SmartPublishingConsumer(SmartConsumer, PublishingConsumer):
 
         # Auto-serialize the content if needed
         if (not no_serialization and not isinstance(body, basestring) and
-            properties.get('content_type')):
+                properties.get('content_type')):
             self.logger.debug('Auto-serializing message body')
             body = self._auto_serialize(properties.get('content_type'), body)
 
@@ -1098,8 +1106,8 @@ class SmartPublishingConsumer(SmartConsumer, PublishingConsumer):
             return self._dump_csv_value(value)
 
         # If it's XML or HTML auto
-        elif (bs4 and isinstance(value, bs4.BeautifulSoup) and content_type in
-            ('text/html', 'text/xml')):
+        elif (bs4 and isinstance(value, bs4.BeautifulSoup) and
+              content_type in ('text/html', 'text/xml')):
             self.logger.debug('Dumping BS4 object into HTML or XML')
             return self._dump_bs4_value(value)
 
@@ -1130,12 +1138,12 @@ class SmartPublishingConsumer(SmartConsumer, PublishingConsumer):
         :rtype: str
 
         """
-        buffer = stringio.StringIO()
-        writer = csv.writer(buffer, quotechar='"', quoting=csv.QUOTE_ALL)
+        buff = stringio.StringIO()
+        writer = csv.writer(buff, quotechar='"', quoting=csv.QUOTE_ALL)
         writer.writerows(value)
-        buffer.seek(0)
-        value = buffer.read()
-        buffer.close()
+        buff.seek(0)
+        value = buff.read()
+        buff.close()
         return value
 
     @staticmethod

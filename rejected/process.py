@@ -413,6 +413,8 @@ class Process(multiprocessing.Process, state.State):
         closed unexpectedly. Shutdown if not already doing so.
 
         :param pika.connection.Connection _unused: The closed connection
+        :param int code: The AMQP reply code
+        :param str text: The AMQP reply text
 
         """
         LOGGER.critical('Connection from RabbitMQ closed in state %s (%s, %s)',
@@ -814,9 +816,12 @@ class Process(multiprocessing.Process, state.State):
                 values[key] = values[key].replace(matches.group(1), '****')
         return values
 
-    def stop(self, signum=None, _frame_unused=None):
+    def stop(self, signum=None, _unused=None):
         """Stop the consumer from consuming by calling BasicCancel and setting
         our state.
+
+        :param int signum: The signal received
+        :param frame _unused: The stack frame from when the signal was called
 
         """
         LOGGER.debug('Stop called in state: %s', self.state_description)

@@ -8,6 +8,7 @@ import logging
 class CorrelationFilter(logging.Formatter):
     """Filter records that have a correlation_id"""
     def __init__(self, exists=None):
+        super(CorrelationFilter, self).__init__()
         self.exists = exists
 
     def filter(self, record):
@@ -22,6 +23,7 @@ class CorrelationAdapter(logging.LoggerAdapter):
 
     """
     def __init__(self, logger, consumer):
+        super(CorrelationAdapter, self).__init__(logger, {})
         self.logger = logger
         self.consumer = consumer
 

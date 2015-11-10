@@ -60,9 +60,10 @@ class StatsdClient(object):
         self._on_counter_flush()
 
     def _on_counter_flush(self):
-        for key in self._counters:
-            self._send(key, self._counters[key], 'c')
+        counters = dict(self._counters)
         self._counters = collections.Counter()
+        for key in counters.keys():
+            self._send(key, counters[key], 'c')
 
     def _setting(self, key, default):
         """Return the setting, checking config, then the appropriate

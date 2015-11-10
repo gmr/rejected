@@ -9,17 +9,22 @@ Environment Variables:
 - STATSD_PREFIX
 
 """
+import collections
 import logging
 import os
 import socket
+
+from tornado import ioloop
 
 LOGGER = logging.getLogger(__name__)
 
 
 class StatsdClient(object):
-    """
+    """A simple statsd client that buffers counters to emit fewer UDP packets
+    than once per incr.
 
     """
+    ROLLUP_DURATION = 5000
     DEFAULT_HOST = 'localhost'
     DEFAULT_PORT = 8125
     DEFAULT_PREFIX = 'rejected'
@@ -31,6 +36,7 @@ class StatsdClient(object):
         :param cfg:
 
         """
+        self._counters = collections.Counter()
         self._consumer_name = consumer_name
         self._hostname = socket.gethostname().split('.')[0]
         self._settings = settings
@@ -40,6 +46,19 @@ class StatsdClient(object):
         self._prefix = self._setting('prefix', self.DEFAULT_PREFIX)
         self._socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM,
                                      socket.IPPROTO_UDP)
+        self._ioloop = ioloop.IOLoop.current()
+        self._counter_flush = ioloop.PeriodicCallback(self._on_counter_flush,
+                                                      self.ROLLUP_DURATION)
+        self._counter_flush.start()
+
+    def stop(self):
+        self._counter_flush.stop()
+        self._on_counter_flush()
+
+    def _on_counter_flush(self):
+        for key in self._counters:
+            self._send(key, self._counters[key], 'c')
+        self._counters = collections.Counter()
 
     def _setting(self, key, default):
         """Return the setting, checking config, then the appropriate
@@ -57,19 +76,21 @@ class StatsdClient(object):
         """Add a timer value to statsd for the specified key
 
         :param str key: The key to add the timing to
-        :param int|float value: The value of the timing
+        :param int|float value: The value of the timing in milliseconds
 
         """
-        self._send(key, value, 'ms')
+        self._send(key, value * 1000, 'ms')
 
     def incr(self, key, value=1):
-        """Increment the counter value in statsd
+        """Increment the counter value in statsd by grouping up the counters
+        and sending them out in chunks.
 
         :param str key: The key to increment
         :param int value: The value to increment by, defaults to 1
 
         """
-        self._send(key, value, 'c')
+
+        self._counters[key] += value
 
     def _send(self, key, value, metric_type):
         """Send the specified value to the statsd daemon via UDP without a

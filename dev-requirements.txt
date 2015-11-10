@@ -4,3 +4,4 @@ mock
 nose
 sphinx
 raven
+coverage

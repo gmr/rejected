@@ -735,10 +735,12 @@ class PublishingConsumer(Consumer):
 
         # Publish the message
         self.logger.debug('Publishing message to %s:%s', exchange, routing_key)
-        self._channel.basic_publish(exchange=exchange,
-                                    routing_key=routing_key,
-                                    properties=msg_props,
-                                    body=body)
+        with self.statsd_track_duration('publish.{}.{}'.format(exchange,
+                                                               routing_key)):
+            self._channel.basic_publish(exchange=exchange,
+                                        routing_key=routing_key,
+                                        properties=msg_props,
+                                        body=body)
 
     def reply(self, response_body, properties,
               auto_id=True,

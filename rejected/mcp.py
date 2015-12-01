@@ -6,7 +6,10 @@ import logging
 import multiprocessing
 import os
 import psutil
-import Queue
+try:
+    import Queue as queue
+except ImportError:
+    import queue
 import signal
 import sys
 import time
@@ -418,7 +421,7 @@ class MasterControlProgram(state.State):
         while True:
             try:
                 stats = self.stats_queue.get(False)
-            except Queue.Empty:
+            except queue.Empty:
                 break
             try:
                 self.poll_data['processes'].remove(stats['name'])
@@ -530,7 +533,7 @@ class MasterControlProgram(state.State):
 
         """
         proc = multiprocessing.current_process()
-        for offset in xrange(0, len(sys.argv)):
+        for offset in range(0, len(sys.argv)):
             if sys.argv[offset] == '-c':
                 name = sys.argv[offset + 1].split('/')[-1]
                 proc.name = name.split('.')[0]

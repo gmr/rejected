@@ -15,6 +15,7 @@ message's property, it will automatically be decoded.
 
 Supported `SmartConsumer` MIME types are:
 
+ - application/msgpack (with u-msgpack-python installed)
  - application/json
  - application/pickle
  - application/x-pickle
@@ -31,11 +32,11 @@ Supported `SmartConsumer` MIME types are:
 import bz2
 import contextlib
 import csv
+import io
 import json
 import logging
 import pickle
 import plistlib
-import StringIO as stringio
 import sys
 import time
 import traceback
@@ -63,12 +64,20 @@ except ImportError:
     bs4 = None
 
 try:
-    import msgpack
+    import umsgpack
 except ImportError:
-    LOGGER.warning('msgpack not found, disabling msgpack support')
-    msgpack = None
+    LOGGER.warning('umsgpack not found, disabling msgpack support')
+    umsgpack = None
+
+# Python3 Support
+try:
+    unicode()
+except NameError:
+    unicode = str
+
 
 _PROCESSING_EXCEPTIONS = 'X-Processing-Exceptions'
+_EXCEPTION_FROM = 'X-Exception-From'
 
 BS4_MIME_TYPES = ('text/html', 'text/xml')
 PICKLE_MIME_TYPES = ('application/pickle', 'application/x-pickle',
@@ -875,7 +884,7 @@ class SmartConsumer(Consumer):
         if self.content_type == 'application/json':
             self._message_body = self._load_json_value(self._message_body)
 
-        elif msgpack and self.content_type == 'application/msgpack':
+        elif umsgpack and self.content_type == 'application/msgpack':
             self._message_body = self._load_msgpack_value(self._message_body)
 
         elif self.content_type in PICKLE_MIME_TYPES:
@@ -938,7 +947,7 @@ class SmartConsumer(Consumer):
         :rtype: csv.DictReader
 
         """
-        csv_buffer = stringio.StringIO(value)
+        csv_buffer = io.StringIO(value)
         dialect = csv.Sniffer().sniff(csv_buffer.read(1024))
         csv_buffer.seek(0)
         return csv.DictReader(csv_buffer, dialect=dialect)
@@ -967,7 +976,7 @@ class SmartConsumer(Consumer):
 
         """
         try:
-            return msgpack.unpackb(value)
+            return umsgpack.unpackb(value)
         except ValueError as error:
             self.logger.error('Could not decode message body: %s', error,
                               exc_info=sys.exc_info())
@@ -993,7 +1002,12 @@ class SmartConsumer(Consumer):
         :rtype: dict
 
         """
-        return plistlib.readPlistFromString(value)
+        if hasattr(plistlib, 'loads'):
+            return plistlib.loads(value)
+        try:
+            return plistlib.readPlistFromString(value)
+        except AttributeError:
+            return plistlib.readPlistFromBytes(value)
 
     @staticmethod
     def _load_yaml_value(value):
@@ -1042,7 +1056,10 @@ class SmartPublishingConsumer(SmartConsumer, PublishingConsumer):
         properties_out = self._get_pika_properties(properties)
 
         # Auto-serialize the content if needed
-        if (not no_serialization and not isinstance(body, basestring) and
+        is_string = (isinstance(body, str) or
+                     isinstance(body, bytes) or
+                     isinstance(body, unicode))
+        if (not no_serialization and not is_string and
                 properties.get('content_type')):
             self.logger.debug('Auto-serializing message body')
             body = self._auto_serialize(properties.get('content_type'), body)
@@ -1089,7 +1106,7 @@ class SmartPublishingConsumer(SmartConsumer, PublishingConsumer):
             self.logger.debug('Auto-serializing content as JSON')
             return self._dump_json_value(value)
 
-        elif msgpack and content_type == 'application/msgpack':
+        elif umsgpack and content_type == 'application/msgpack':
             self.logger.debug('Auto-serializing content as msgpack')
             return self._dump_msgpack_value(value)
 
@@ -1138,7 +1155,7 @@ class SmartPublishingConsumer(SmartConsumer, PublishingConsumer):
         :rtype: str
 
         """
-        buff = stringio.StringIO()
+        buff = io.StringIO()
         writer = csv.writer(buff, quotechar='"', quoting=csv.QUOTE_ALL)
         writer.writerows(value)
         buff.seek(0)
@@ -1164,7 +1181,7 @@ class SmartPublishingConsumer(SmartConsumer, PublishingConsumer):
         :rtype: str
 
         """
-        return msgpack.packb(value)
+        return umsgpack.packb(value)
 
     @staticmethod
     def _dump_pickle_value(value):
@@ -1184,7 +1201,12 @@ class SmartPublishingConsumer(SmartConsumer, PublishingConsumer):
         :rtype: dict
 
         """
-        return plistlib.writePlistToString(value)
+        if hasattr(plistlib, 'dumps'):
+            return plistlib.dumps(value)
+        try:
+            return plistlib.writePlistToString(value)
+        except AttributeError:
+            return plistlib.writePlistToBytes(value)
 
     @staticmethod
     def _dump_yaml_value(value):

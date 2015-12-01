@@ -4,7 +4,7 @@ Rejected is a Python RabbitMQ Consumer Framework and Controller Daemon
 """
 __author__ = 'Gavin M. Roy <gavinmroy@gmail.com>'
 __since__ = '2009-09-10'
-__version__ = '3.11.1'
+__version__ = '3.12.0'
 
 import logging
 try:
@@ -18,9 +18,9 @@ except ImportError:
 # Add NullHandler to prevent logging warnings
 logging.getLogger(__name__).addHandler(NullHandler())
 
-from consumer import Consumer
-from consumer import PublishingConsumer
-from consumer import SmartConsumer
-from consumer import SmartPublishingConsumer
-from consumer import ConsumerException
-from consumer import MessageException
+from rejected.consumer import Consumer
+from rejected.consumer import PublishingConsumer
+from rejected.consumer import SmartConsumer
+from rejected.consumer import SmartPublishingConsumer
+from rejected.consumer import ConsumerException
+from rejected.consumer import MessageException

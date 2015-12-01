@@ -6,6 +6,7 @@ __author__ = 'Gavin M. Roy <gavinmroy@gmail.com>'
 __since__ = '2009-09-10'
 __version__ = '3.12.0'
 
+import sys
 import logging
 try:
     # not available in python 2.6
@@ -14,6 +15,8 @@ except ImportError:
     class NullHandler(logging.Handler):
         def emit(self, record):
             pass
+
+PYTHON26 = sys.version_info < (2,7)
 
 # Add NullHandler to prevent logging warnings
 logging.getLogger(__name__).addHandler(NullHandler())

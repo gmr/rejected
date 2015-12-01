@@ -50,6 +50,7 @@ from tornado import gen
 from tornado import locks
 import yaml
 
+from rejected import PYTHON26
 from rejected import data
 from rejected import log
 
@@ -695,8 +696,12 @@ class Consumer(object):
         if all(exc_info):
             exc_type, exc_value, tb = exc_info
             exc_name = exc_type.__name__
-            self.logger.exception('Processor handled %s: %s', exc_name,
-                                  exc_value, exc_info=exc_info)
+            if PYTHON26:
+                self.logger.exception('Processor handled %s: %s', exc_name,
+                                      exc_value)
+            else:
+                self.logger.exception('Processor handled %s: %s', exc_name,
+                                      exc_value, exc_info=exc_info)
 
         if kwargs.get('send_to_sentry', True):
             self._process.send_exception_to_sentry(exc_info)

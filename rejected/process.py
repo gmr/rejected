@@ -30,6 +30,7 @@ except ImportError:
 from pika import spec
 
 from rejected import __version__
+from rejected import PYTHON26
 from rejected import data
 from rejected import state
 from rejected import stats
@@ -273,8 +274,13 @@ class Process(multiprocessing.Process, state.State):
         try:
             consumer_, version = import_consumer(cfg['consumer'])
         except ImportError as error:
-            LOGGER.exception('Error importing the consumer %s: %s',
-                             cfg['consumer'], error, exc_info=sys.exc_info())
+            if PYTHON26:
+                LOGGER.exception('Error importing the consumer %s: %s',
+                                 cfg['consumer'], error)
+            else:
+                LOGGER.exception('Error importing the consumer %s: %s',
+                                 cfg['consumer'], error,
+                                 exc_info=sys.exc_info())
             return
 
         if version:
@@ -288,8 +294,13 @@ class Process(multiprocessing.Process, state.State):
         try:
             return consumer_(settings=settings, process=self)
         except Exception as error:
-            LOGGER.exception('Error creating the consumer "%s": %s',
-                             cfg['consumer'], error, exc_info=sys.exc_info())
+            if PYTHON26:
+                LOGGER.exception('Error creating the consumer "%s": %s',
+                                 cfg['consumer'], error)
+            else:
+                LOGGER.exception('Error creating the consumer "%s": %s',
+                                 cfg['consumer'], error,
+                                 exc_info=sys.exc_info())
 
     def get_module_data(self):
         modules = {}
@@ -339,9 +350,14 @@ class Process(multiprocessing.Process, state.State):
                 try:
                     result = yield self.consumer._execute(message)
                 except Exception as error:
-                    LOGGER.exception('Unhandled exception from consumer in '
-                                     'process. This should not happen. %s',
-                                     error, exc_info=sys.exc_info())
+                    if PYTHON26:
+                        LOGGER.exception('Unhandled exception from consumer in '
+                                         'process. This should not happen. %s',
+                                         error)
+                    else:
+                        LOGGER.exception('Unhandled exception from consumer in '
+                                         'process. This should not happen. %s',
+                                         error, exc_info=sys.exc_info())
                     result = data.MESSAGE_REQUEUE
 
                 LOGGER.debug('Finished processing message: %r', result)
@@ -661,8 +677,12 @@ class Process(multiprocessing.Process, state.State):
         except (AttributeError, ImportError) as error:
             name = self._kwargs['consumer_name']
             class_name = self._kwargs['config']['Consumers'][name]['consumer']
-            LOGGER.exception('Could not start %s, stopping process: %r',
-                             class_name, error, exc_info=sys.exc_info())
+            if PYTHON26:
+                LOGGER.exception('Could not start %s, stopping process: %r',
+                                 class_name, error)
+            else:
+                LOGGER.exception('Could not start %s, stopping process: %r',
+                                 class_name, error, exc_info=sys.exc_info())
             os.kill(os.getppid(), signal.SIGABRT)
             sys.exit(1)
 

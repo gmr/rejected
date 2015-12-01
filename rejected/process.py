@@ -436,7 +436,11 @@ class Process(multiprocessing.Process, state.State):
         """
         if method.redelivered:
             self.stats.incr(self.REDELIVERED)
-        self.invoke_consumer(data.Message(channel, method, properties, body))
+        try:
+            self.invoke_consumer(data.Message(channel, method, properties,
+                                              body))
+        except AttributeError:
+            pass
 
     def on_processed(self, message, result, start_time):
         self.stats.add_timing(self.TIME_SPENT, time.time() - start_time)

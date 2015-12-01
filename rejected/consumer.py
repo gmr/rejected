@@ -147,7 +147,9 @@ class Consumer(object):
         self._yield_condition = locks.Condition()
 
         # Create a logger that attaches correlation ID to the record
-        self.logger = log.CorrelationAdapter(LOGGER, self)
+        self._logger = logging.getLogger(settings.get('_import_module',
+                                                      __name__))
+        self.logger = log.CorrelationAdapter(self._logger, self)
 
         # Set a Sentry context for the consumer
         self.set_sentry_context('consumer', self.name)

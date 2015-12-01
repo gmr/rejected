@@ -48,7 +48,6 @@ def import_consumer(value):
     :return: tuple(Class, str)
 
     """
-
     parts = value.split('.')
     import_name = '.'.join(parts[0:-1])
     import_handle = importlib.import_module(import_name)
@@ -288,14 +287,11 @@ class Process(multiprocessing.Process, state.State):
         else:
             LOGGER.info('Creating consumer %s', cfg['consumer'])
 
-        kwargs = {'process': self}
-        if 'config' in cfg:
-            kwargs['configuration'] = cfg.get('config', dict())
+        settings = cfg.get('config', dict())
+        settings['_import_module'] = '.'.join(cfg['consumer'].split('.')[0:-1])
 
         try:
-            return consumer_(**kwargs)
-        except TypeError:
-            return consumer_(cfg.get('config', dict()), process=self)
+            return consumer_(settings=settings, process=self)
         except Exception as error:
             LOGGER.error('Error creating the consumer "%s": %s',
                          cfg['consumer'], error)

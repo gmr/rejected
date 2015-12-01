@@ -3,7 +3,7 @@
 Application:
   poll_interval: 10.0
   log_stats: True
-  sentry_dsn: https://[YOUR-SENTRY-DSN]
+  # sentry_dsn: https://[YOUR-SENTRY-DSN]
   statsd:
     enabled: True
     host: localhost
@@ -99,7 +99,11 @@ Logging:
       propagate: false
       handlers: [console, console_correlation, syslog, syslog_correlation]
     rejected.consumer:
-      level: DEBUG
+      level: INFO
+      propagate: false
+      handlers: [console, console_correlation, syslog, syslog_correlation]
+    rejected.example:
+      level: INFO
       propagate: false
       handlers: [console, console_correlation, syslog, syslog_correlation]
     rejected.mcp:

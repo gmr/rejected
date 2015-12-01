@@ -540,8 +540,9 @@ class Process(multiprocessing.Process, state.State):
         self.consumer_lock = None
 
         # Stop the IOLoop
-        LOGGER.debug('Stopping IOLoop')
-        self.ioloop.stop()
+        if self.ioloop:
+            LOGGER.debug('Stopping IOLoop')
+            self.ioloop.stop()
 
         # Note that shutdown is complete and set the state accordingly
         self.set_state(self.STATE_STOPPED)

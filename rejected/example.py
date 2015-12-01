@@ -12,7 +12,7 @@ __version__ = '1.0.0'
 class ExampleConsumer(consumer.SmartConsumer):
 
     def process(self):
-        self.logger.debug('Message: %r', self.body)
+        self.logger.info('Message: %r', self.body)
         """
         action = random.randint(0, 100)
         if action == 0:

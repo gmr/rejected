@@ -39,7 +39,6 @@ import pickle
 import plistlib
 import sys
 import time
-import traceback
 import uuid
 import warnings
 import zlib
@@ -696,10 +695,8 @@ class Consumer(object):
         if all(exc_info):
             exc_type, exc_value, tb = exc_info
             exc_name = exc_type.__name__
-            self.logger.error('Processor handled %s: %s', exc_name, exc_value)
-            formatted_lines = traceback.format_exception(*exc_info)
-            for offset, line in enumerate(formatted_lines):
-                self.logger.debug('(%s) %i: %s', exc_name, offset, line.strip())
+            self.logger.exception('Processor handled %s: %s', exc_name,
+                                  exc_value, exc_info=exc_info)
 
         if kwargs.get('send_to_sentry', True):
             self._process.send_exception_to_sentry(exc_info)

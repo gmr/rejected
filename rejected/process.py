@@ -3,7 +3,6 @@ Consumer process management. Imports consumer code, manages RabbitMQ
 connection state and collects stats about the consuming process.
 
 """
-from tornado import gen
 import importlib
 import logging
 import math
@@ -19,8 +18,8 @@ import re
 import signal
 import sys
 import time
-import traceback
 
+from tornado import gen
 from tornado import ioloop
 from tornado import locks
 import pika
@@ -275,11 +274,7 @@ class Process(multiprocessing.Process, state.State):
             consumer_, version = import_consumer(cfg['consumer'])
         except ImportError as error:
             LOGGER.exception('Error importing the consumer %s: %s',
-                             cfg['consumer'], error)
-            exc_type, exc_value, exc_traceback = sys.exc_info()
-            lines = traceback.extract_tb(exc_traceback)
-            for line in lines:
-                LOGGER.error(line)
+                             cfg['consumer'], error, exc_info=sys.exc_info())
             return
 
         if version:
@@ -293,13 +288,8 @@ class Process(multiprocessing.Process, state.State):
         try:
             return consumer_(settings=settings, process=self)
         except Exception as error:
-            LOGGER.error('Error creating the consumer "%s": %s',
-                         cfg['consumer'], error)
-            exc_type, exc_value, exc_traceback = sys.exc_info()
-            lines = traceback.extract_tb(exc_traceback)
-            for line in lines:
-                LOGGER.error(line)
-            return
+            LOGGER.exception('Error creating the consumer "%s": %s',
+                             cfg['consumer'], error, exc_info=sys.exc_info())
 
     def get_module_data(self):
         modules = {}
@@ -351,7 +341,7 @@ class Process(multiprocessing.Process, state.State):
                 except Exception as error:
                     LOGGER.exception('Unhandled exception from consumer in '
                                      'process. This should not happen. %s',
-                                     error)
+                                     error, exc_info=sys.exc_info())
                     result = data.MESSAGE_REQUEUE
 
                 LOGGER.debug('Finished processing message: %r', result)
@@ -667,7 +657,7 @@ class Process(multiprocessing.Process, state.State):
             name = self._kwargs['consumer_name']
             class_name = self._kwargs['config']['Consumers'][name]['consumer']
             LOGGER.exception('Could not start %s, stopping process: %r',
-                             class_name, error)
+                             class_name, error, exc_info=sys.exc_info())
             os.kill(os.getppid(), signal.SIGABRT)
             sys.exit(1)
 

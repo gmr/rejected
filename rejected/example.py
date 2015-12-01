@@ -13,7 +13,6 @@ class ExampleConsumer(consumer.SmartConsumer):
 
     def process(self):
         self.logger.info('Message: %r', self.body)
-        """
         action = random.randint(0, 100)
         if action == 0:
             raise consumer.ConsumerException('zomg')
@@ -21,9 +20,6 @@ class ExampleConsumer(consumer.SmartConsumer):
             raise consumer.MessageException('reject')
         elif action < 10:
             raise consumer.ProcessingException('publish')
-
-        """
-
 
 
 class AsyncExampleConsumer(consumer.Consumer):

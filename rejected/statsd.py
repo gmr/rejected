@@ -9,15 +9,9 @@ Environment Variables:
  - STATSD_PREFIX
 
 """
-try:
-    import backport_collections as collections
-except ImportError:
-    import collections
 import logging
 import os
 import socket
-
-from tornado import ioloop
 
 LOGGER = logging.getLogger(__name__)
 
@@ -27,7 +21,6 @@ class StatsdClient(object):
     than once per incr.
 
     """
-    ROLLUP_DURATION = 5000
     DEFAULT_HOST = 'localhost'
     DEFAULT_PORT = 8125
     DEFAULT_PREFIX = 'rejected'
@@ -40,7 +33,6 @@ class StatsdClient(object):
         :param dict settings: statsd Settings
 
         """
-        self._counters = collections.Counter()
         self._consumer_name = consumer_name
         self._hostname = socket.gethostname().split('.')[0]
         self._settings = settings
@@ -50,20 +42,10 @@ class StatsdClient(object):
         self._prefix = self._setting('prefix', self.DEFAULT_PREFIX)
         self._socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM,
                                      socket.IPPROTO_UDP)
-        self._ioloop = ioloop.IOLoop.current()
-        self._counter_flush = ioloop.PeriodicCallback(self._on_counter_flush,
-                                                      self.ROLLUP_DURATION)
-        self._counter_flush.start()
 
     def stop(self):
         self._counter_flush.stop()
         self._on_counter_flush()
-
-    def _on_counter_flush(self):
-        counters = dict(self._counters)
-        self._counters = collections.Counter()
-        for key in counters.keys():
-            self._send(key, counters[key], 'c')
 
     def _setting(self, key, default):
         """Return the setting, checking config, then the appropriate
@@ -94,8 +76,7 @@ class StatsdClient(object):
         :param int value: The value to increment by, defaults to 1
 
         """
-
-        self._counters[key] += value
+        self._send(key, value, 'c')
 
     def _send(self, key, value, metric_type):
         """Send the specified value to the statsd daemon via UDP without a

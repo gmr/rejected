@@ -44,8 +44,7 @@ class StatsdClient(object):
                                      socket.IPPROTO_UDP)
 
     def stop(self):
-        self._counter_flush.stop()
-        self._on_counter_flush()
+        pass
 
     def _setting(self, key, default):
         """Return the setting, checking config, then the appropriate

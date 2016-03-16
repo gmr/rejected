@@ -121,7 +121,11 @@ class Consumer(object):
     """Drop a message if its type property doesn't match ``MESSAGE_TYPE``"""
 
     MESSAGE_TYPE = None
-    """Used to validate the message type of a message before processing"""
+    """Used to validate the message type of a message before processing.
+
+    This attribute can be set to a string that is matched against the
+    AMQP message type or a list of acceptable message types.
+    """
 
     ERROR_EXCHANGE = 'errors'
     """The exchange to publish ProcessingErrors to"""
@@ -560,14 +564,20 @@ class Consumer(object):
         if self.message_type:
             self.set_sentry_context('type', self.message_type)
 
-        # Validate the message type if the child sets _MESSAGE_TYPE
-        if self.MESSAGE_TYPE and self.MESSAGE_TYPE != self.message_type:
-            self.logger.warning('Received a non-supported message type: %s',
-                                self.message_type)
-            # Should the message be dropped or returned to the broker?
-            if self.DROP_INVALID_MESSAGES:
-                raise gen.Return(data.MESSAGE_DROP)
-            raise gen.Return(data.MESSAGE_EXCEPTION)
+        # Validate the message type if the child sets MESSAGE_TYPE
+        if self.MESSAGE_TYPE:
+            if isinstance(self.MESSAGE_TYPE, (tuple, list, set)):
+                message_supported = self.message_type in self.MESSAGE_TYPE
+            else:
+                message_supported = self.message_type == self.MESSAGE_TYPE
+
+            if not message_supported:
+                self.logger.warning('Received unsupported message type: %s',
+                                    self.message_type)
+                # Should the message be dropped or returned to the broker?
+                if self.DROP_INVALID_MESSAGES:
+                    raise gen.Return(data.MESSAGE_DROP)
+                raise gen.Return(data.MESSAGE_EXCEPTION)
 
         # Check the number of ProcessingErrors and possibly drop the message
         if (self.ERROR_MAX_RETRY and

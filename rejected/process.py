@@ -122,6 +122,7 @@ class Process(multiprocessing.Process, state.State):
         self.consumer = None
         self.consumer_lock = None
         self.consumer_name = None
+        self.consumer_version = None
         self.delivery_time = None
         self.ioloop = None
         self.last_failure = 0
@@ -285,6 +286,7 @@ class Process(multiprocessing.Process, state.State):
 
         if version:
             LOGGER.info('Creating consumer %s v%s', cfg['consumer'], version)
+            self.consumer_version = version
         else:
             LOGGER.info('Creating consumer %s', cfg['consumer'])
 
@@ -736,13 +738,28 @@ class Process(multiprocessing.Process, state.State):
         LOGGER.info('Initializing for %s on %s connection', self.name,
                     connection_name)
 
-        # Setup the Sentry client
-        if raven and 'sentry_dsn' in cfg:
-            options = {
-                'include_paths': ['pika', 'rejected', 'tornado',
+        # Setup the Sentry client if configured and installed
+        sentry_dsn = cfg['Consumers'][consumer_name].get('sentry_dsn',
+                                                         cfg.get('sentry_dsn'))
+        if raven and sentry_dsn:
+            kwargs = {
+                'exclude_paths': ['tornado'],
+                'include_paths': ['pika',
+                                  'rejected',
                                   cfg['Consumers'][consumer_name]['consumer']],
+                'ignore_exceptions': ['rejected.consumer.ConsumerException',
+                                      'rejected.consumer.MessageException',
+                                      'rejected.consumer.ProcessingException'],
+                'processors': ['raven.processors.SanitizePasswordsProcessor']
             }
-            self.sentry_client = raven.Client(cfg['sentry_dsn'], **options)
+
+            if os.environ.get('ENVIRONMENT'):
+                kwargs['environment'] = os.environ['ENVIRONMENT']
+
+            if self.consumer_version:
+                kwargs['version'] = self.consumer_version
+
+            self.sentry_client = raven.Client(sentry_dsn, **kwargs)
 
         self.connection_name = connection_name
         self.consumer_name = consumer_name

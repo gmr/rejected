@@ -49,12 +49,12 @@ To make a consumer async, you can decorate the
 and `Consumer.process <http://rejected.readthedocs.org/en/latest/api_consumer.html#rejected.consumer.Consumer.process>`_
 methods using Tornado's
 `@gen.coroutine <http://www.tornadoweb.org/en/stable/gen.html#tornado.gen.coroutine>`_.
-Asynchronous consumers to handle multiple messages in the same process, but
+Asynchronous consumers do not allow for concurrent processing multiple messages in the same process, but
 rather allow you to use asynchronous clients like
 `Tornado's <http://tornadoweb.org>`_
 `AsyncHTTPClient <http://www.tornadoweb.org/en/stable/httpclient.html>`_ and the
 `Queries <http://queries.readthedocs.org/en/latest/tornado_session.html>`_
-PostgreSQL library to perform parallel tasks using coroutines.
+PostgreSQL library to perform parallel tasks using coroutines when processing a single message.
 
 .. code:: python
 

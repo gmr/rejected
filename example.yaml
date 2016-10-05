@@ -31,7 +31,7 @@ Application:
       connections: [rabbitmq]
       # sentry_dsn: sentry_dsn: https://[YOUR-SENTRY-DSN]
       qty: 1
-      queue: gmr-test
+      queue: test
       ack: True
       influxdb_measurement: async_consumer
       qos_prefetch: 100
@@ -44,7 +44,7 @@ Application:
       queue: generated_messages
       ack: True
       max_errors: 100
-      error_exchange: Foo
+      error_exchange: errors
       influxdb_measurement: sync_consumer
       qos_prefetch: 1
       config:

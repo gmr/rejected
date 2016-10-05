@@ -75,7 +75,8 @@ class MasterControlProgram(state.State):
         self.child_abort = False
 
         # Carry for logging internal stats collection data
-        self.log_stats_enabled = config.application.get('log_stats', False)
+        self.log_stats_enabled = config.application.get('stats', {}).get(
+            'log', config.application.get('log_stats', False))
         LOGGER.debug('Stats logging enabled: %s', self.log_stats_enabled)
 
         # Setup the poller related threads

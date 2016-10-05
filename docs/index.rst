@@ -19,15 +19,23 @@ data from the consumer processes and report on it.
 Features
 --------
 
-- Dynamic QoS
 - Automatic exception handling including connection management and consumer restarting
 - Smart consumer classes that can automatically decode and deserialize message bodies based upon message headers
-- Metrics logging and submission to statsd
+- Metrics logging and submission to statsd and InfluxDB
 - Built-in profiling of consumer code
 
 Installation
 ------------
-rejected is available from the `Python Package Index <https://preview-pypi.python.org/project/rejected/>`_ and can be installed by running :command:`easy_install rejected` or :command:`pip install rejected`
+rejected is available from the `Python Package Index <https://preview-pypi.python.org/project/rejected/>`_
+and can be installed by running :command:`pip install rejected`.
+
+For additional dependencies for optional features:
+
+  - To install HTML support, run :command:`pip install rejected[html]`
+  - To install InfluxDB support, run :command:`pip install rejected[influxdb]`
+  - To install MessagePack support, run :command:`pip install rejected[msgpack]`
+  - To install Sentry support, run :command:`pip install rejected[sentry]`
+
 
 Getting Started
 ---------------

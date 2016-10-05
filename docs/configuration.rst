@@ -18,26 +18,56 @@ Application
 The application section of the configuration is broken down into multiple top-level options:
 
 +---------------+-----------------------------------------------------------------------------------------+
-| poll_interval | How often rejected should poll consumer processes for stats data in seconds (int/float) |
+| poll_interval | How often rejected should poll consumer processes for status in seconds (int/float)     |
 +---------------+-----------------------------------------------------------------------------------------+
-| log_stats     | Should stats data be logged via Python's standard logging mechanism (bool)              |
-+---------------+-----------------------------------------------------------------------------------------+
-| `statsd`_     | Enable and configure statsd metric submission (obj)                                     |
+| `stats`_     | Enable and configure statsd metric submission (obj)                                      |
 +---------------+-----------------------------------------------------------------------------------------+
 | `Connections`_| A subsection with RabbitMQ connection information for consumers (obj)                   |
 +---------------+-----------------------------------------------------------------------------------------+
 | `Consumers`_  | Where each consumer type is configured (obj)                                            |
 +---------------+-----------------------------------------------------------------------------------------+
 
+stats
+^^^^^
++-------+----------------------------------------------------------------------------------------+
+| stats |                                                                                        |
++=======+===============+========================================================================+
+|       | log           | Toggle  top-level logging of consumer process stats (bool)             |
++-------+---------------+------------------------------------------------------------------------+
+|       | `influxdb`_   | Configure the submission of per-message measurements to InfluxDB (obj) |
++-------+---------------+------------------------------------------------------------------------+
+|       | `statsd`_     | Configure the submission of per-message measurements to statsd (obj)   |
++-------+---------------+------------------------------------------------------------------------+
+
+influxdb
+^^^^^^^^
++------------------+------------------------------------------------------------------------------------------------------+
+| stats > influxdb |                                                                                                      |
++==================+==========+===========================================================================================+
+|                  | scheme   | The scheme to use when submitting metrics to the InfluxDB server. Default: ``http`` (str) |
++------------------+----------+-------------------------------------------------------------------------------------------+
+|                  | host     | The hostname or ip address of the InfluxDB server. Default: ``localhost`` (str)           |
++------------------+----------+-------------------------------------------------------------------------------------------+
+|                  | port     | The port of the influxdb server. Default: ``8086`` (int)                                  |
++------------------+----------+-------------------------------------------------------------------------------------------+
+|                  | user     | An optional username to use when submitting measurements. (str)                           |
++------------------+----------+-------------------------------------------------------------------------------------------+
+|                  | password | An optional password to use when submitting measurements. (str)                           |
++------------------+----------+-------------------------------------------------------------------------------------------+
+|                  | database | The InfluxDB database to submit measurements to. Default: ``rejected`` (str)              |
++------------------+----------+-------------------------------------------------------------------------------------------+
+
 statsd
 ^^^^^^
-+---------------+--------------------------------------------------------+
-| enabled       | Enable the per consumer statsd metric reporting (bool) |
-+---------------+--------------------------------------------------------+
-| host          | The hostname or ip address of the statsd server (str)  |
-+---------------+--------------------------------------------------------+
-| port          | The port of the statsd server (int)                    |
-+---------------+--------------------------------------------------------+
++----------------+-------------------------------------------------------------------------------+
+| stats > statsd |                                                                               |
++================+========+======================================================================+
+|                | prefix | An optional prefix to use when creating the statsd metric path (str) |
++----------------+--------+----------------------------------------------------------------------+
+|                | host   | The hostname or ip address of the statsd server (str)                |
++----------------+--------+----------------------------------------------------------------------+
+|                | port   | The port of the statsd server. Default: ``8125`` (int)               |
++----------------+--------+----------------------------------------------------------------------+
 
 Connections
 ^^^^^^^^^^^
@@ -63,25 +93,38 @@ Consumers
 ^^^^^^^^^
 Each consumer entry should be a nested object with a unique name with consumer attributes.
 
-+---------------+------------------------------------------------------------------------------------------------+
-| Consumer Name |                                                                                                |
-+===============+=============+==================================================================================+
-|               | consumer    | The package.module.Class path to the consumer code (str)                         |
-|               +-------------+----------------------------------------------------------------------------------+
-|               | connections | The connections, by name, to connect to from the Connections section (list)      |
-|               +-------------+----------------------------------------------------------------------------------+
-|               | qty         | The number of consumers per connection to run (int)                              |
-|               +-------------+----------------------------------------------------------------------------------+
-|               | queue       | The RabbitMQ queue name to consume from (int)                                    |
-|               +-------------+----------------------------------------------------------------------------------+
-|               | ack         | Explicitly acknowledge messages (no_ack = not ack) (bool)                        |
-|               +-------------+----------------------------------------------------------------------------------+
-|               | dynamic_qos | Automatically figure out channel prefetch-count QoS settings by message velocity |
-|               +-------------+----------------------------------------------------------------------------------+
-|               | max_errors  | Number of errors encountered before restarting a consumer                        |
-|               +-------------+----------------------------------------------------------------------------------+
-|               | config      | Free-form key-value configuration section for the consumer (obj)                 |
-+---------------+------------------------------------------------------------------------------------------------+
++---------------+-----------------------------------------------------------------------------------------------------------+
+| Consumer Name |                                                                                                           |
++===============+=============+=============================================================================================+
+|               | consumer              | The package.module.Class path to the consumer code (str)                          |
+|               +-----------------------+-----------------------------------------------------------------------------------+
+|               | connections           | The connections, by name, to connect to from the Connections section (list)       |
+|               +-----------------------+-----------------------------------------------------------------------------------+
+|               | qty                   | The number of consumers per connection to run (int)                               |
+|               +-----------------------+-----------------------------------------------------------------------------------+
+|               | queue                 | The RabbitMQ queue name to consume from (int)                                     |
+|               +-----------------------+-----------------------------------------------------------------------------------+
+|               | ack                   | Explicitly acknowledge messages (no_ack = not ack) (bool)                         |
+|               +-----------------------+-----------------------------------------------------------------------------------+
+|               | max_errors            | Number of errors encountered before restarting a consumer (int)                   |
+|               +-----------------------+-----------------------------------------------------------------------------------+
+|               | drop_invalid_messages | Drop a message if the type property doesn't match the specified message type (str)|
+|               +-----------------------+-----------------------------------------------------------------------------------+
+|               | message_type          | Used to validate the message type of a message before processing. This attribute  |
+|               |                       | can be set to a string that is matched against the AMQP message type or a list of |
+|               |                       | acceptable message types. (str, array)                                            |
+|               +-----------------------+-----------------------------------------------------------------------------------+
+|               | error_exchange        | The exchange to publish messages that raise                                       |
+|               |                       | :exc:`~rejected.consumer.ProcessingException` to (str)                            |
+|               +-----------------------+-----------------------------------------------------------------------------------+
+|               | error_max_retry       | The number of :exc:`~rejected.consumer.ProcessingException` raised on a message   |
+|               |                       | before a message is dropped. If not specified messages will never be dropped (int)|
+|               +-----------------------+-----------------------------------------------------------------------------------+
+|               | influxdb_measurement  | When using InfluxDB, the measurement name for per-message measurements.           |
+|               |                       | Defaults to the consumer name. (str)                                              |
+|               +-----------------------+-----------------------------------------------------------------------------------+
+|               | config                | Free-form key-value configuration section for the consumer (obj)                  |
++---------------+-----------------------------------------------------------------------------------------------------------+
 
 .. _daemon:
 

@@ -14,11 +14,15 @@ with the keys ``foo`` and ``bar``.
     ---
     Application:
       poll_interval: 10.0
-      log_stats: True
-      statsd:
-        enabled: True
-        host: localhost
-        port: 8125
+      stats:
+        log: True
+        influxdb:
+          host: localhost
+          port: 8086
+          database: rejected
+        statsd:
+          host: localhost
+          port: 8125
       Connections:
         rabbit1:
           host: rabbit1
@@ -85,10 +89,10 @@ with the keys ``foo`` and ``bar``.
           handlers: [console, syslog]
         rejected:
           level: INFO
-          propagate: false
+          propagate: true
           handlers: [console, syslog]
-        rejected.consumer:
-          level: INFO
+        sprockets_influxdb:
+          level: WARNING
           propagate: false
           handlers: [console, syslog]
       root:

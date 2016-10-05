@@ -2,16 +2,14 @@
 ---
 Application:
   poll_interval: 10.0
-  log_stats: True
   # sentry_dsn: https://[YOUR-SENTRY-DSN]
   stats:
-    enabled: true
-    type: influxdb
+    log: True
     influxdb:
       scheme: http
       host: influxdb
       port: 8086
-      username: influxdb
+      user: influxdb
       password: foo
       database: bar
     statsd:
@@ -35,6 +33,7 @@ Application:
       qty: 1
       queue: gmr-test
       ack: True
+      influxdb_measurement: async_consumer
       qos_prefetch: 100
       max_errors: 100
 
@@ -45,6 +44,8 @@ Application:
       queue: generated_messages
       ack: True
       max_errors: 100
+      error_exchange: Foo
+      influxdb_measurement: sync_consumer
       qos_prefetch: 1
       config:
         foo: True
@@ -121,7 +122,15 @@ Logging:
       propagate: false
       handlers: [console, console_correlation, syslog, syslog_correlation]
     rejected.process:
-      level: INFO
+      level: DEBUG
+      propagate: false
+      handlers: [console, console_correlation, syslog, syslog_correlation]
+    rejected.statsd:
+      level: DEBUG
+      propagate: false
+      handlers: [console, console_correlation, syslog, syslog_correlation]
+    sprockets_influxdb:
+      level: DEBUG
       propagate: false
       handlers: [console, console_correlation, syslog, syslog_correlation]
     tornado:

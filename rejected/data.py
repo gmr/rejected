@@ -2,7 +2,10 @@
 Rejected data objects
 
 """
+import collections
+import contextlib
 import copy
+import time
 
 MESSAGE_ACK = 1
 MESSAGE_DROP = 2
@@ -92,3 +95,34 @@ class Properties(Data):
             setattr(self, attr, None)
             if properties and getattr(properties, attr):
                 setattr(self, attr, getattr(properties, attr))
+
+
+class Measurement(object):
+    """
+    Common Measurement Object for
+
+    """
+    def __init__(self):
+        self.counters = collections.Counter()
+        self.tags = {}
+        self.values = {}
+
+    def decr(self, key, value=1):
+        self.counters[key] -= value
+
+    def incr(self, key, value=1):
+        self.counters[key] += value
+
+    def set_tag(self, key, value):
+        self.tags[key] = value
+
+    def set_value(self, key, value):
+        self.values[key] = value
+
+    @contextlib.contextmanager
+    def track_duration(self, key):
+        start_time = time.time()
+        try:
+            yield
+        finally:
+            self.values[key] = max(start_time, time.time()) - start_time

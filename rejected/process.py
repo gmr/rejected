@@ -18,7 +18,12 @@ except ImportError:
 import signal
 import sys
 import time
+import warnings
 
+try:
+    import sprockets_influxdb as influxdb
+except ImportError:
+    influxdb = None
 from tornado import gen, ioloop, locks
 import pika
 try:
@@ -27,7 +32,7 @@ except ImportError:
     raven = None
 from pika import spec
 
-from rejected import __version__, data, state
+from rejected import __version__, data, state, statsd
 
 LOGGER = logging.getLogger(__name__)
 
@@ -68,16 +73,17 @@ class Process(multiprocessing.Process, state.State):
     # Counter constants
     ACKED = 'acked'
     CLOSED_ON_COMPLETE = 'closed_on_complete'
+    DROPPED = 'dropped'
     ERROR = 'failed'
     FAILURES = 'failures_until_stop'
+    NACKED = 'nacked'
     PROCESSED = 'processed'
-    REDELIVERED = 'redelivered_messages'
+    REQUEUED = 'requeued'
+    REDELIVERED = 'redelivered'
     TIME_SPENT = 'processing_time'
     TIME_WAITED = 'idle_time'
 
     MESSAGE_AGE = 'message_age'
-    MESSAGE_DROPPED = 'message_dropped'
-    MESSAGE_REQUEUED = 'message_requeued'
 
     CONSUMER_EXCEPTION = 'consumer_exception'
     MESSAGE_EXCEPTION = 'message_exception'
@@ -117,10 +123,12 @@ class Process(multiprocessing.Process, state.State):
         self.consumer_version = None
         self.counters = collections.Counter()
         self.delivery_time = None
+        self.influxdb = None
         self.ioloop = None
         self.last_failure = 0
         self.last_stats_time = None
         self.logging_config = dict()
+        self.measurement = None
         self.message_connection_id = None
         self.max_error_count = self.MAX_ERROR_COUNT
         self.max_frame_size = spec.FRAME_MAX_SIZE
@@ -131,6 +139,7 @@ class Process(multiprocessing.Process, state.State):
         self.state = self.STATE_INITIALIZING
         self.state_start = time.time()
         self.stats_queue = None
+        self.statsd = None
 
         # Override ACTIVE with PROCESSING
         self.STATES[0x04] = 'Processing'
@@ -148,6 +157,7 @@ class Process(multiprocessing.Process, state.State):
         LOGGER.debug('Acking %s', delivery_tag)
         self.channel.basic_ack(delivery_tag=delivery_tag)
         self.counters[self.ACKED] += 1
+        self.measurement.set_tag(self.ACKED, True)
 
     def add_on_channel_close_callback(self):
         """This method tells pika to call the on_channel_closed method if
@@ -325,7 +335,17 @@ class Process(multiprocessing.Process, state.State):
                 self.delivery_time = start_time = time.time()
                 self.active_message = message
 
-                # @TODO Track the message age?
+                self.measurement = data.Measurement()
+
+                if message.method.redelivered:
+                    self.counters[self.REDELIVERED] += 1
+                    self.measurement.set_tag(self.REDELIVERED, True)
+
+                if message.properties.timestamp:
+                    self.measurement.set_value(
+                        self.MESSAGE_AGE,
+                        max(message.properties.timestamp, start_time) -
+                        message.properties.timestamp)
 
                 self.start_message_processing()
                 try:
@@ -356,6 +376,16 @@ class Process(multiprocessing.Process, state.State):
 
         """
         return self.state in [self.STATE_PROCESSING, self.STATE_STOP_REQUESTED]
+
+    def maybe_submit_measurement(self):
+        """Check for configured instrumentation backends and if found, submit
+        the message measurement info.
+
+        """
+        if self.statsd:
+            self.submit_statsd_measurements()
+        if self.influxdb:
+            self.submit_influxdb_measurement()
 
     def on_channel_closed(self, _channel, reply_code, reply_text):
         """Invoked by pika when RabbitMQ unexpectedly closes the channel.
@@ -426,65 +456,65 @@ class Process(multiprocessing.Process, state.State):
         :param str body: The message body
 
         """
-        if method.redelivered:
-            self.counters[self.REDELIVERED] += 1
-        try:
-            self.invoke_consumer(data.Message(channel, method, properties,
-                                              body))
-        except AttributeError:
-            pass
+        self.invoke_consumer(data.Message(channel, method, properties, body))
 
     def on_processed(self, message, result, start_time):
-        self.counters[self.TIME_SPENT] += \
-            max(start_time, time.time()) - start_time
+        """Invoked after a message is processed by the consumer and
+        implements the logic for how to deal with a message based upon
+        the result.
+
+        :param rejected.data.Message message: The message that was processed
+        :param int result: The result of the processing of the message
+        :param float start_time: When the message was received
+
+        """
+        duration = max(start_time, time.time()) - start_time
+        self.counters[self.TIME_SPENT] += duration
+        self.measurement.set_value(self.TIME_SPENT, duration)
 
         if result == data.MESSAGE_DROP:
             LOGGER.debug('Rejecting message due to drop return from consumer')
             self.reject(message.delivery_tag, False)
-            self.counters[self.MESSAGE_DROPPED] += 1
-            return
+            self.counters[self.DROPPED] += 1
 
         elif result == data.MESSAGE_EXCEPTION:
-            LOGGER.debug('Rejecteting due to MessageException')
+            LOGGER.debug('Rejecting message due to MessageException')
             self.reject(message.delivery_tag, False)
             self.counters[self.MESSAGE_EXCEPTION] += 1
-            return
+            self.measurement.set_tag('exception', 'MessageException')
 
         elif result == data.PROCESSING_EXCEPTION:
             LOGGER.debug('Rejecting message due to ProcessingException')
             self.reject(message.delivery_tag, False)
             self.counters[self.PROCESSING_EXCEPTION] += 1
-            return
+            self.measurement.set_tag('exception', 'ProcessingException')
 
         elif result == data.CONSUMER_EXCEPTION:
             LOGGER.debug('Re-queueing message due to ConsumerException')
             self.reject(message.delivery_tag, True)
             self.on_processing_error()
             self.counters[self.CONSUMER_EXCEPTION] += 1
-            return
+            self.measurement.set_tag('exception', 'ConsumerException')
 
         elif result == data.UNHANDLED_EXCEPTION:
             LOGGER.debug('Re-queueing message due to UnhandledException')
             self.reject(message.delivery_tag, True)
             self.on_processing_error()
             self.counters[self.UNHANDLED_EXCEPTION] += 1
-            return
+            self.measurement.set_tag('exception', 'UnhandledException')
 
         elif result == data.MESSAGE_REQUEUE:
             LOGGER.debug('Re-queueing message due Consumer request')
             self.reject(message.delivery_tag, True)
-            self.counters[self.MESSAGE_REQUEUED] += 1
-            return
+            self.counters[self.REQUEUED] += 1
 
-        # Ack if the msg wasn't rejected by MessageException and self.ack = True
         elif result == data.MESSAGE_ACK and self.ack:
             self.ack_message(message.delivery_tag)
-            self.counters[self.PROCESSED] += 1
 
-        if self.is_waiting_to_shutdown:
-            return self.on_ready_to_stop()
-
+        self.counters[self.PROCESSED] += 1
+        self.maybe_submit_measurement()
         self.reset_state()
+        LOGGER.info('Exiting on_processed: %s', self.state_description)
 
     def on_processing_error(self):
         """Called when message processing failure happens due to a
@@ -600,14 +630,14 @@ class Process(multiprocessing.Process, state.State):
         if not self.can_respond:
             LOGGER.warning('Can not reject message, disconnected from RabbitMQ')
             self.counters[self.CLOSED_ON_COMPLETE] += 1
-            if self.is_processing:
-                self.reset_state()
+            self.measurement.set_tag(self.CLOSED_ON_COMPLETE, True)
             return
+
         LOGGER.warning('Rejecting message %s %s requeue', delivery_tag, 'with'
                        if requeue else 'without')
         self.channel.basic_nack(delivery_tag=delivery_tag, requeue=requeue)
-        if self.is_processing:
-            self.reset_state()
+        self.measurement.set_tag(self.NACKED, True)
+        self.measurement.set_tag(self.REQUEUED, requeue)
 
     def report_stats(self):
         """Create the dict of stats data for the MCP stats queue"""
@@ -635,12 +665,13 @@ class Process(multiprocessing.Process, state.State):
 
         """
         self.active_message = None
+        self.measurement = None
         if self.is_waiting_to_shutdown:
             self.set_state(self.STATE_SHUTTING_DOWN)
             self.on_ready_to_stop()
         elif self.is_processing:
             self.set_state(self.STATE_IDLE)
-        elif self.is_idle or self.is_connecting:
+        elif self.is_idle or self.is_connecting or self.is_shutting_down:
             pass
         else:
             LOGGER.critical('Unexepected state: %s', self.state_description)
@@ -752,13 +783,16 @@ class Process(multiprocessing.Process, state.State):
 
         self.connections = cfg['Connections']
         self.consumer = self.get_consumer(self.config)
-        self.stats_queue = stats_queue
 
         if not self.consumer:
             LOGGER.critical('Could not import and start processor')
             self.set_state(self.STATE_STOPPED)
             self.on_ready_to_stop()
             return
+
+        self.stats_queue = stats_queue
+
+        self.setup_instrumentation(cfg)
 
         # Consumer settings
         self.ack = self.config.get('ack', True)
@@ -791,6 +825,64 @@ class Process(multiprocessing.Process, state.State):
                                    queue=self.queue_name,
                                    no_ack=not self.ack,
                                    consumer_tag=self.name)
+
+    def setup_influxdb(self, config):
+        """Configure the InfluxDB module for measurement submission.
+
+        :param dict config: The InfluxDB configuration stanza
+
+        """
+        base_tags = {
+            'connection': self.connection_name,
+            'version': self.consumer_version
+        }
+        measurement = self.config.get('influxdb_measurement',
+                                      os.environ.get('SERVICE'))
+        if measurement != self.consumer_name:
+            base_tags['consumer'] = self.consumer_name
+        for key in {'ENVIRONMENT', 'SERVICE'}:
+            if key in os.environ:
+                base_tags[key.lower()] = os.environ[key]
+        influxdb.install(
+            '{}://{}:{}'.format(
+                config.get('scheme',
+                           os.environ.get('INFLUXDB_SCHEME', 'http')),
+                config.get('host',
+                           os.environ.get('INFLUXDB_HOST', 'localhost')),
+                config.get('port', os.environ.get('INFLUXDB_PORT', '8086'))
+            ),
+            config.get('user', os.environ.get('INFLUXDB_USER')),
+            config.get('password', os.environ.get('INFLUXDB_PASSWORD')),
+            base_tags=base_tags)
+        return config.get('database', 'rejected'), measurement
+
+    def setup_instrumentation(self, config):
+        """Configure instrumentation for submission per message measurements
+        to statsd and/or InfluxDB.
+
+        :param dict config: The application configuration stanza
+
+        """
+        if not config.get('stats'):
+            if not config.get('statsd'):  # Backwards compatible statsd check
+                return
+            config['stats'] = {}
+
+        # Backwards compatible statsd config support
+        if config.get('statsd'):
+            warnings.warn('Deprecated statsd configuration detected',
+                          DeprecationWarning)
+            config['stats'].setdefault('statsd', config.get('statsd'))
+
+        if config['stats'].get('statsd'):
+            self.statsd = statsd.Client(self.consumer_name,
+                                        config['stats']['statsd'])
+            LOGGER.debug('statsd measurements configured')
+
+        # InfluxDB support
+        if influxdb and config['stats'].get('influxdb'):
+            self.influxdb = self.setup_influxdb(config['stats']['influxdb'])
+            LOGGER.debug('InfluxDB measurements configured')
 
     def setup_sighandlers(self):
         """Setup the stats and stop signal handlers."""
@@ -853,6 +945,41 @@ class Process(multiprocessing.Process, state.State):
             self.consumer.shutdown()
         except AttributeError:
             LOGGER.debug('Consumer does not have a shutdown method')
+
+    def submit_influxdb_measurement(self):
+        """Submit a measurement for a message to InfluxDB"""
+        measurement = influxdb.Measurement(*self.influxdb)
+        measurement.set_timestamp(time.time())
+        for key, value in self.measurement.counters.items():
+            measurement.set_field(key, value)
+        for key, value in self.measurement.tags.items():
+            measurement.set_tag(key, value)
+        for key, value in self.measurement.values.items():
+            measurement.set_field(key, value)
+        influxdb.add_measurement(measurement)
+        LOGGER.debug('InfluxDB Measurement: %r', measurement.marshall())
+
+    def submit_statsd_measurements(self):
+        """Submit a measurement for a message to statsd as individual items."""
+        for key, value in self.measurement.counters.items():
+            self.statsd.incr(key, value)
+        for key, value in self.measurement.values.items():
+            if isinstance(value, float):
+                self.statsd.add_timing(key, value)
+            else:
+                self.statsd.set_gauge(key, value)
+        for key, value in self.measurement.tags.items():
+            if isinstance(value, bool):
+                if value:
+                    self.statsd.incr(key)
+            elif isinstance(value, str):
+                if value:
+                    self.statsd.incr('{}.{}'.format(key, value))
+            elif isinstance(value, int):
+                self.statsd.incr(key, value)
+            else:
+                LOGGER.warning('The %s value type of %s is unsupported',
+                               key, type(value))
 
     @property
     def too_many_errors(self):

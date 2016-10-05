@@ -44,15 +44,11 @@ import warnings
 import zlib
 
 import pika
-from tornado import concurrent
 from pika import exceptions
-from tornado import gen
-from tornado import locks
+from tornado import concurrent, gen, locks
 import yaml
 
-from rejected import PYTHON26
-from rejected import data
-from rejected import log
+from rejected import data, log
 
 LOGGER = logging.getLogger(__name__)
 
@@ -138,7 +134,7 @@ class Consumer(object):
         initialization tasks, extend Consumer.initialize
 
         :param dict settings: The configuration from rejected
-        :param rejected.process.Process: The controlling process
+        :param rejected.process.Process process: The controlling process
 
         """
         self._channel = None
@@ -147,7 +143,6 @@ class Consumer(object):
         self._message_body = None
         self._process = process
         self._settings = settings
-        self._statsd = None
         self._yield_condition = locks.Condition()
 
         # Create a logger that attaches correlation ID to the record
@@ -157,12 +152,6 @@ class Consumer(object):
 
         # Set a Sentry context for the consumer
         self.set_sentry_context('consumer', self.name)
-
-        try:
-            self.set_sentry_context('version',
-                                    sys.modules[self.__module__].__version__)
-        except (NameError, AttributeError):
-            pass
 
         # Run any child object specified initialization
         self.initialize()
@@ -246,8 +235,9 @@ class Consumer(object):
         :param int|float duration: The timing value
 
         """
-        if self._statsd:
-            self._statsd.add_timing(key, duration)
+        warnings.warn('Deprecated, use Consumer.stats.add_timing',
+                      DeprecationWarning)
+        #self.stats.add_timing(key, duration)
 
     def statsd_incr(self, key, value=1):
         """Increment the specified key in statsd if statsd is enabled.
@@ -256,8 +246,9 @@ class Consumer(object):
         :param int value: The value to increment the key by
 
         """
-        if self._statsd:
-            self._statsd.incr(key, value)
+        warnings.warn('Deprecated, use Consumer.stats.incr',
+                      DeprecationWarning)
+        #self.stats.incr(key, value)
 
     @contextlib.contextmanager
     def statsd_track_duration(self, key):
@@ -266,12 +257,9 @@ class Consumer(object):
         :param str key: The key for the timing to track
 
         """
-        start_time = time.time()
-        try:
-            yield
-        finally:
-            finish_time = max(start_time, time.time())
-            self.statsd_add_timing(key, finish_time - start_time)
+        warnings.warn('Deprecated, use Consumer.stats.track_duration',
+                      DeprecationWarning)
+        #return self.stats.track_duration(key)
 
     def unset_sentry_context(self, tag):
         """Remove a context tag from sentry
@@ -706,12 +694,8 @@ class Consumer(object):
         if all(exc_info):
             exc_type, exc_value, tb = exc_info
             exc_name = exc_type.__name__
-            if PYTHON26:
-                self.logger.exception('Processor handled %s: %s', exc_name,
-                                      exc_value)
-            else:
-                self.logger.exception('Processor handled %s: %s', exc_name,
-                                      exc_value, exc_info=exc_info)
+            self.logger.exception('Processor handled %s: %s', exc_name,
+                                  exc_value)
 
         if kwargs.get('send_to_sentry', True):
             self._process.send_exception_to_sentry(exc_info)

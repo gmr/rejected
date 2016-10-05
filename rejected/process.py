@@ -3,6 +3,7 @@ Consumer process management. Imports consumer code, manages RabbitMQ
 connection state and collects stats about the consuming process.
 
 """
+import collections
 import importlib
 import logging
 import math
@@ -14,14 +15,11 @@ try:
     import cProfile as profile
 except ImportError:
     import profile
-import re
 import signal
 import sys
 import time
 
-from tornado import gen
-from tornado import ioloop
-from tornado import locks
+from tornado import gen, ioloop, locks
 import pika
 try:
     import raven
@@ -29,15 +27,9 @@ except ImportError:
     raven = None
 from pika import spec
 
-from rejected import __version__
-from rejected import PYTHON26
-from rejected import data
-from rejected import state
-from rejected import stats
+from rejected import __version__, data, state
 
 LOGGER = logging.getLogger(__name__)
-
-URI_RE = re.compile(r'^[\w\+\-]+://.*:(\w+)@.*')
 
 
 def import_consumer(value):
@@ -123,6 +115,7 @@ class Process(multiprocessing.Process, state.State):
         self.consumer_lock = None
         self.consumer_name = None
         self.consumer_version = None
+        self.counters = collections.Counter()
         self.delivery_time = None
         self.ioloop = None
         self.last_failure = 0
@@ -133,10 +126,10 @@ class Process(multiprocessing.Process, state.State):
         self.max_frame_size = spec.FRAME_MAX_SIZE
         self.queue_name = None
         self.prepend_path = None
+        self.previous = None
         self.sentry_client = None
         self.state = self.STATE_INITIALIZING
         self.state_start = time.time()
-        self.stats = None
         self.stats_queue = None
 
         # Override ACTIVE with PROCESSING
@@ -150,11 +143,11 @@ class Process(multiprocessing.Process, state.State):
         """
         if not self.can_respond:
             LOGGER.warning('Can not ack message, disconnected from RabbitMQ')
-            self.stats.incr(self.CLOSED_ON_COMPLETE)
+            self.counters[self.CLOSED_ON_COMPLETE] += 1
             return
         LOGGER.debug('Acking %s', delivery_tag)
         self.channel.basic_ack(delivery_tag=delivery_tag)
-        self.stats.incr(self.ACKED)
+        self.counters[self.ACKED] += 1
 
     def add_on_channel_close_callback(self):
         """This method tells pika to call the on_channel_closed method if
@@ -275,13 +268,8 @@ class Process(multiprocessing.Process, state.State):
         try:
             consumer_, version = import_consumer(cfg['consumer'])
         except ImportError as error:
-            if PYTHON26:
-                LOGGER.exception('Error importing the consumer %s: %s',
-                                 cfg['consumer'], error)
-            else:
-                LOGGER.exception('Error importing the consumer %s: %s',
-                                 cfg['consumer'], error,
-                                 exc_info=sys.exc_info())
+            LOGGER.exception('Error importing the consumer %s: %s',
+                             cfg['consumer'], error)
             return
 
         if version:
@@ -296,13 +284,8 @@ class Process(multiprocessing.Process, state.State):
         try:
             return consumer_(settings=settings, process=self)
         except Exception as error:
-            if PYTHON26:
-                LOGGER.exception('Error creating the consumer "%s": %s',
-                                 cfg['consumer'], error)
-            else:
-                LOGGER.exception('Error creating the consumer "%s": %s',
-                                 cfg['consumer'], error,
-                                 exc_info=sys.exc_info())
+            LOGGER.exception('Error creating the consumer "%s": %s',
+                             cfg['consumer'], error)
 
     def get_module_data(self):
         modules = {}
@@ -342,24 +325,15 @@ class Process(multiprocessing.Process, state.State):
                 self.delivery_time = start_time = time.time()
                 self.active_message = message
 
-                # Track the message age
-                if message.properties.timestamp:
-                    self.stats.add_timing(self.MESSAGE_AGE,
-                                          start_time -
-                                          message.properties.timestamp)
+                # @TODO Track the message age?
 
                 self.start_message_processing()
                 try:
                     result = yield self.consumer._execute(message)
                 except Exception as error:
-                    if PYTHON26:
-                        LOGGER.exception('Unhandled exception from consumer in '
-                                         'process. This should not happen. %s',
-                                         error)
-                    else:
-                        LOGGER.exception('Unhandled exception from consumer in '
-                                         'process. This should not happen. %s',
-                                         error, exc_info=sys.exc_info())
+                    LOGGER.exception('Unhandled exception from consumer in '
+                                     'process. This should not happen. %s',
+                                     error)
                     result = data.MESSAGE_REQUEUE
 
                 LOGGER.debug('Finished processing message: %r', result)
@@ -453,7 +427,7 @@ class Process(multiprocessing.Process, state.State):
 
         """
         if method.redelivered:
-            self.stats.incr(self.REDELIVERED)
+            self.counters[self.REDELIVERED] += 1
         try:
             self.invoke_consumer(data.Message(channel, method, properties,
                                               body))
@@ -461,50 +435,51 @@ class Process(multiprocessing.Process, state.State):
             pass
 
     def on_processed(self, message, result, start_time):
-        self.stats.add_timing(self.TIME_SPENT, time.time() - start_time)
+        self.counters[self.TIME_SPENT] += \
+            max(start_time, time.time()) - start_time
 
         if result == data.MESSAGE_DROP:
             LOGGER.debug('Rejecting message due to drop return from consumer')
             self.reject(message.delivery_tag, False)
-            self.stats.incr(self.MESSAGE_DROPPED)
+            self.counters[self.MESSAGE_DROPPED] += 1
             return
 
         elif result == data.MESSAGE_EXCEPTION:
             LOGGER.debug('Rejecteting due to MessageException')
             self.reject(message.delivery_tag, False)
-            self.stats.incr(self.MESSAGE_EXCEPTION)
+            self.counters[self.MESSAGE_EXCEPTION] += 1
             return
 
         elif result == data.PROCESSING_EXCEPTION:
             LOGGER.debug('Rejecting message due to ProcessingException')
             self.reject(message.delivery_tag, False)
-            self.stats.incr(self.PROCESSING_EXCEPTION)
+            self.counters[self.PROCESSING_EXCEPTION] += 1
             return
 
         elif result == data.CONSUMER_EXCEPTION:
             LOGGER.debug('Re-queueing message due to ConsumerException')
             self.reject(message.delivery_tag, True)
             self.on_processing_error()
-            self.stats.incr(self.CONSUMER_EXCEPTION)
+            self.counters[self.CONSUMER_EXCEPTION] += 1
             return
 
         elif result == data.UNHANDLED_EXCEPTION:
             LOGGER.debug('Re-queueing message due to UnhandledException')
             self.reject(message.delivery_tag, True)
             self.on_processing_error()
-            self.stats.incr(self.UNHANDLED_EXCEPTION)
+            self.counters[self.UNHANDLED_EXCEPTION] += 1
             return
 
         elif result == data.MESSAGE_REQUEUE:
             LOGGER.debug('Re-queueing message due Consumer request')
             self.reject(message.delivery_tag, True)
-            self.stats.incr(self.MESSAGE_REQUEUED)
+            self.counters[self.MESSAGE_REQUEUED] += 1
             return
 
         # Ack if the msg wasn't rejected by MessageException and self.ack = True
         elif result == data.MESSAGE_ACK and self.ack:
             self.ack_message(message.delivery_tag)
-            self.stats.incr(self.PROCESSED)
+            self.counters[self.PROCESSED] += 1
 
         if self.is_waiting_to_shutdown:
             return self.on_ready_to_stop()
@@ -521,11 +496,11 @@ class Process(multiprocessing.Process, state.State):
             LOGGER.info('Resetting failure window, %i seconds since last',
                         duration)
             self.reset_error_counter()
-        self.stats.incr(self.ERROR)
+        self.counters[self.ERROR] += 1
         self.last_failure = time.time()
         if self.too_many_errors:
             LOGGER.critical('Error threshold exceeded (%i), shutting down',
-                            self.stats[self.ERROR])
+                            self.counters[self.ERROR])
             self.cancel_consumer_with_rabbitmq()
             self.close_connection()
             self.on_ready_to_stop()
@@ -578,8 +553,7 @@ class Process(multiprocessing.Process, state.State):
         :param frame _unused_frame: The python frame the signal was received at
 
         """
-        values = self.stats.report()
-        self.stats_queue.put(values, True)
+        self.stats_queue.put(self.report_stats(), True)
         self.last_stats_time = time.time()
         signal.siginterrupt(signal.SIGPROF, False)
 
@@ -625,7 +599,7 @@ class Process(multiprocessing.Process, state.State):
             raise RuntimeError('Can not rejected messages when ack is False')
         if not self.can_respond:
             LOGGER.warning('Can not reject message, disconnected from RabbitMQ')
-            self.stats.incr(self.CLOSED_ON_COMPLETE)
+            self.counters[self.CLOSED_ON_COMPLETE] += 1
             if self.is_processing:
                 self.reset_state()
             return
@@ -635,10 +609,25 @@ class Process(multiprocessing.Process, state.State):
         if self.is_processing:
             self.reset_state()
 
+    def report_stats(self):
+        """Create the dict of stats data for the MCP stats queue"""
+        if not self.previous:
+            self.previous = dict()
+            for key in self.counters:
+                self.previous[key] = 0
+        values = {
+            'name': self.name,
+            'consumer_name': self.consumer_name,
+            'counts': dict(self.counters),
+            'previous': dict(self.previous)
+        }
+        self.previous = dict(self.counters)
+        return values
+
     def reset_error_counter(self):
         """Reset the error counter to 0"""
         LOGGER.debug('Resetting the error counter')
-        self.stats[self.ERROR] = 0
+        self.counters[self.ERROR] = 0
 
     def reset_state(self):
         """Reset the runtime state after processing a message to either idle
@@ -679,12 +668,8 @@ class Process(multiprocessing.Process, state.State):
         except (AttributeError, ImportError) as error:
             name = self._kwargs['consumer_name']
             class_name = self._kwargs['config']['Consumers'][name]['consumer']
-            if PYTHON26:
-                LOGGER.exception('Could not start %s, stopping process: %r',
-                                 class_name, error)
-            else:
-                LOGGER.exception('Could not start %s, stopping process: %r',
-                                 class_name, error, exc_info=sys.exc_info())
+            LOGGER.exception('Could not start %s, stopping process: %r',
+                             class_name, error)
             os.kill(os.getppid(), signal.SIGABRT)
             sys.exit(1)
 
@@ -719,7 +704,7 @@ class Process(multiprocessing.Process, state.State):
                   'extra': {
                       'consumer_name': self.consumer_name,
                       'connection': self.connection_name,
-                      'env': self.strip_uri_passwords(dict(os.environ)),
+                      'env': dict(os.environ),
                       'message': message},
                   'time_spent': duration}
         LOGGER.debug('Sending exception to sentry: %r', kwargs)
@@ -764,6 +749,7 @@ class Process(multiprocessing.Process, state.State):
         self.connection_name = connection_name
         self.consumer_name = consumer_name
         self.config = cfg['Consumers'][consumer_name]
+
         self.connections = cfg['Connections']
         self.consumer = self.get_consumer(self.config)
         self.stats_queue = stats_queue
@@ -773,16 +759,6 @@ class Process(multiprocessing.Process, state.State):
             self.set_state(self.STATE_STOPPED)
             self.on_ready_to_stop()
             return
-
-        # Setup the stats counter instance
-        self.stats = stats.Stats(self.name, consumer_name, cfg['statsd'] or {})
-
-        # Set statsd in the consumer
-        if self.stats.statsd:
-            try:
-                self.consumer._set_statsd(self.stats.statsd)
-            except AttributeError:
-                LOGGER.info('Consumer does not support statsd assignment')
 
         # Consumer settings
         self.ack = self.config.get('ack', True)
@@ -811,7 +787,6 @@ class Process(multiprocessing.Process, state.State):
 
         # Setup QoS, Send a Basic.Recover and then Basic.Consume
         self.channel.basic_qos(self.on_qos_set, 0, self.qos_prefetch, False)
-        # self.channel.basic_recover(requeue=True)
         self.channel.basic_consume(consumer_callback=self.on_message,
                                    queue=self.queue_name,
                                    no_ack=not self.ack,
@@ -835,14 +810,6 @@ class Process(multiprocessing.Process, state.State):
 
         """
         self.message_connection_id = self.connection_id
-
-    @staticmethod
-    def strip_uri_passwords(values):
-        for key in values.keys():
-            matches = URI_RE.search(values[key])
-            if matches:
-                values[key] = values[key].replace(matches.group(1), '****')
-        return values
 
     def stop(self, signum=None, _unused=None):
         """Stop the consumer from consuming by calling BasicCancel and setting
@@ -874,10 +841,6 @@ class Process(multiprocessing.Process, state.State):
                 signal.siginterrupt(signal.SIGTERM, False)
             return
 
-        # Stop and flush the statds data
-        if self.stats.statsd:
-            self.stats.statsd.stop()
-
         self.on_ready_to_stop()
 
     def stop_consumer(self):
@@ -898,4 +861,4 @@ class Process(multiprocessing.Process, state.State):
         :rtype: bool
 
         """
-        return self.stats[self.ERROR] >= self.max_error_count
+        return self.counters[self.ERROR] >= self.max_error_count

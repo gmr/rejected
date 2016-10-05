@@ -1,10 +1,8 @@
 from setuptools import setup
-import sys
 
 classifiers = ['Development Status :: 5 - Production/Stable',
                'Intended Audience :: Developers',
                'Programming Language :: Python :: 2',
-               'Programming Language :: Python :: 2.6',
                'Programming Language :: Python :: 2.7',
                'Programming Language :: Python :: 3',
                'Programming Language :: Python :: 3.4',
@@ -20,15 +18,12 @@ install_requires = ['helper',
                     'tornado>=4.2,<4.3']
 
 extras_require = {'html': ['beautifulsoup4'],
-                  'msgpack': ['msgpack-python'],
+                  'influxdb': ['sprockets-influxdb'],
+                  'msgpack': ['u-msgpack-python'],
                   'sentry': ['raven']}
 
-if sys.version_info < (2, 7, 0):
-    install_requires.append('backport_collections')
-    install_requires.append('importlib')
-
 setup(name='rejected',
-      version='3.12.2',
+      version='3.13.0',
       description='Rejected is a Python RabbitMQ Consumer Framework and '
                   'Controller Daemon',
       long_description=open('README.rst').read(),
@@ -42,6 +37,7 @@ setup(name='rejected',
       package_data={'': ['LICENSE', 'README.rst']},
       include_package_data=True,
       install_requires=install_requires,
-      tests_require=['mock', 'nose', 'unittest2'],
+      extras_require=extras_require,
+      tests_require=['mock', 'nose', 'coverage'],
       entry_points=dict(console_scripts=['rejected=rejected.controller:main']),
       zip_safe=True)

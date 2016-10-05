@@ -16,10 +16,11 @@ class GarbageCollectorMixin(object):
     """
     DEFAULT_GC_FREQUENCY = 10000
 
-    def __init__(self, settings, process):
-        self._collection_cycle = settings.get('gc_collection_frequency',
-                                              self.DEFAULT_GC_FREQUENCY)
-        super(GarbageCollectorMixin, self).__init__(settings, process)
+    def __init__(self, *args, **kwargs):
+        self._collection_cycle = \
+            kwargs.get('settings', {}).get('gc_collection_frequency',
+                                           self.DEFAULT_GC_FREQUENCY)
+        super(GarbageCollectorMixin, self).__init__(*args, **kwargs)
         self._cycles_left = self.collection_cycle
 
     @property

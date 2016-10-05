@@ -524,7 +524,6 @@ class Process(multiprocessing.Process, state.State):
         self.counters[self.PROCESSED] += 1
         self.maybe_submit_measurement()
         self.reset_state()
-        LOGGER.info('Exiting on_processed: %s', self.state_description)
 
     def on_processing_error(self):
         """Called when message processing failure happens due to a
@@ -854,7 +853,7 @@ class Process(multiprocessing.Process, state.State):
             if key in os.environ:
                 base_tags[key.lower()] = os.environ[key]
         influxdb.install(
-            '{}://{}:{}'.format(
+            '{}://{}:{}/write'.format(
                 config.get('scheme',
                            os.environ.get('INFLUXDB_SCHEME', 'http')),
                 config.get('host',
@@ -892,7 +891,7 @@ class Process(multiprocessing.Process, state.State):
         # InfluxDB support
         if influxdb and config['stats'].get('influxdb'):
             self.influxdb = self.setup_influxdb(config['stats']['influxdb'])
-            LOGGER.debug('InfluxDB measurements configured')
+            LOGGER.debug('InfluxDB measurements configured: %r', self.influxdb)
 
     def setup_sighandlers(self):
         """Setup the stats and stop signal handlers."""

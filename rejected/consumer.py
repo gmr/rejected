@@ -30,6 +30,7 @@ Supported `SmartConsumer` MIME types are:
 
 """
 import bz2
+import contextlib
 import csv
 import io
 import json
@@ -248,6 +249,9 @@ class Consumer(object):
         :param int|float duration: The timing value
 
         """
+        if not self._measurement:
+            LOGGER.warning('stats_add_timing invoked outside execution')
+            return
         self._measurement.set_value(key, duration)
 
     def statsd_add_timing(self, key, duration):
@@ -261,7 +265,7 @@ class Consumer(object):
         """
         warnings.warn('Deprecated, use Consumer.stats_add_timing',
                       DeprecationWarning)
-        self._measurement.set_value(key, duration)
+        self.stats_add_timing(key, duration)
 
     def stats_incr(self, key, value=1):
         """Increment the specified key in the per-message measurements
@@ -270,6 +274,9 @@ class Consumer(object):
         :param int value: The value to increment the key by
 
         """
+        if not self._measurement:
+            LOGGER.warning('stats_incr invoked outside execution')
+            return
         self._measurement.incr(key, value)
 
     def statsd_incr(self, key, value=1):
@@ -283,7 +290,7 @@ class Consumer(object):
         """
         warnings.warn('Deprecated, use Consumer.stats_incr',
                       DeprecationWarning)
-        self._measurement.incr(key, value)
+        self.stats_incr(key, value)
 
     def stats_set_tag(self, key, value=1):
         """Set the specified tag/value in the per-message measurements
@@ -292,6 +299,9 @@ class Consumer(object):
         :param int value: The value to increment the key by
 
         """
+        if not self._measurement:
+            LOGGER.warning('stats_set_tag invoked outside execution')
+            return
         self._measurement.set_tag(key, value)
 
     def stats_set_value(self, key, value=1):
@@ -301,6 +311,9 @@ class Consumer(object):
         :param int value: The value to increment the key by
 
         """
+        if not self._measurement:
+            LOGGER.warning('stats_set_value invoked outside execution')
+            return
         self._measurement.set_value(key, value)
 
     def stats_track_duration(self, key):
@@ -309,7 +322,15 @@ class Consumer(object):
         :param str key: The key for the timing to track
 
         """
-        return self._measurement.track_duration(key)
+        start_time = time.time()
+        try:
+            yield
+        finally:
+            if not self._measurement:
+                LOGGER.warning('stats_track_duration invoked outside execution')
+                return
+            self.stats_add_timing(
+                key, max(start_time, time.time()) - start_time)
 
     def statsd_track_duration(self, key):
         """Time around a context and add to the the per-message measurements
@@ -321,7 +342,7 @@ class Consumer(object):
         """
         warnings.warn('Deprecated, use Consumer.stats_track_duration',
                       DeprecationWarning)
-        return self._measurement.track_duration(key)
+        return self.stats_track_duration(key)
 
     def unset_sentry_context(self, tag):
         """Remove a context tag from sentry

@@ -294,7 +294,7 @@ class Process(multiprocessing.Process, state.State):
         kwargs = {
             'settings': settings,
             'process': self,
-            'drop_invalid': cfg.get('drop_invalid_messages'),
+            'drop_invalid_messages': cfg.get('drop_invalid_messages'),
             'message_type': cfg.get('message_type'),
             'error_exchange': cfg.get('error_exchange'),
             'error_max_retry': cfg.get('error_max_retry')

@@ -64,31 +64,34 @@ class ConsumerReceiveTests(testing.AsyncTestCase):
         self.obj = TestConsumer({}, None)
         self.message = data.Message(mocks.CHANNEL, mocks.METHOD,
                                     mocks.PROPERTIES, mocks.BODY)
+        self.measurement = data.Measurement()
 
     @testing.gen_test
     def test_receive_assigns_message(self):
-        yield self.obj._execute(self.message)
+        yield self.obj._execute(self.message, self.measurement)
         self.assertEqual(self.obj._message, self.message)
 
     @testing.gen_test
     def test_receive_invokes_process(self):
         with mock.patch.object(self.obj, 'process') as process:
-            yield self.obj._execute(self.message)
+            yield self.obj._execute(self.message, self.measurement)
             process.assert_called_once_with()
 
     @testing.gen_test
     def test_receive_drops_invalid_message_type(self):
-        self.obj.MESSAGE_TYPE = 'fooz'
-        self.obj.DROP_INVALID_MESSAGES = True
-        with mock.patch.object(self.obj, 'process') as process:
-            yield self.obj._execute(self.message)
+        obj = TestConsumer({}, None,
+                           drop_invalid_messages=True,
+                           message_type='foo')
+        with mock.patch.object(obj, 'process') as process:
+            yield self.obj._execute(self.message, self.measurement)
             process.assert_not_called()
 
     @testing.gen_test
     def test_raises_with_drop(self):
-        self.obj.MESSAGE_TYPE = 'foo'
-        self.obj.DROP_INVALID_MESSAGES = True
-        result = yield self.obj._execute(self.message)
+        obj = TestConsumer({}, None,
+                           drop_invalid_messages=True,
+                           message_type='foo')
+        result = yield obj._execute(self.message, self.measurement)
         self.assertEqual(result, data.MESSAGE_DROP)
 
 
@@ -100,8 +103,9 @@ class ConsumerPropertyTests(testing.AsyncTestCase):
         self.config = {'foo': 'bar', 'baz': 1, 'qux': True}
         self.message = data.Message(mocks.CHANNEL, mocks.METHOD,
                                     mocks.PROPERTIES, mocks.BODY)
+        self.measurement = data.Measurement()
         self.obj = TestConsumer(self.config, None)
-        yield self.obj._execute(self.message)
+        yield self.obj._execute(self.message, self.measurement)
 
     def test_app_id_property(self):
         self.assertEqual(self.obj.app_id, mocks.PROPERTIES.app_id)
@@ -175,8 +179,9 @@ class TestSmartConsumerWithJSON(unittest.TestCase):
         self.body = {'foo': 'bar', 'baz': 1, 'qux': True}
         self.message = data.Message(mocks.CHANNEL, mocks.METHOD,
                                     mocks.PROPERTIES, json.dumps(self.body))
+        self.measurement = data.Measurement()
         self.obj = TestSmartConsumer({}, None)
-        self.obj._execute(self.message)
+        self.obj._execute(self.message, self.measurement)
 
     def test_message_body_property(self):
         self.assertDictEqual(self.obj.body, self.body)

@@ -968,7 +968,7 @@ class SmartConsumer(Consumer):
     def _decode_bz2(value):
         """Return a bz2 decompressed value
 
-        :param str value: Compressed value
+        :param bytes value: Compressed value
         :rtype: str
 
         """
@@ -978,7 +978,7 @@ class SmartConsumer(Consumer):
     def _decode_gzip(value):
         """Return a zlib decompressed value
 
-        :param str value: Compressed value
+        :param bytes value: Compressed value
         :rtype: str
 
         """
@@ -995,6 +995,8 @@ class SmartConsumer(Consumer):
         """
         if not bs4:
             raise ConsumerException('BeautifulSoup4 is not enabled')
+        if isinstance(value, bytes):
+            value = value.decode('utf-8')
         return bs4.BeautifulSoup(value)
 
     @staticmethod
@@ -1006,6 +1008,8 @@ class SmartConsumer(Consumer):
         :rtype: csv.DictReader
 
         """
+        if isinstance(value, bytes):
+            value = value.decode('utf-8')
         csv_buffer = io.StringIO(value)
         dialect = csv.Sniffer().sniff(csv_buffer.read(1024))
         csv_buffer.seek(0)
@@ -1019,11 +1023,12 @@ class SmartConsumer(Consumer):
         :rtype: object
 
         """
+        if isinstance(value, bytes):
+            value = value.decode('utf-8')
         try:
             return json.loads(value, encoding='utf-8')
         except ValueError as error:
-            self.logger.error('Could not decode message body: %s', error,
-                              exc_info=sys.exc_info())
+            self.logger.exception('Could not decode message body: %s', error)
             raise MessageException(error)
 
     def _load_msgpack_value(self, value):
@@ -1037,8 +1042,7 @@ class SmartConsumer(Consumer):
         try:
             return umsgpack.unpackb(value)
         except ValueError as error:
-            self.logger.error('Could not decode message body: %s', error,
-                              exc_info=sys.exc_info())
+            self.logger.exception('Could not decode message body: %s', error)
             raise MessageException(error)
 
     @staticmethod
@@ -1046,7 +1050,7 @@ class SmartConsumer(Consumer):
         """Deserialize a pickle string returning the native Python data type
         for the value.
 
-        :param str value: The pickle string
+        :param bytes value: The pickle string
         :rtype: object
 
         """
@@ -1057,7 +1061,7 @@ class SmartConsumer(Consumer):
         """Deserialize a plist string returning the native Python data type
         for the value.
 
-        :param str value: The pickle string
+        :param bytes value: The pickle string
         :rtype: dict
 
         """
@@ -1227,17 +1231,17 @@ class SmartPublishingConsumer(SmartConsumer, PublishingConsumer):
         """Serialize a value into JSON
 
         :param str|dict|list: The value to serialize as JSON
-        :rtype: str
+        :rtype: bytes
 
         """
-        return json.dumps(value, ensure_ascii=False)
+        return json.dumps(value, ensure_ascii=True).encode('utf-8')
 
     @staticmethod
     def _dump_msgpack_value(value):
         """Serialize a value into MessagePack
 
         :param str|dict|list: The value to serialize as msgpack
-        :rtype: str
+        :rtype: bytes
 
         """
         return umsgpack.packb(value)
@@ -1247,7 +1251,7 @@ class SmartPublishingConsumer(SmartConsumer, PublishingConsumer):
         """Serialize a value into the pickle format
 
         :param any value: The object to pickle
-        :rtype: str
+        :rtype: bytes
 
         """
         return pickle.dumps(value)
@@ -1257,13 +1261,13 @@ class SmartPublishingConsumer(SmartConsumer, PublishingConsumer):
         """Create a plist value from a dictionary
 
         :param dict value: The value to make the plist from
-        :rtype: dict
+        :rtype: bytes
 
         """
         if hasattr(plistlib, 'dumps'):
             return plistlib.dumps(value)
         try:
-            return plistlib.writePlistToString(value)
+            return plistlib.writePlistToString(value).encode('utf-8')
         except AttributeError:
             return plistlib.writePlistToBytes(value)
 
@@ -1282,9 +1286,11 @@ class SmartPublishingConsumer(SmartConsumer, PublishingConsumer):
         """Return a bzip2 compressed value
 
         :param str value: Uncompressed value
-        :rtype: str
+        :rtype: bytes
 
         """
+        if not isinstance(value, bytes):
+            value = value.encode('utf-8')
         return bz2.compress(value)
 
     @staticmethod
@@ -1292,9 +1298,11 @@ class SmartPublishingConsumer(SmartConsumer, PublishingConsumer):
         """Return zlib compressed value
 
         :param str value: Uncompressed value
-        :rtype: str
+        :rtype: bytes
 
         """
+        if not isinstance(value, bytes):
+            value = value.encode('utf-8')
         return zlib.compress(value)
 
 

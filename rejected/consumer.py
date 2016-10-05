@@ -85,48 +85,56 @@ class Consumer(object):
     """Base consumer class that defines the contract between rejected and
     consumer applications.
 
-    In any of the consumer base classes, if the ``MESSAGE_TYPE`` attribute is
-    set, the ``type`` property of incoming messages will be validated against
-    when a message is received, checking for string equality against the
-    ``MESSAGE_TYPE`` attribute. If they are not matched, the consumer will not
+    In any of the consumer base classes, if the ``message_type`` is specified
+    in the configuration (or set with the ``MESSAGE_TYPE`` attribute), the
+    ``type`` property of incoming messages will be validated against when a
+    message is received. If there is no match, the consumer will not
     process the message and will drop the message without an exception if the
-    ``DROP_INVALID_MESSAGES`` attribute is set to ``True``. If it is ``False``,
-    a :py:class:`MessageException` is raised.
+    ``drop_invalid_messages`` setting is set to ``True`` in the configuration
+    (or if the ``DROP_INVALID_MESSAGES`` attribute is set to ``True``).
+    If it is ``False``, a :exc:`~rejected.consumer.MessageException` is raised.
 
-    If a consumer raises a :py:class:`ProcessingException`, the message that
-    was being processed will be republished to the exchange specified by the
-    ``ERROR_EXCHANGE`` attribute of the consumer's class using the routing key
-    that was last used for the message. The original message body and
-    properties will be used and an additional header
+    If a consumer raises a `~rejected.consumer.ProcessingException`, the
+    message that was being processed will be republished to the exchange
+    specified by the ``error`` exchange configuration value or the
+    ``ERROR_EXCHANGE`` attribute of the consumer's class. The message will be
+    published using the routing key that was last used for the message. The
+    original message body and properties will be used and an additional header
     ``X-Processing-Exceptions`` will be added that will contain the number of
-    times the message has had a ``ProcessingException`` raised for it. In
-    combination with a queue that has ``x-message-ttl`` set and
-    ``x-dead-letter-exchange`` that points to the original exchange for the
+    times the message has had a :exc:`~rejected.consumer.ProcessingException`
+    raised for it. In combination with a queue that has ``x-message-ttl`` set
+    and ``x-dead-letter-exchange`` that points to the original exchange for the
     queue the consumer is consuming off of, you can implement a delayed retry
     cycle for messages that are failing to process due to external resource or
     service issues.
 
-    If ``ERROR_MAX_RETRY`` is set on the class, the headers for each method
+    If ``error_max_retry`` is specified in the configuration or
+    ``ERROR_MAX_RETRY`` is set on the class, the headers for each method
     will be inspected and if the value of ``X-Processing-Exceptions`` is
-    greater than or equal to the ``ERROR_MAX_RETRY`` value, the message will
+    greater than or equal to the specified value, the message will
     be dropped.
+
+    :param dict settings: The configuration from rejected
+    :param rejected.process.Process process: The controlling process
+    :param bool drop_invalid_messages: Drop a message if its type property
+        doesn't match the specified message type.
+    :param str|list message_type: Used to validate the message type of a
+        message before processing. This attribute can be set to a string
+        that is matched against the AMQP message type or a list of
+        acceptable message types.
+    :param error_exchange: The exchange to publish a message raising a
+        :exc:`~rejected.consumer.ProcessingException` to
+    :type error_exchange: str
+    :param int error_max_retry: The number of
+        :exc:`~rejected.consumer.ProcessingException`s raised on a message
+        before a message is dropped. If not specified, messages will never be
+        dropped.
 
     """
     DROP_INVALID_MESSAGES = False
-    """Drop a message if its type property doesn't match ``MESSAGE_TYPE``"""
-
     MESSAGE_TYPE = None
-    """Used to validate the message type of a message before processing.
-
-    This attribute can be set to a string that is matched against the
-    AMQP message type or a list of acceptable message types.
-    """
-
     ERROR_EXCHANGE = 'errors'
-    """The exchange to publish messages that raise `ProcessingException` to"""
-
     ERROR_MAX_RETRY = None
-    """The number of `ProcessingException`s before a message is dropped"""
 
     def __init__(self, settings, process,
                  drop_invalid_messages=DROP_INVALID_MESSAGES,
@@ -135,20 +143,6 @@ class Consumer(object):
                  error_max_retry=ERROR_MAX_RETRY):
         """Creates a new instance of a Consumer class. To perform
         initialization tasks, extend Consumer.initialize
-
-        :param dict settings: The configuration from rejected
-        :param rejected.process.Process process: The controlling process
-        :param bool drop_invalid_messages: Drop a message if its type property
-            doesn't match the specified message type.
-        :param str|list message_type: Used to validate the message type of a
-            message before processing. This attribute can be set to a string
-            that is matched against the AMQP message type or a list of
-            acceptable message types.
-        :param error_exchange: The exchange to publish `ProcessingException` to
-        :type error_exchange: str
-        :param int error_max_retry: The number of `ProcessingException`s
-            raised on a message before a message is dropped. If not specified,
-            messages will never be dropped.
 
         """
         self._channel = None
@@ -788,6 +782,20 @@ class PublishingConsumer(Consumer):
     ``DROP_INVALID_MESSAGES`` attribute is set to ``True``. If it is ``False``,
     a :py:class:`ConsumerException` is raised.
 
+    :param dict settings: The configuration from rejected
+    :param rejected.process.Process process: The controlling process
+    :param bool drop_invalid_messages: Drop a message if its type property
+        doesn't match the specified message type.
+    :param str|list message_type: Used to validate the message type of a
+        message before processing. This attribute can be set to a string
+        that is matched against the AMQP message type or a list of
+        acceptable message types.
+    :param error_exchange: The exchange to publish `ProcessingException` to
+    :type error_exchange: str
+    :param int error_max_retry: The number of `ProcessingException`s
+        raised on a message before a message is dropped. If not specified,
+        messages will never be dropped.
+
     """
 
     def initialize(self):
@@ -912,6 +920,20 @@ class SmartConsumer(Consumer):
     process the message and will drop the message without an exception if the
     ``DROP_INVALID_MESSAGES`` attribute is set to ``True``. If it is ``False``,
     a :py:class:`ConsumerException` is raised.
+
+    :param dict settings: The configuration from rejected
+    :param rejected.process.Process process: The controlling process
+    :param bool drop_invalid_messages: Drop a message if its type property
+        doesn't match the specified message type.
+    :param str|list message_type: Used to validate the message type of a
+        message before processing. This attribute can be set to a string
+        that is matched against the AMQP message type or a list of
+        acceptable message types.
+    :param error_exchange: The exchange to publish `ProcessingException` to
+    :type error_exchange: str
+    :param int error_max_retry: The number of `ProcessingException`s
+        raised on a message before a message is dropped. If not specified,
+        messages will never be dropped.
 
     """
 
@@ -1085,8 +1107,23 @@ class SmartConsumer(Consumer):
 
 
 class SmartPublishingConsumer(SmartConsumer, PublishingConsumer):
-    """PublishingConsumer with serialization built in"""
+    """PublishingConsumer with serialization built in
 
+    :param dict settings: The configuration from rejected
+    :param rejected.process.Process process: The controlling process
+    :param bool drop_invalid_messages: Drop a message if its type property
+        doesn't match the specified message type.
+    :param str|list message_type: Used to validate the message type of a
+        message before processing. This attribute can be set to a string
+        that is matched against the AMQP message type or a list of
+        acceptable message types.
+    :param error_exchange: The exchange to publish `ProcessingException` to
+    :type error_exchange: str
+    :param int error_max_retry: The number of `ProcessingException`s
+        raised on a message before a message is dropped. If not specified,
+        messages will never be dropped.
+
+    """
     def publish_message(self, exchange, routing_key, properties, body,
                         no_serialization=False,
                         no_encoding=False):

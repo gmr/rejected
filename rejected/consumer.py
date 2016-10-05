@@ -30,7 +30,6 @@ Supported `SmartConsumer` MIME types are:
 
 """
 import bz2
-import contextlib
 import csv
 import io
 import json
@@ -129,17 +128,27 @@ class Consumer(object):
     ERROR_MAX_RETRY = None
     """The number of ``ProcessingErrors` before a message is dropped"""
 
-    def __init__(self, settings, process):
+    def __init__(self, settings, process,
+                 drop_invalid=DROP_INVALID_MESSAGES,
+                 message_type=MESSAGE_TYPE,
+                 error_exchange=ERROR_EXCHANGE,
+                 error_max_retry=ERROR_MAX_RETRY):
         """Creates a new instance of a Consumer class. To perform
         initialization tasks, extend Consumer.initialize
 
         :param dict settings: The configuration from rejected
         :param rejected.process.Process process: The controlling process
+        :param str error_exchange: The exchange to publish PublishingErrors to
 
         """
         self._channel = None
+        self._drop_invalid = drop_invalid
+        self._error_exchange = error_exchange
+        self._error_max_retry = error_max_retry
         self._finished = False
         self._message = None
+        self._message_type = message_type
+        self._measurement = None
         self._message_body = None
         self._process = process
         self._settings = settings
@@ -228,38 +237,69 @@ class Consumer(object):
             self.logger.debug('Setting sentry context for %s to %s', tag, value)
             self.sentry_client.tags_context({tag: value})
 
-    def statsd_add_timing(self, key, duration):
-        """Add a timing to statsd
+    def stats_add_timing(self, key, duration):
+        """Add a timing to the per-message measurements
 
         :param str key: The key to add the timing to
         :param int|float duration: The timing value
 
         """
-        warnings.warn('Deprecated, use Consumer.stats.add_timing',
-                      DeprecationWarning)
-        #self.stats.add_timing(key, duration)
+        self._measurement.set_value(key, duration)
 
-    def statsd_incr(self, key, value=1):
-        """Increment the specified key in statsd if statsd is enabled.
+    def statsd_add_timing(self, key, duration):
+        """Add a timing to the per-message measurements
+
+        :param str key: The key to add the timing to
+        :param int|float duration: The timing value
+
+        .. deprecated:: 3.13.0
+
+        """
+        warnings.warn('Deprecated, use Consumer.stats_add_timing',
+                      DeprecationWarning)
+        self._measurement.set_value(key, duration)
+
+    def stats_incr(self, key, value=1):
+        """Increment the specified key in the per-message measurements
 
         :param str key: The key to increment
         :param int value: The value to increment the key by
 
         """
-        warnings.warn('Deprecated, use Consumer.stats.incr',
-                      DeprecationWarning)
-        #self.stats.incr(key, value)
+        self._measurement.incr(key, value)
 
-    @contextlib.contextmanager
-    def statsd_track_duration(self, key):
-        """Time around a context and emit a statsd metric.
+    def statsd_incr(self, key, value=1):
+        """Increment the specified key in the per-message measurements
+
+        :param str key: The key to increment
+        :param int value: The value to increment the key by
+
+        .. deprecated:: 3.13.0
+
+        """
+        warnings.warn('Deprecated, use Consumer.stats_incr',
+                      DeprecationWarning)
+        self._measurement.incr(key, value)
+
+    def stats_track_duration(self, key):
+        """Time around a context and add to the the per-message measurements
 
         :param str key: The key for the timing to track
 
         """
-        warnings.warn('Deprecated, use Consumer.stats.track_duration',
+        return self._measurement.track_duration(key)
+
+    def statsd_track_duration(self, key):
+        """Time around a context and add to the the per-message measurements
+
+        :param str key: The key for the timing to track
+
+        .. deprecated:: 3.13.0
+
+        """
+        warnings.warn('Deprecated, use Consumer.stats_track_duration',
                       DeprecationWarning)
-        #return self.stats.track_duration(key)
+        return self._measurement.track_duration(key)
 
     def unset_sentry_context(self, tag):
         """Remove a context tag from sentry
@@ -537,40 +577,43 @@ class Consumer(object):
         self._message_body = None
 
     @gen.coroutine
-    def _execute(self, message_in):
+    def _execute(self, message_in, measurement):
         """Process the message from RabbitMQ. To implement logic for processing
         a message, extend Consumer._process, not this method.
 
         :param rejected.Consumer.Message message_in: The message to process
+        :param measurement: For collecting per-message instrumentation
+        :type measurement: rejected.data.Measurement
         :rtype: bool
 
         """
         LOGGER.debug('Received: %r', message_in)
         self._clear()
         self._message = message_in
+        self._measurement = measurement
 
         if self.message_type:
             self.set_sentry_context('type', self.message_type)
 
         # Validate the message type if the child sets MESSAGE_TYPE
-        if self.MESSAGE_TYPE:
-            if isinstance(self.MESSAGE_TYPE, (tuple, list, set)):
-                message_supported = self.message_type in self.MESSAGE_TYPE
+        if self._message_type:
+            if isinstance(self._message_type, (tuple, list, set)):
+                message_supported = self.message_type in self._message_type
             else:
-                message_supported = self.message_type == self.MESSAGE_TYPE
+                message_supported = self.message_type == self._message_type
 
             if not message_supported:
                 self.logger.warning('Received unsupported message type: %s',
                                     self.message_type)
                 # Should the message be dropped or returned to the broker?
-                if self.DROP_INVALID_MESSAGES:
+                if self._drop_invalid:
                     raise gen.Return(data.MESSAGE_DROP)
                 raise gen.Return(data.MESSAGE_EXCEPTION)
 
         # Check the number of ProcessingErrors and possibly drop the message
-        if (self.ERROR_MAX_RETRY and
+        if (self._error_max_retry and
                 _PROCESSING_EXCEPTIONS in self.headers):
-            if self.headers[_PROCESSING_EXCEPTIONS] >= self.ERROR_MAX_RETRY:
+            if self.headers[_PROCESSING_EXCEPTIONS] >= self._error_max_retry:
                 self.logger.warning('Dropping message with %i deaths due to '
                                     'ERROR_MAX_RETRY',
                                     self.headers[_PROCESSING_EXCEPTIONS])
@@ -597,13 +640,11 @@ class Consumer(object):
         except exceptions.ChannelClosed as error:
             self.logger.critical('Channel closed while processing %s: %s',
                                  message_in.delivery_tag, error)
-            self._process.reconnect()
             raise gen.Return(None)
 
         except exceptions.ConnectionClosed as error:
             self.logger.critical('Connection closed while processing %s: %s',
                                  message_in.delivery_tag, error)
-            self._process.reconnect()
             raise gen.Return(None)
 
         except ConsumerException as error:
@@ -652,7 +693,7 @@ class Consumer(object):
             except TypeError:
                 properties['headers'][_PROCESSING_EXCEPTIONS] = 1
 
-        self._channel.basic_publish(self.ERROR_EXCHANGE,
+        self._channel.basic_publish(self._error_exchange,
                                     self._message.routing_key,
                                     self._message.body,
                                     pika.BasicProperties(**properties))
@@ -665,14 +706,6 @@ class Consumer(object):
 
         """
         self._channel = channel
-
-    def _set_statsd(self, statsd):
-        """Assign a `StatsdClient` instance to the class.
-
-        :param pika.statsd.StatsdClient statsd: The StatsdClient instance
-
-        """
-        self._statsd = statsd
 
     def log_exception(self, msg_format, *args, **kwargs):
         """Customize the logging of uncaught exceptions.
@@ -748,8 +781,8 @@ class PublishingConsumer(Consumer):
 
         # Publish the message
         self.logger.debug('Publishing message to %s:%s', exchange, routing_key)
-        with self.statsd_track_duration('publish.{}.{}'.format(exchange,
-                                                               routing_key)):
+        with self._measurement.track_duration(
+                'publish.{}.{}'.format(exchange, routing_key)):
             self._channel.basic_publish(exchange=exchange,
                                         routing_key=routing_key,
                                         properties=msg_props,

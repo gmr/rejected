@@ -16,7 +16,7 @@ import socket
 LOGGER = logging.getLogger(__name__)
 
 
-class StatsdClient(object):
+class Client(object):
     """A simple statsd client that buffers counters to emit fewer UDP packets
     than once per incr.
 
@@ -68,14 +68,22 @@ class StatsdClient(object):
         self._send(key, value * 1000, 'ms')
 
     def incr(self, key, value=1):
-        """Increment the counter value in statsd by grouping up the counters
-        and sending them out in chunks.
+        """Increment the counter value in statsd
 
         :param str key: The key to increment
         :param int value: The value to increment by, defaults to 1
 
         """
         self._send(key, value, 'c')
+
+    def set_gauge(self, key, value):
+        """Set a gauge value in statsd
+
+        :param str key: The key to set the value for
+        :param int value: The value to set
+
+        """
+        self._send(key, value, 'g')
 
     def _send(self, key, value, metric_type):
         """Send the specified value to the statsd daemon via UDP without a
@@ -89,6 +97,7 @@ class StatsdClient(object):
             payload = self.PAYLOAD_FORMAT.format(self._prefix, self._hostname,
                                                  self._consumer_name, key,
                                                  value, metric_type).encode()
+            LOGGER.debug('Sending statsd payload: %r', payload)
             self._socket.sendto(payload, self._address)
         except socket.error:
             LOGGER.exception('Error sending statsd metric')

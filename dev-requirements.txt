@@ -5,3 +5,4 @@ nose
 sphinx
 raven
 coverage
+sprockets-influxdb

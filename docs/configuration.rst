@@ -20,7 +20,9 @@ The application section of the configuration is broken down into multiple top-le
 +---------------+-----------------------------------------------------------------------------------------+
 | poll_interval | How often rejected should poll consumer processes for status in seconds (int/float)     |
 +---------------+-----------------------------------------------------------------------------------------+
-| `stats`_     | Enable and configure statsd metric submission (obj)                                      |
+| sentry_dsn    | If Sentry support is installed, optionally set a global DSN for all consumers (str)     |
++---------------+-----------------------------------------------------------------------------------------+
+| `stats`_      | Enable and configure statsd metric submission (obj)                                     |
 +---------------+-----------------------------------------------------------------------------------------+
 | `Connections`_| A subsection with RabbitMQ connection information for consumers (obj)                   |
 +---------------+-----------------------------------------------------------------------------------------+
@@ -107,6 +109,8 @@ Each consumer entry should be a nested object with a unique name with consumer a
 |               | ack                   | Explicitly acknowledge messages (no_ack = not ack) (bool)                         |
 |               +-----------------------+-----------------------------------------------------------------------------------+
 |               | max_errors            | Number of errors encountered before restarting a consumer (int)                   |
+|               +-----------------------+-----------------------------------------------------------------------------------+
+|               | sentry_dsn            | If Sentry support is installed, set a consumer specific sentry DSN (str)          |
 |               +-----------------------+-----------------------------------------------------------------------------------+
 |               | drop_invalid_messages | Drop a message if the type property doesn't match the specified message type (str)|
 |               +-----------------------+-----------------------------------------------------------------------------------+

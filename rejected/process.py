@@ -291,8 +291,17 @@ class Process(multiprocessing.Process, state.State):
         settings = cfg.get('config', dict())
         settings['_import_module'] = '.'.join(cfg['consumer'].split('.')[0:-1])
 
+        kwargs = {
+            'settings': settings,
+            'process': self,
+            'drop_invalid': cfg.get('drop_invalid_messages'),
+            'message_type': cfg.get('message_type'),
+            'error_exchange': cfg.get('error_exchange'),
+            'error_max_retry': cfg.get('error_max_retry')
+        }
+
         try:
-            return consumer_(settings=settings, process=self)
+            return consumer_(**kwargs)
         except Exception as error:
             LOGGER.exception('Error creating the consumer "%s": %s',
                              cfg['consumer'], error)
@@ -349,7 +358,8 @@ class Process(multiprocessing.Process, state.State):
 
                 self.start_message_processing()
                 try:
-                    result = yield self.consumer._execute(message)
+                    result = yield self.consumer._execute(message,
+                                                          self.measurement)
                 except Exception as error:
                     LOGGER.exception('Unhandled exception from consumer in '
                                      'process. This should not happen. %s',

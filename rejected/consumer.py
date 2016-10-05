@@ -316,6 +316,7 @@ class Consumer(object):
             return
         self._measurement.set_value(key, value)
 
+    @contextlib.contextmanager
     def stats_track_duration(self, key):
         """Time around a context and add to the the per-message measurements
 
@@ -326,9 +327,6 @@ class Consumer(object):
         try:
             yield
         finally:
-            if not self._measurement:
-                LOGGER.warning('stats_track_duration invoked outside execution')
-                return
             self.stats_add_timing(
                 key, max(start_time, time.time()) - start_time)
 

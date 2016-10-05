@@ -4,24 +4,34 @@ Application:
   poll_interval: 10.0
   log_stats: True
   # sentry_dsn: https://[YOUR-SENTRY-DSN]
-  statsd:
-    enabled: True
-    host: localhost
-    port: 8125
-    prefix: application.rejected
+  stats:
+    enabled: true
+    type: influxdb
+    influxdb:
+      scheme: http
+      host: influxdb
+      port: 8086
+      username: influxdb
+      password: foo
+      database: bar
+    statsd:
+      host: localhost
+      port: 8125
+      prefix: application.rejected
   Connections:
     rabbitmq:
       host: localhost
       port: 5672
-      user: rejected
-      pass: rabbitmq
+      user: guest
+      pass: guest
       ssl: False
       vhost: /
       heartbeat_interval: 60
   Consumers:
     async:
-      consumer: rejected.example.AsyncExampleConsumer
+      consumer: examples.AsyncExampleConsumer
       connections: [rabbitmq]
+      # sentry_dsn: sentry_dsn: https://[YOUR-SENTRY-DSN]
       qty: 1
       queue: gmr-test
       ack: True
@@ -29,10 +39,10 @@ Application:
       max_errors: 100
 
     sync:
-      consumer: rejected.example.ExampleConsumer
+      consumer: examples.ExampleConsumer
       connections: [rabbitmq]
       qty: 1
-      queue: test
+      queue: generated_messages
       ack: True
       max_errors: 100
       qos_prefetch: 1

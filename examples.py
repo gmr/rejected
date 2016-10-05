@@ -1,10 +1,8 @@
 """Example Rejected Consumer"""
-from rejected import consumer
-
 import random
 
-from tornado import gen
-from tornado import httpclient
+from rejected import consumer
+from tornado import gen, httpclient
 
 __version__ = '1.0.0'
 

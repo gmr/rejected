@@ -28,7 +28,7 @@ if __name__ == '__main__':
     # Open the channel
     channel = connection.channel()
 
-    channel.exchange_declare(exchange='example')
+    channel.exchange_declare(exchange='example', type='topic', durable=True)
 
     # Declare the queue
     channel.queue_declare(queue='generated_messages', durable=True,

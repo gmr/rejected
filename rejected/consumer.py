@@ -123,13 +123,13 @@ class Consumer(object):
     """
 
     ERROR_EXCHANGE = 'errors'
-    """The exchange to publish ProcessingErrors to"""
+    """The exchange to publish messages that raise `ProcessingException` to"""
 
     ERROR_MAX_RETRY = None
-    """The number of ``ProcessingErrors` before a message is dropped"""
+    """The number of `ProcessingException`s before a message is dropped"""
 
     def __init__(self, settings, process,
-                 drop_invalid=DROP_INVALID_MESSAGES,
+                 drop_invalid_messages=DROP_INVALID_MESSAGES,
                  message_type=MESSAGE_TYPE,
                  error_exchange=ERROR_EXCHANGE,
                  error_max_retry=ERROR_MAX_RETRY):
@@ -138,11 +138,21 @@ class Consumer(object):
 
         :param dict settings: The configuration from rejected
         :param rejected.process.Process process: The controlling process
-        :param str error_exchange: The exchange to publish PublishingErrors to
+        :param bool drop_invalid_messages: Drop a message if its type property
+            doesn't match the specified message type.
+        :param str|list message_type: Used to validate the message type of a
+            message before processing. This attribute can be set to a string
+            that is matched against the AMQP message type or a list of
+            acceptable message types.
+        :param error_exchange: The exchange to publish `ProcessingException` to
+        :type error_exchange: str
+        :param int error_max_retry: The number of `ProcessingException`s
+            raised on a message before a message is dropped. If not specified,
+            messages will never be dropped.
 
         """
         self._channel = None
-        self._drop_invalid = drop_invalid
+        self._drop_invalid = drop_invalid_messages
         self._error_exchange = error_exchange
         self._error_max_retry = error_max_retry
         self._finished = False
@@ -280,6 +290,24 @@ class Consumer(object):
         warnings.warn('Deprecated, use Consumer.stats_incr',
                       DeprecationWarning)
         self._measurement.incr(key, value)
+
+    def stats_set_tag(self, key, value=1):
+        """Set the specified tag/value in the per-message measurements
+
+        :param str key: The key to increment
+        :param int value: The value to increment the key by
+
+        """
+        self._measurement.set_tag(key, value)
+
+    def stats_set_value(self, key, value=1):
+        """Set the specified key/value in the per-message measurements
+
+        :param str key: The key to increment
+        :param int value: The value to increment the key by
+
+        """
+        self._measurement.set_value(key, value)
 
     def stats_track_duration(self, key):
         """Time around a context and add to the the per-message measurements

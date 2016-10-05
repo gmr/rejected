@@ -10,6 +10,8 @@ Rejected runs as a master process with multiple consumer configurations that are
 each run it an isolated process. It has the ability to collect statistical
 data from the consumer processes and report on it.
 
+Rejected supports Python 2.7 and 3.4+.
+
 |Version| |Downloads| |Status| |License|
 
 Features
@@ -17,7 +19,7 @@ Features
 
 - Automatic exception handling including connection management and consumer restarting
 - Smart consumer classes that can automatically decode and deserialize message bodies based upon message headers
-- Metrics logging and submission to statsd
+- Metrics logging and submission to statsd and InfluxDB
 - Built-in profiling of consumer code
 - Ability to write asynchronous code in consumers allowing for parallel communication with external resources
 

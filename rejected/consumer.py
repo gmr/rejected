@@ -138,21 +138,21 @@ class Consumer(object):
     ERROR_MAX_RETRY = None
 
     def __init__(self, settings, process,
-                 drop_invalid_messages=DROP_INVALID_MESSAGES,
-                 message_type=MESSAGE_TYPE,
-                 error_exchange=ERROR_EXCHANGE,
-                 error_max_retry=ERROR_MAX_RETRY):
+                 drop_invalid_messages=None,
+                 message_type=None,
+                 error_exchange=None,
+                 error_max_retry=None):
         """Creates a new instance of a Consumer class. To perform
         initialization tasks, extend Consumer.initialize
 
         """
         self._channel = None
-        self._drop_invalid = drop_invalid_messages
-        self._error_exchange = error_exchange
-        self._error_max_retry = error_max_retry
+        self._drop_invalid = drop_invalid_messages or self.DROP_INVALID_MESSAGES
+        self._error_exchange = error_exchange or self.ERROR_EXCHANGE
+        self._error_max_retry = error_max_retry or self.ERROR_MAX_RETRY
         self._finished = False
         self._message = None
-        self._message_type = message_type
+        self._message_type = message_type or self.MESSAGE_TYPE
         self._measurement = None
         self._message_body = None
         self._process = process
@@ -664,14 +664,11 @@ class Consumer(object):
             result = self.prepare()
             if concurrent.is_future(result):
                 yield result
-            if self._finished:
-                self.logger.debug('Returning from finished in prepare')
-                raise gen.Return(data.MESSAGE_ACK)
-
-            result = self.process()
-            if concurrent.is_future(result):
-                yield result
-                self.logger.debug('Post yield of future process')
+            if not self._finished:
+                result = self.process()
+                if concurrent.is_future(result):
+                    yield result
+                    self.logger.debug('Post yield of future process')
         except KeyboardInterrupt:
             self.logger.debug('CTRL-C')
             self._process.reject(message_in.delivery_tag, True)
@@ -709,7 +706,8 @@ class Consumer(object):
                                message_in.delivery_tag, error)
             raise gen.Return(data.UNHANDLED_EXCEPTION)
 
-        self.finish()
+        if not self._finished:
+            self.finish()
         self.logger.debug('Post finish')
         raise gen.Return(data.MESSAGE_ACK)
 

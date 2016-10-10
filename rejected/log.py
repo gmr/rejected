@@ -35,5 +35,6 @@ class CorrelationAdapter(logging.LoggerAdapter):
         :rtype: (str, dict)
 
         """
-        kwargs['extra'] = {'correlation_id': self.consumer.correlation_id}
+        kwargs['extra'] = {'correlation_id': self.consumer.correlation_id,
+                           'consumer': self.consumer.name}
         return msg, kwargs

@@ -2,6 +2,7 @@
 Master Control Program
 
 """
+import collections
 import logging
 import multiprocessing
 import os
@@ -40,6 +41,7 @@ class MasterControlProgram(state.State):
 
     DEFAULT_CONSUMER_QTY = 1
     MAX_SHUTDOWN_WAIT = 10
+    MAX_UNRESPONSIVE_COUNT = 3
     POLL_INTERVAL = 60.0
     POLL_RESULTS_INTERVAL = 3.0
     SHUTDOWN_WAIT = 1
@@ -59,6 +61,7 @@ class MasterControlProgram(state.State):
         super(MasterControlProgram, self).__init__()
 
         # Default values
+        self._active_cache = None
         self.consumer_cfg = self.get_consumer_cfg(config, consumer, quantity)
         self.consumers = dict()
         self.config = config
@@ -70,6 +73,7 @@ class MasterControlProgram(state.State):
         self.stats = dict()
         self.stats_queue = multiprocessing.Queue()
         self.polled = False
+        self.unresponsive = collections.Counter()
 
         # Flag to indicate child creation error
         self.child_abort = False
@@ -84,13 +88,15 @@ class MasterControlProgram(state.State):
                                                     self.POLL_INTERVAL)
         LOGGER.debug('Set process poll interval to %.2f', self.poll_interval)
 
-    @property
     def active_processes(self):
         """Return a list of all active processes, pruning dead ones
 
         :rtype: list
 
         """
+        if self._active_cache and \
+                self._active_cache[0] > time.time() - self.poll_interval:
+            return self._active_cache[1]
         active_processes, dead_processes = list(), list()
         for consumer in self.consumers:
             for name in self.consumers[consumer].processes:
@@ -103,7 +109,16 @@ class MasterControlProgram(state.State):
                     dead_processes.append((consumer, name))
                     continue
 
-                if self.is_dead(proc):
+                if self.unresponsive[name] >= self.MAX_UNRESPONSIVE_COUNT:
+                    LOGGER.info('Killing unresponsive consumer %s (%i): '
+                                '%i misses',
+                                name, proc.pid, self.unresponsive[name])
+                    try:
+                        os.kill(child.pid, signal.SIGABRT)
+                    except OSError:
+                        pass
+                    dead_processes.append((consumer, name))
+                elif self.is_dead(proc, name):
                     dead_processes.append((consumer, name))
                 else:
                     active_processes.append(child)
@@ -112,6 +127,7 @@ class MasterControlProgram(state.State):
             LOGGER.debug('Removing %i dead process(es)', len(dead_processes))
             for proc in dead_processes:
                 self.remove_consumer_process(*proc)
+        self._active_cache = time.time(), active_processes
         return active_processes
 
     def calculate_stats(self, data):
@@ -123,7 +139,6 @@ class MasterControlProgram(state.State):
         """
         timestamp = data['timestamp']
         del data['timestamp']
-        LOGGER.debug('Calculating stats for data timestamp: %i', timestamp)
 
         # Iterate through the last poll results
         stats = self.consumer_stats_counter()
@@ -139,7 +154,7 @@ class MasterControlProgram(state.State):
                     consumer_stats[name][key] += value
 
         # Return a data structure that can be used in reporting out the stats
-        stats['processes'] = len(self.active_processes)
+        stats['processes'] = len(self.active_processes())
         return {
             'last_poll': timestamp,
             'consumers': consumer_stats,
@@ -156,9 +171,9 @@ class MasterControlProgram(state.State):
         for name in self.consumers:
             for connection in self.consumers[name].connections:
                 processes_needed = self.process_spawn_qty(name, connection)
-                LOGGER.debug('Need to spawn %i processes for %s on %s',
-                             processes_needed, name, connection)
                 if processes_needed:
+                    LOGGER.info('Need to spawn %i processes for %s on %s',
+                                processes_needed, name, connection)
                     self.start_processes(name, connection, processes_needed)
 
     def collect_results(self, data_values):
@@ -238,19 +253,25 @@ class MasterControlProgram(state.State):
                 consumers[only]['qty'] = qty
         return consumers
 
-    @staticmethod
-    def is_dead(proc):
+    def is_dead(self, proc, name):
         """Checks to see if the specified process is dead.
 
         :param psutil.Process proc: The process to check
+        :param str name: The name of consumer
         :rtype: bool
 
         """
         status = proc.status()
-        LOGGER.debug('Process status (%r): %r', proc.pid, status)
+        LOGGER.debug('Process %s (%s) status: %r (Unresponsive Count: %s)',
+                     name, proc.pid, status, self.unresponsive[name])
         try:
+            if status in [psutil.STATUS_RUNNING,
+                          psutil.STATUS_SLEEPING]:
+                return False
             if status == psutil.STATUS_ZOMBIE:
                 proc.terminate()
+                return True
+            elif status == psutil.STATUS_STOPPED:
                 return True
             elif status == psutil.STATUS_DEAD:
                 return True
@@ -268,11 +289,13 @@ class MasterControlProgram(state.State):
         LOGGER.critical('Max shutdown exceeded, forcibly exiting')
         processes = True
         while processes:
-            processes = self.active_processes
-            for proc in processes:
+            for proc in self.active_processes():
                 if int(proc.pid) != int(os.getpid()):
                     LOGGER.warning('Killing %s (%s)', proc.name, proc.pid)
-                    os.kill(int(proc.pid), signal.SIGKILL)
+                    try:
+                        os.kill(int(proc.pid), signal.SIGKILL)
+                    except OSError:
+                        pass
                 else:
                     LOGGER.warning('Cowardly refusing kill self (%s, %s)',
                                    proc.pid, os.getpid())
@@ -326,8 +349,6 @@ class MasterControlProgram(state.State):
         """
         process_name = '%s-%s' % (consumer_name,
                                   self.new_process_number(consumer_name))
-        LOGGER.debug('Creating a new process for %s: %s', connection_name,
-                     process_name)
         kwargs = {
             'config': self.config.application,
             'connection_name': connection_name,
@@ -353,7 +374,7 @@ class MasterControlProgram(state.State):
     def on_abort(self, _signum, _unused_frame):
         LOGGER.debug('Abort signal received from child')
         time.sleep(1)
-        if not self.active_processes:
+        if not self.active_processes():
             LOGGER.info('Stopping with no active processes and child error')
             self.set_state(self.STATE_STOPPED)
 
@@ -374,6 +395,15 @@ class MasterControlProgram(state.State):
             if self.log_stats_enabled:
                 self.log_stats()
 
+            # Increment the unresponsive children
+            for proc_name in self.poll_data['processes']:
+                self.unresponsive[proc_name] += 1
+
+            # Remove counters for processes that came back to life
+            for proc_name in list(self.unresponsive.keys()):
+                if proc_name not in self.poll_data['processes']:
+                    del self.unresponsive[proc_name]
+
     def poll(self):
         """Start the poll process by invoking the get_stats method of the
         consumers. If we hit this after another interval without fully
@@ -391,10 +421,8 @@ class MasterControlProgram(state.State):
         self.poll_data = {'timestamp': time.time(), 'processes': list()}
 
         # Iterate through all of the consumers
-        for proc in self.active_processes:
-            LOGGER.debug('Checking runtime state of %s', proc.name)
+        for proc in list(self.active_processes()):
             if proc == multiprocessing.current_process():
-                LOGGER.debug('Matched current process in active_processes')
                 continue
 
             # Send the profile signal
@@ -640,4 +668,4 @@ class MasterControlProgram(state.State):
         :rtype: int
 
         """
-        return len(self.active_processes)
+        return len(self.active_processes())

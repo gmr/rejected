@@ -88,13 +88,13 @@ class MasterControlProgram(state.State):
                                                     self.POLL_INTERVAL)
         LOGGER.debug('Set process poll interval to %.2f', self.poll_interval)
 
-    def active_processes(self):
+    def active_processes(self, use_cache=True):
         """Return a list of all active processes, pruning dead ones
 
         :rtype: list
 
         """
-        if self._active_cache and \
+        if use_cache and self._active_cache and \
                 self._active_cache[0] > time.time() - self.poll_interval:
             return self._active_cache[1]
         active_processes, dead_processes = list(), list()
@@ -287,9 +287,9 @@ class MasterControlProgram(state.State):
 
         """
         LOGGER.critical('Max shutdown exceeded, forcibly exiting')
-        processes = True
+        processes = self.active_processes(False)
         while processes:
-            for proc in self.active_processes():
+            for proc in self.active_processes(False):
                 if int(proc.pid) != int(os.getpid()):
                     LOGGER.warning('Killing %s (%s)', proc.name, proc.pid)
                     try:
@@ -300,6 +300,7 @@ class MasterControlProgram(state.State):
                     LOGGER.warning('Cowardly refusing kill self (%s, %s)',
                                    proc.pid, os.getpid())
             time.sleep(0.5)
+            processes = self.active_processes(False)
 
         LOGGER.info('Killed all children')
         return self.set_state(self.STATE_STOPPED)
@@ -639,24 +640,20 @@ class MasterControlProgram(state.State):
                 os.kill(int(proc.pid), signal.SIGABRT)
 
         # Wait for them to finish up to MAX_SHUTDOWN_WAIT
-        iterations = 0
-        processes = self.total_process_count
-        while processes:
-            LOGGER.info('Waiting on %i active processes to shut down',
-                        processes)
+        for iteration in range(0, self.MAX_SHUTDOWN_WAIT):
+            processes = len(self.active_processes(False))
+            if not processes:
+                break
+
+            LOGGER.info('Waiting on %i active processes to shut down (%i/%i)',
+                        processes, iteration, self.MAX_SHUTDOWN_WAIT)
             try:
                 time.sleep(0.5)
             except KeyboardInterrupt:
-                LOGGER.info('Caught CTRL-C, Killing Children')
-                self.kill_processes()
-                self.set_state(self.STATE_STOPPED)
-                return
-
-            iterations += 1
-            if iterations == self.MAX_SHUTDOWN_WAIT:
-                self.kill_processes()
                 break
-            processes = self.total_process_count
+
+        if len(self.active_processes(False)):
+            self.kill_processes()
 
         LOGGER.debug('All consumer processes stopped')
         self.set_state(self.STATE_STOPPED)
@@ -668,4 +665,4 @@ class MasterControlProgram(state.State):
         :rtype: int
 
         """
-        return len(self.active_processes())
+        return len(self.active_processes(False))

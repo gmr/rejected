@@ -2,13 +2,19 @@
 OS Level controlling class invokes startup, shutdown and handles signals.
 
 """
-import helper
 import logging
-from helper import parser
+import os
 import signal
 import sys
 
-from rejected import mcp
+import helper
+from helper import parser
+try:
+    import raven
+except ImportError:
+    raven = None
+
+from rejected import mcp, utils, __version__
 
 LOGGER = logging.getLogger(__name__)
 
@@ -21,6 +27,20 @@ class Controller(helper.Controller):
     def __init__(self, *args, **kwargs):
         super(Controller, self).__init__(*args, **kwargs)
         self._mcp = None
+        self._sentry_client = None
+        if raven and self.config.application.get('sentry_dsn'):
+            kwargs = {
+                'exclude_paths': ['tornado'],
+                'include_paths': ['pika',
+                                  'helper',
+                                  'rejected'],
+                'processors': ['raven.processors.SanitizePasswordsProcessor']
+            }
+            if os.environ.get('ENVIRONMENT'):
+                kwargs['environment'] = os.environ['ENVIRONMENT']
+            kwargs['version'] = __version__
+            self._sentry_client = raven.Client(
+                self.config.application['sentry_dsn'], **kwargs)
 
     def _master_control_program(self):
         """Return an instance of the MasterControlProgram.
@@ -85,6 +105,13 @@ class Controller(helper.Controller):
             self._mcp.run()
         except KeyboardInterrupt:
             LOGGER.info('Caught CTRL-C, shutting down')
+        except Exception:
+            exc_info = sys.exc_info()
+            kwargs = {'logger': 'rejected.controller',
+                      'modules': utils.get_module_data()}
+            LOGGER.debug('Sending exception to sentry: %r', kwargs)
+            self._sentry_client.captureException(exc_info, **kwargs)
+            raise
         if self.is_running:
             self.stop()
 

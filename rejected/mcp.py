@@ -15,9 +15,7 @@ import signal
 import sys
 import time
 
-from rejected import state
-from rejected import process
-from rejected import __version__
+from rejected import state, process, __version__
 
 LOGGER = logging.getLogger(__name__)
 

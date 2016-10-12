@@ -9,7 +9,6 @@ import logging
 import math
 import multiprocessing
 import os
-import pkg_resources
 from os import path
 try:
     import cProfile as profile
@@ -32,7 +31,7 @@ except ImportError:
     raven = None
 from pika import spec
 
-from rejected import __version__, data, state, statsd
+from rejected import __version__, data, state, statsd, utils
 
 LOGGER = logging.getLogger(__name__)
 
@@ -305,30 +304,6 @@ class Process(multiprocessing.Process, state.State):
         except Exception as error:
             LOGGER.exception('Error creating the consumer "%s": %s',
                              cfg['consumer'], error)
-
-    def get_module_data(self):
-        modules = {}
-        for module_name in sys.modules.keys():
-            module = sys.modules[module_name]
-            if hasattr(module, '__version__'):
-                modules[module_name] = module.__version__
-            elif hasattr(module, 'version'):
-                modules[module_name] = module.version
-            else:
-                try:
-                    version = self.get_version(module_name)
-                    if version:
-                        modules[module_name] = version
-                except Exception:
-                    pass
-        return modules
-
-    @staticmethod
-    def get_version(module_name):
-        try:
-            return pkg_resources.get_distribution(module_name).version
-        except pkg_resources.DistributionNotFound:
-            return None
 
     @gen.engine
     def invoke_consumer(self, message):
@@ -740,7 +715,7 @@ class Process(multiprocessing.Process, state.State):
         except TypeError:
             duration = 0
         kwargs = {'logger': 'rejected.processs',
-                  'modules': self.get_module_data(),
+                  'modules': utils.get_module_data(),
                   'extra': {
                       'consumer_name': self.consumer_name,
                       'connection': self.connection_name,

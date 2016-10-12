@@ -768,17 +768,6 @@ class Consumer(object):
             exc_name = exc_type.__name__
             self.logger.exception('Processor handled %s: %s', exc_name,
                                   exc_value)
-
-        if kwargs.get('send_to_sentry', True):
-            self._process.send_exception_to_sentry(exc_info)
-
-    def send_exception_to_sentry(self, exc_info):
-        """Send an exception to Sentry if enabled.
-
-        :param tuple exc_info: exception information as returned from
-            :func:`sys.exc_info`
-
-        """
         self._process.send_exception_to_sentry(exc_info)
 
 

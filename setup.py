@@ -1,7 +1,7 @@
 from setuptools import setup
 
 setup(name='rejected',
-      version='3.15.0',
+      version='3.15.1',
       description='Rejected is a Python RabbitMQ Consumer Framework and '
                   'Controller Daemon',
       long_description=open('README.rst').read(),

@@ -328,8 +328,9 @@ class Process(multiprocessing.Process, state.State):
                 if message.properties.timestamp:
                     self.measurement.set_value(
                         self.MESSAGE_AGE,
-                        max(message.properties.timestamp, start_time) -
-                        message.properties.timestamp)
+                        float(
+                            max(message.properties.timestamp, start_time) -
+                            message.properties.timestamp))
 
                 self.start_message_processing()
                 try:
@@ -707,6 +708,7 @@ class Process(multiprocessing.Process, state.State):
 
         """
         if not self.sentry_client:
+            LOGGER.debug('No sentry_client, aborting')
             return
 
         message = dict(self.active_message)

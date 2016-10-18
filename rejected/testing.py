@@ -5,11 +5,11 @@ methods to make it easy to setup a consumer and process messages. It is
 build on top of :class:`tornado.testing.AsyncTestCase` which extends
 :class:`unittest.TestCase`.
 
-To get started, your consumer class should be assigned to the
-:attr:`~rejected.testing.AsyncTestCase.CONSUMER` attribute.
+To get started, override the
+:meth:`rejected.testing.AsyncTestCase.get_consumer` method.
 
-Next, the :meth:`~rejected.testing.AsyncTestCase.settings` method can be
-overriden to define the settings that are passed into the consumer.
+Next, the :meth:`rejected.testing.AsyncTestCase.get_settings` method can be
+overridden to define the settings that are passed into the consumer.
 
 Finally, to invoke your Consumer as if it were receiving a message, the
 :meth:`~rejected.testing.AsyncTestCase.process_message` method should be
@@ -32,7 +32,11 @@ consumer, the consumer will raise a  :exc:`~rejected.consumer.MessageException`.
 
     class ConsumerTestCase(testing.AsyncTestCase):
 
-        CONSUMER = my_package.Consumer
+        def get_consumer(self):
+            return my_package.Consumer
+
+        def get_settings(self):
+            return {'remote_url': 'http://foo'}
 
         @testing.gen_test
         def test_consumer_raises_message_exception(self):
@@ -44,6 +48,7 @@ import json
 import time
 import uuid
 
+from helper import config
 import mock
 from pika import spec
 from tornado import gen, testing
@@ -59,21 +64,34 @@ class AsyncTestCase(testing.AsyncTestCase):
     :class:`~tornado.ioloop.IOLoop`-based asynchronous code.
 
     """
-    CONSUMER = consumer.Consumer
-    """Assign your consumer class to this method to have it automatically
-    constructed on each test.
-    """
     _consumer = None
 
     def setUp(self):
         super(AsyncTestCase, self).setUp()
-        self.consumer = self._create_consumer()
         self.correlation_id = str(uuid.uuid4())
+        self.consumer = self._create_consumer()
 
     def tearDown(self):
         super(AsyncTestCase, self).tearDown()
         if not self.consumer._finished:
             self.consumer.finish()
+
+    def get_consumer(self):
+        """Override to return the consumer class for testing.
+
+        :rtype: class
+
+        """
+        return consumer.Consumer
+
+    def get_settings(self):
+        """Override this method to provide settings to the consumer during
+        construction.
+
+        :return:
+
+        """
+        return {}
 
     @gen.coroutine
     def process_message(self, message_body,
@@ -108,15 +126,6 @@ class AsyncTestCase(testing.AsyncTestCase):
         elif result == data.PROCESSING_EXCEPTION:
             raise consumer.ProcessingException()
 
-    def settings(self):
-        """Override this method to provide settings to the consumer during
-        construction.
-
-        :rtype: dict
-
-        """
-        return {}
-
     def _create_consumer(self):
         """Creates the per-test instance of the consumer that is going to be
         tested.
@@ -124,11 +133,12 @@ class AsyncTestCase(testing.AsyncTestCase):
         :rtype: rejected.consumer.Consumer
 
         """
-        obj = self.CONSUMER(
-            self.settings(), mock.Mock('rejected.process.Process'))
+        cls = self.get_consumer()
+        settings = config.Data(self.get_settings())
+        obj = cls(settings, mock.Mock('rejected.process.Process'))
+        obj._process = mock.Mock()
+        obj._process.send_exception_to_sentry = mock.Mock()
         obj.initialize()
-        obj.publish_message = mock.Mock()
-        obj.set_sentry_context = mock.Mock()
         obj._channel = mock.Mock('pika.channel.Channel')
         obj._channel.basic_publish = mock.Mock()
         obj._correlation_id = self.correlation_id

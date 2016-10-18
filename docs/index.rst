@@ -59,6 +59,7 @@ API Documentation
    :maxdepth: 2
 
    consumer
+   api_testing
 
 Issues
 ------

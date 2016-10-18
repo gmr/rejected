@@ -19,7 +19,7 @@ invoked.
 Example
 -------
 The following example expects that when the message is processed by the
-consumer, the consumer will raise a  :exc:`~rejected.consumer.MessageConsumer`.
+consumer, the consumer will raise a  :exc:`~rejected.consumer.MessageException`.
 
 .. code:: python
 

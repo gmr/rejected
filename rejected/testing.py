@@ -1,10 +1,10 @@
 """
-The :cls:`rejected.testing.AsyncTestCase` provides a based class for the easy
-creation of tests for your consumers. The test cases exposes multiple methods
-to make it easy to setup a consumer and process messages.
+The :class:`rejected.testing.AsyncTestCase` provides a based class for the
+easy creation of tests for your consumers. The test cases exposes multiple
+methods to make it easy to setup a consumer and process messages.
 
 To get started, your consumer class should be assigned to the
-:prop:`~rejected.testing.AsyncTestCase.CONSUMER` attribute.
+:attr:`~rejected.testing.AsyncTestCase.CONSUMER` attribute.
 
 Next, the :meth:`~rejected.testing.AsyncTestCase.settings` method can be
 overriden to define the settings that are passed into the consumer.
@@ -46,12 +46,17 @@ import mock
 from pika import spec
 from tornado import gen, testing
 
-from tornado.testing import gen_log, gen_test
+gen_test = testing.gen_test
+"""Testing equivalent of ``@gen.coroutine``, to be applied to test methods."""
 
 from rejected import consumer, data
 
 
 class AsyncTestCase(testing.AsyncTestCase):
+    """`~unittest.TestCase` subclass for testing `.IOLoop`-based
+    asynchronous code.
+
+    """
 
     CONSUMER = consumer.Consumer
     """Assign your consumer class to this method to have it automatically

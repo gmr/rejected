@@ -1,7 +1,9 @@
 """
 The :class:`rejected.testing.AsyncTestCase` provides a based class for the
 easy creation of tests for your consumers. The test cases exposes multiple
-methods to make it easy to setup a consumer and process messages.
+methods to make it easy to setup a consumer and process messages. It is
+build on top of :class:`tornado.testing.AsyncTestCase` which extends
+:class:`unittest.TestCase`.
 
 To get started, your consumer class should be assigned to the
 :attr:`~rejected.testing.AsyncTestCase.CONSUMER` attribute.
@@ -53,11 +55,10 @@ gen_test = testing.gen_test
 
 
 class AsyncTestCase(testing.AsyncTestCase):
-    """`~unittest.TestCase` subclass for testing `.IOLoop`-based
-    asynchronous code.
+    """:class:`~unittest.TestCase` subclass for testing
+    :class:`~tornado.ioloop.IOLoop`-based asynchronous code.
 
     """
-
     CONSUMER = consumer.Consumer
     """Assign your consumer class to this method to have it automatically
     constructed on each test.

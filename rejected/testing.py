@@ -14,7 +14,7 @@ Finally, to invoke your Consumer as if it were receiving a message, the
 invoked.
 
 .. note:: Tests are asynchronous, so each test should be decorated with
-:meth:`~rejected.testing.gen_test`.
+          :meth:`~rejected.testing.gen_test`.
 
 Example
 -------

@@ -46,10 +46,10 @@ import mock
 from pika import spec
 from tornado import gen, testing
 
+from rejected import consumer, data
+
 gen_test = testing.gen_test
 """Testing equivalent of ``@gen.coroutine``, to be applied to test methods."""
-
-from rejected import consumer, data
 
 
 class AsyncTestCase(testing.AsyncTestCase):

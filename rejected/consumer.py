@@ -660,6 +660,7 @@ class Consumer(object):
                                     self.headers[_PROCESSING_EXCEPTIONS])
                 raise gen.Return(data.MESSAGE_DROP)
 
+        result = None
         try:
             result = self.prepare()
             if concurrent.is_future(result):
@@ -702,8 +703,13 @@ class Consumer(object):
             raise gen.Return(data.PROCESSING_EXCEPTION)
 
         except Exception as error:
+            exc_info = sys.exc_info()
+            if concurrent.is_future(result):
+                error = result.exception()
+                exc_info = result.exc_info()
             self.log_exception('Exception processing delivery %s: %s',
-                               message_in.delivery_tag, error)
+                               message_in.delivery_tag, error,
+                               exc_info=exc_info)
             raise gen.Return(data.UNHANDLED_EXCEPTION)
 
         if not self._finished:
@@ -762,12 +768,12 @@ class Consumer(object):
 
         """
         self.logger.error(msg_format, *args)
-        exc_info = sys.exc_info()
+        exc_info = kwargs.get('exc_info', sys.exc_info())
         if all(exc_info):
             exc_type, exc_value, tb = exc_info
             exc_name = exc_type.__name__
             self.logger.exception('Processor handled %s: %s', exc_name,
-                                  exc_value)
+                                  exc_value, exc_info=exc_info)
         self._process.send_exception_to_sentry(exc_info)
 
     def send_exception_to_sentry(self, exc_info):

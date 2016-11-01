@@ -244,7 +244,7 @@ class MasterControlProgram(state.State):
         """
         consumers = dict(config.application.Consumers)
         if only:
-            for key in consumers.keys():
+            for key in list(consumers.keys()):
                 if key != only:
                     del consumers[key]
             if qty:

@@ -679,31 +679,31 @@ class Consumer(object):
         except exceptions.ChannelClosed as error:
             self.logger.critical('Channel closed while processing %s: %s',
                                  message_in.delivery_tag, error)
-            self._measurement.set_tag('error', str(error))
+            self._measurement.set_tag('exception', error.__class__.__name__)
             raise gen.Return(None)
 
         except exceptions.ConnectionClosed as error:
             self.logger.critical('Connection closed while processing %s: %s',
                                  message_in.delivery_tag, error)
-            self._measurement.set_tag('error', str(error))
+            self._measurement.set_tag('exception', error.__class__.__name__)
             raise gen.Return(None)
 
         except ConsumerException as error:
             self.logger.error('ConsumerException processing delivery %s: %s',
                               message_in.delivery_tag, error)
-            self._measurement.set_tag('error', str(error))
+            self._measurement.set_tag('exception', error.__class__.__name__)
             raise gen.Return(data.CONSUMER_EXCEPTION)
 
         except MessageException as error:
             self.logger.debug('MessageException processing delivery %s: %s',
                               message_in.delivery_tag, error)
-            self._measurement.set_tag('error', str(error))
+            self._measurement.set_tag('exception', error.__class__.__name__)
             raise gen.Return(data.MESSAGE_EXCEPTION)
 
         except ProcessingException as error:
             self.logger.debug('ProcessingException processing delivery %s: %s',
                               message_in.delivery_tag, error)
-            self._measurement.set_tag('error', str(error))
+            self._measurement.set_tag('exception', error.__class__.__name__)
             self._republish_processing_error()
             raise gen.Return(data.PROCESSING_EXCEPTION)
 
@@ -715,7 +715,7 @@ class Consumer(object):
             self.log_exception('Exception processing delivery %s: %s',
                                message_in.delivery_tag, error,
                                exc_info=exc_info)
-            self._measurement.set_tag('error', str(error))
+            self._measurement.set_tag('exception', error.__class__.__name__)
             raise gen.Return(data.UNHANDLED_EXCEPTION)
 
         if not self._finished:

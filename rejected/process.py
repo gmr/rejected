@@ -27,8 +27,10 @@ from tornado import gen, ioloop, locks
 import pika
 try:
     import raven
+    from raven import breadcrumbs
+    from raven.contrib.tornado import AsyncSentryClient
 except ImportError:
-    raven = None
+    breadcrumbs, raven, AsyncSentryClient = None, None, None
 from pika import spec
 
 from rejected import __version__, data, state, statsd, utils
@@ -676,6 +678,7 @@ class Process(multiprocessing.Process, state.State):
         """Run method that can be profiled"""
         self.ioloop = ioloop.IOLoop.current()
         self.consumer_lock = locks.Lock()
+        self.logging_config = self._kwargs['logging_config']
         try:
             self.setup(self._kwargs['config'],
                        self._kwargs['consumer_name'],
@@ -688,6 +691,9 @@ class Process(multiprocessing.Process, state.State):
                              class_name, error)
             os.kill(os.getppid(), signal.SIGABRT)
             sys.exit(1)
+
+        self.sentry_client = self.setup_sentry(
+            self._kwargs['config'], self._kwargs['consumer_name'])
 
         # Connect to RabbitMQ after the IOLoop has started
         self.ioloop.add_callback(self.connect_to_rabbitmq,
@@ -716,9 +722,7 @@ class Process(multiprocessing.Process, state.State):
             duration = math.ceil(time.time() - self.delivery_time) * 1000
         except TypeError:
             duration = 0
-        kwargs = {'logger': 'rejected.processs',
-                  'modules': utils.get_module_data(),
-                  'extra': {
+        kwargs = {'extra': {
                       'consumer_name': self.consumer_name,
                       'connection': self.connection_name,
                       'env': dict(os.environ),
@@ -739,29 +743,6 @@ class Process(multiprocessing.Process, state.State):
         """
         LOGGER.info('Initializing for %s on %s connection', self.name,
                     connection_name)
-
-        # Setup the Sentry client if configured and installed
-        sentry_dsn = cfg['Consumers'][consumer_name].get('sentry_dsn',
-                                                         cfg.get('sentry_dsn'))
-        if raven and sentry_dsn:
-            kwargs = {
-                'exclude_paths': ['tornado'],
-                'include_paths': ['pika',
-                                  'rejected',
-                                  cfg['Consumers'][consumer_name]['consumer']],
-                'ignore_exceptions': ['rejected.consumer.ConsumerException',
-                                      'rejected.consumer.MessageException',
-                                      'rejected.consumer.ProcessingException'],
-                'processors': ['raven.processors.SanitizePasswordsProcessor']
-            }
-
-            if os.environ.get('ENVIRONMENT'):
-                kwargs['environment'] = os.environ['ENVIRONMENT']
-
-            if self.consumer_version:
-                kwargs['version'] = self.consumer_version
-
-            self.sentry_client = raven.Client(sentry_dsn, **kwargs)
 
         self.connection_name = connection_name
         self.consumer_name = consumer_name
@@ -790,6 +771,36 @@ class Process(multiprocessing.Process, state.State):
 
         self.reset_error_counter()
         self.setup_sighandlers()
+
+    def setup_sentry(self, cfg, consumer_name):
+        # Setup the Sentry client if configured and installed
+        sentry_dsn = cfg['Consumers'][consumer_name].get('sentry_dsn',
+                                                         cfg.get('sentry_dsn'))
+        if not raven or not sentry_dsn:
+            return
+        consumer = cfg['Consumers'][consumer_name]['consumer'].split('.')[0]
+        kwargs = {
+            'exclude_paths': [],
+            'include_paths':
+                ['pika', 'rejected', 'raven', 'tornado', consumer],
+            'ignore_exceptions': ['rejected.consumer.ConsumerException',
+                                  'rejected.consumer.MessageException',
+                                  'rejected.consumer.ProcessingException'],
+            'processors': ['raven.processors.SanitizePasswordsProcessor']
+        }
+
+        if os.environ.get('ENVIRONMENT'):
+            kwargs['environment'] = os.environ['ENVIRONMENT']
+
+        if self.consumer_version:
+            kwargs['version'] = self.consumer_version
+
+        for logger in {'pika', 'pika.channel', 'pika.connection',
+                       'pika.callback', 'pika.heartbeat',
+                       'rejected.process', 'rejected.state'}:
+            breadcrumbs.ignore_logger(logger)
+
+        return AsyncSentryClient(sentry_dsn, **kwargs)
 
     def setup_channel(self):
         """Setup the channel that will be used to communicate with RabbitMQ and

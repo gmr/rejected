@@ -2,10 +2,6 @@
 Rejected is a Python RabbitMQ Consumer Framework and Controller Daemon
 
 """
-__author__ = 'Gavin M. Roy <gavinmroy@gmail.com>'
-__since__ = '2009-09-10'
-__version__ = '3.16.6'
-
 import logging
 from logging import NullHandler
 
@@ -18,6 +14,10 @@ from rejected.consumer import SmartConsumer
 from rejected.consumer import SmartPublishingConsumer
 from rejected.consumer import ConsumerException
 from rejected.consumer import MessageException
+
+__author__ = 'Gavin M. Roy <gavinmroy@gmail.com>'
+__since__ = '2009-09-10'
+__version__ = '3.16.7'
 
 __all__ = [
     'Consumer',

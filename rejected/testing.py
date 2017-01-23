@@ -96,6 +96,7 @@ class AsyncTestCase(testing.AsyncTestCase):
     @gen.coroutine
     def process_message(self, message_body,
                         content_type='application/json', message_type=None,
+                        properties=None,
                         exchange='rejected', routing_key='routing-key'):
         """Process a message as if it were being delivered by RabbitMQ. When
         invoked, an AMQP message will be locally created and passed into the
@@ -106,6 +107,7 @@ class AsyncTestCase(testing.AsyncTestCase):
         :param any message_body: the body of the message to create
         :param str content_type: The mime type
         :param str message_type: identifies the type of message to create
+        :param dict properties: AMQP message properties
         :param str exchange: The exchange the message should appear to be from
         :param str routing_key: The message's routing key
         :raises: rejected.consumer.ConsumerException
@@ -114,8 +116,12 @@ class AsyncTestCase(testing.AsyncTestCase):
         :returns: bool
 
         """
+        properties = properties or {}
+        properties.setdefault('content_type', content_type)
+        properties.setdefault('type', message_type)
+
         result = yield self.consumer._execute(
-            self._create_message(message_body, content_type, message_type,
+            self._create_message(message_body, properties,
                                  exchange, routing_key), data.Measurement())
         if result == data.MESSAGE_ACK:
             raise gen.Return(True)
@@ -144,32 +150,38 @@ class AsyncTestCase(testing.AsyncTestCase):
         obj._correlation_id = self.correlation_id
         return obj
 
-    def _create_message(self, message,
-                        content_type='application/json',
-                        message_type=None,
+    def _create_message(self, message, properties,
                         exchange='rejected',
                         routing_key='test'):
         """Create a message instance for the consumer.
 
         :param any message: the body of the message to create
-        :param str content_type: The mime type
-        :param str message_type: identifies the type of message to create
+        :param dict properties: AMQP message properties
         :param str exchange: The exchange the message should appear to be from
         :param str routing_key: The message's routing key
+        :rtype: rejected.data.Message
 
         """
-        if isinstance(message, dict) and content_type == 'application/json':
+        if isinstance(message, dict) and \
+                properties['content_type'] == 'application/json':
             message = json.dumps(message)
         return data.Message(
             channel=self.consumer._channel,
             method=spec.Basic.Deliver(
                 'ctag0', 1, False, exchange, routing_key),
             properties=spec.BasicProperties(
-                app_id='rejected.testing',
-                content_type=content_type,
-                correlation_id=self.correlation_id,
-                delivery_mode=1,
-                message_id=str(uuid.uuid4()),
-                timestamp=int(time.time()),
-                type=message_type
+                app_id=properties.get('app_id', 'rejected.testing'),
+                content_encoding=properties.get('content_encoding'),
+                content_type=properties['content_type'],
+                correlation_id=properties.get(
+                    'correlation_id', self.correlation_id),
+                delivery_mode=properties.get('delivery_mode', 1),
+                expiration=properties.get('expiration'),
+                headers=properties.get('headers'),
+                message_id=properties.get('message_id', str(uuid.uuid4())),
+                priority=properties.get('priority'),
+                reply_to=properties.get('reply_to'),
+                timestamp=properties.get('timestamp', int(time.time())),
+                type=properties['type'],
+                user_id=properties.get('user_id')
             ), body=message)

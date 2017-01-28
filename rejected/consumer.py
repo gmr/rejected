@@ -147,6 +147,7 @@ class Consumer(object):
 
         """
         self._channel = None
+        self._correlation_id = None
         self._drop_invalid = drop_invalid_messages or self.DROP_INVALID_MESSAGES
         self._error_exchange = error_exchange or self.ERROR_EXCHANGE
         self._error_max_retry = error_max_retry or self.ERROR_MAX_RETRY
@@ -428,14 +429,14 @@ class Consumer(object):
     @property
     def correlation_id(self):
         """Access the current message's ``correlation-id`` property as an
-        attribute of the consumer class.
+        attribute of the consumer class. If the message does not have a
+        correlation-id then, each message is assigned a new UUIDv4 based
+        correlation-id value.
 
         :rtype: str
 
         """
-        if not self._message:
-            return None
-        return self._message.properties.correlation_id
+        return self._correlation_id
 
     @property
     def exchange(self):
@@ -632,6 +633,11 @@ class Consumer(object):
         self._clear()
         self._message = message_in
         self._measurement = measurement
+
+        # Ensure there is a correlation ID
+        self._correlation_id = message_in.properties.correlation_id or \
+            message_in.properties.message_id or \
+            str(uuid.uuid4())
 
         if self.message_type:
             self.set_sentry_context('type', self.message_type)

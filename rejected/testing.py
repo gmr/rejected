@@ -51,7 +51,7 @@ import uuid
 from helper import config
 import mock
 from pika import spec
-from tornado import gen, testing
+from tornado import gen, ioloop, testing
 
 from rejected import consumer, data
 
@@ -68,8 +68,9 @@ class AsyncTestCase(testing.AsyncTestCase):
 
     def setUp(self):
         super(AsyncTestCase, self).setUp()
-        self.correlation_id = str(uuid.uuid4())
+        self.process = self._create_process()
         self.consumer = self._create_consumer()
+        self.correlation_id = str(uuid.uuid4())
 
     def tearDown(self):
         super(AsyncTestCase, self).tearDown()
@@ -94,15 +95,22 @@ class AsyncTestCase(testing.AsyncTestCase):
         return {}
 
     @gen.coroutine
-    def process_message(self, message_body,
-                        content_type='application/json', message_type=None,
+    def process_message(self,
+                        message_body=None,
+                        content_type='application/json',
+                        message_type=None,
                         properties=None,
-                        exchange='rejected', routing_key='routing-key'):
+                        exchange='rejected',
+                        routing_key='routing-key'):
         """Process a message as if it were being delivered by RabbitMQ. When
         invoked, an AMQP message will be locally created and passed into the
         consumer. With using the default values for the method, if you pass in
         a JSON serializable object, the message body will automatically be
         JSON serialized.
+
+        If an exception is not raised, a :cls:`~rejected.data.Measurement`
+        instance is returned that will contain all of the measurements
+        collected during the processing of the message.
 
         :param any message_body: the body of the message to create
         :param str content_type: The mime type
@@ -113,24 +121,45 @@ class AsyncTestCase(testing.AsyncTestCase):
         :raises: rejected.consumer.ConsumerException
         :raises: rejected.consumer.MessageException
         :raises: rejected.consumer.ProcessingException
-        :returns: bool
+        :rtype: rejected.data.Measurement
 
         """
         properties = properties or {}
         properties.setdefault('content_type', content_type)
+        properties.setdefault('correlation_id', self.correlation_id)
+        properties.setdefault('timestamp', int(time.time()))
         properties.setdefault('type', message_type)
+
+        measurement = data.Measurement()
 
         result = yield self.consumer._execute(
             self._create_message(message_body, properties,
-                                 exchange, routing_key), data.Measurement())
+                                 exchange, routing_key),
+            measurement)
         if result == data.MESSAGE_ACK:
-            raise gen.Return(True)
+            raise gen.Return(measurement)
         elif result == data.CONSUMER_EXCEPTION:
             raise consumer.ConsumerException()
         elif result == data.MESSAGE_EXCEPTION:
             raise consumer.MessageException()
         elif result == data.PROCESSING_EXCEPTION:
             raise consumer.ProcessingException()
+        raise gen.Return(measurement)
+
+    @staticmethod
+    def _create_channel():
+        obj = mock.Mock('pika.channel.Channel')
+        obj.basic_ack = mock.Mock()
+        obj.basic_nack = mock.Mock()
+        obj.basic_publish = mock.Mock()
+        obj.basic_reject = mock.Mock()
+        return obj
+
+    @staticmethod
+    def _create_connection():
+        obj = mock.Mock('pika.adapters.tornado_connection.TornadoConnection')
+        obj.ioloop = ioloop.IOLoop.current()
+        return obj
 
     def _create_consumer(self):
         """Creates the per-test instance of the consumer that is going to be
@@ -140,14 +169,9 @@ class AsyncTestCase(testing.AsyncTestCase):
 
         """
         cls = self.get_consumer()
-        settings = config.Data(self.get_settings())
-        obj = cls(settings, mock.Mock('rejected.process.Process'))
-        obj._process = mock.Mock()
-        obj._process.send_exception_to_sentry = mock.Mock()
+        obj = cls(config.Data(self.get_settings()), self.process)
         obj.initialize()
-        obj._channel = mock.Mock('pika.channel.Channel')
-        obj._channel.basic_publish = mock.Mock()
-        obj._correlation_id = self.correlation_id
+        obj._channel = self.process.channel
         return obj
 
     def _create_message(self, message, properties,
@@ -166,7 +190,7 @@ class AsyncTestCase(testing.AsyncTestCase):
                 properties['content_type'] == 'application/json':
             message = json.dumps(message)
         return data.Message(
-            channel=self.consumer._channel,
+            channel=self.process.channel,
             method=spec.Basic.Deliver(
                 'ctag0', 1, False, exchange, routing_key),
             properties=spec.BasicProperties(
@@ -185,3 +209,12 @@ class AsyncTestCase(testing.AsyncTestCase):
                 type=properties['type'],
                 user_id=properties.get('user_id')
             ), body=message)
+
+    def _create_process(self):
+        obj = mock.Mock('rejected.process.Process')
+        obj.connection = self._create_connection()
+        obj.channel = self._create_channel()
+        obj.sentry_client = mock.Mock()
+        obj.sentry_client.tags = mock.Mock()
+        obj.send_exception_to_sentry = mock.Mock()
+        return obj

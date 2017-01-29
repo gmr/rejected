@@ -115,8 +115,8 @@ class Consumer(object):
     greater than or equal to the specified value, the message will
     be dropped.
 
-    .. note:: Since 3.17, :cls:`~rejected.consumer.Consumer` and
-        :cls:`~rejected.consumer.PublishingConsumer` have been combined into the
+    .. note:: Since 3.17, :class:`~rejected.consumer.Consumer` and
+        :class:`~rejected.consumer.PublishingConsumer` have been combined into the
         same class.
 
     """
@@ -130,7 +130,7 @@ class Consumer(object):
                  message_type=None,
                  error_exchange=None,
                  error_max_retry=None):
-        """Creates a new instance of the :cls:`~rejected.consumer.Consumer`
+        """Creates a new instance of the :class:`~rejected.consumer.Consumer`
         class. To perform initialization tasks, extend
         :meth:`~rejected.consumer.Consumer.initialize`.
 
@@ -163,7 +163,7 @@ class Consumer(object):
 
     def initialize(self):
         """Extend this method for any initialization tasks that occur only when
-        the :cls:`~rejected.consumer.Consumer` class is created.
+        the :class:`~rejected.consumer.Consumer` class is created.
 
         """
         pass
@@ -175,7 +175,7 @@ class Consumer(object):
         .. note:: Asynchronous support: Decorate this method with
             :meth:`tornado.gen.coroutine` to make it asynchronous.
 
-        If this method returns a :cls:`~tornado.concurrent.Future`, execution
+        If this method returns a :class:`~tornado.concurrent.Future`, execution
         will not proceed until the Future has completed.
 
         """
@@ -1036,8 +1036,8 @@ class SmartConsumer(Consumer):
     ``DROP_INVALID_MESSAGES`` attribute is set to ``True``. If it is ``False``,
     a :py:class:`ConsumerException` is raised.
 
-    .. note:: Since 3.17, :cls:`~rejected.consumer.SmartConsumer` and
-        :cls:`~rejected.consumer.SmartPublishingConsumer` have been combined
+    .. note:: Since 3.17, :class:`~rejected.consumer.SmartConsumer` and
+        :class:`~rejected.consumer.SmartPublishingConsumer` have been combined
         into the same class.
 
     """

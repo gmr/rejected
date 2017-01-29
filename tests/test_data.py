@@ -57,10 +57,9 @@ class TestProperties(unittest.TestCase):
 class TestMessage(unittest.TestCase):
 
     def setUp(self):
-        self._obj = data.Message(mocks.CHANNEL,
-                                 mocks.METHOD,
-                                 mocks.PROPERTIES,
-                                 mocks.BODY)
+        self._obj = data.Message(
+            'mock', mocks.CHANNEL, mocks.METHOD, mocks.PROPERTIES, mocks.BODY,
+            False)
 
     def test_method(self):
         self.assertEqual(self._obj.body, mocks.BODY)
@@ -86,7 +85,6 @@ class TestMessage(unittest.TestCase):
 
     def test_routing_key(self):
         self.assertEqual(self._obj.routing_key, mocks.METHOD.routing_key)
-
 
     def test_app_id(self):
         self.assertEqual(self._obj.properties.app_id, mocks.PROPERTIES.app_id)

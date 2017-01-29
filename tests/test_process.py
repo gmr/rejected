@@ -49,8 +49,13 @@ class TestImportNamspacedClass(unittest.TestCase):
 class TestProcess(test_state.TestState):
 
     config = {
-        'statsd': {
-          'enabled': False
+        'stats': {
+            'influxdb': {
+                'enabled': False
+            },
+            'statsd': {
+                'enabled': False
+            }
         },
         'Connections': {
             'MockConnection': {
@@ -94,8 +99,7 @@ class TestProcess(test_state.TestState):
     logging_config = helper_config.LoggingConfig(helper_config.Config.LOGGING)
 
     mock_args = {
-        'cfg': config,
-        'connection_name': 'MockConnection',
+        'config': config,
         'consumer_name': 'MockConsumer',
         'stats_queue': 'StatsQueue'
     }
@@ -163,10 +167,6 @@ class TestProcess(test_state.TestState):
             new_process = self.new_process()
             self.assertEqual(new_process.state_start, mock_time)
 
-    def test_startup_channel_is_none(self):
-        new_process = self.new_process()
-        self.assertIsNone(new_process.channel)
-
     def test_startup_consumer_is_none(self):
         new_process = self.new_process()
         self.assertIsNone(new_process.consumer)
@@ -178,7 +178,6 @@ class TestProcess(test_state.TestState):
         pid = 1234
         expectation = {
             'connection': self.config['Connections'][conn],
-            'connection_name': conn,
             'consumer_name': name,
             'process_name': '%s_%i_tag_%i' % (name, pid, number)
         }
@@ -235,7 +234,7 @@ class TestProcess(test_state.TestState):
                        return_value=(mock.Mock, None)):
                 if not new_process:
                     new_process = self.new_process(self.mock_args)
-                    new_process.setup(**self.mock_args)
+                    new_process.setup()
                 return new_process
 
     def test_setup_stats_queue(self):
@@ -251,17 +250,17 @@ class TestProcess(test_state.TestState):
     def test_setup_config(self):
         mock_process = self.mock_setup()
         config = self.config['Consumers']['MockConsumer']
-        self.assertEqual(mock_process.config, config)
+        self.assertEqual(mock_process.consumer_config, config)
 
     def test_setup_config_queue_name(self):
         mock_process = self.mock_setup()
         self.assertEqual(mock_process.queue_name,
                          self.config['Consumers']['MockConsumer']['queue'])
 
-    def test_setup_config_ack(self):
+    def test_setup_config_no_ack(self):
         mock_process = self.mock_setup()
-        self.assertEqual(mock_process.ack,
-                         self.config['Consumers']['MockConsumer']['ack'])
+        self.assertEqual(mock_process.no_ack,
+                         not self.config['Consumers']['MockConsumer']['ack'])
 
     def test_setup_max_error_count(self):
         mock_process = self.mock_setup()
@@ -270,9 +269,9 @@ class TestProcess(test_state.TestState):
 
     def test_setup_prefetch_count_no_config(self):
         args = copy.deepcopy(self.mock_args)
-        del args['cfg']['Consumers']['MockConsumer']['qos_prefetch']
-        mock_process = self.new_process()
-        mock_process.setup(**args)
+        del args['config']['Consumers']['MockConsumer']['qos_prefetch']
+        mock_process = self.new_process(args)
+        mock_process.setup()
         self.assertEqual(mock_process.qos_prefetch,
                          process.Process.QOS_PREFETCH_COUNT)
 

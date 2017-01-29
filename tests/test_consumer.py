@@ -11,8 +11,7 @@ except ImportError:
 from . import mocks
 from tornado import testing
 
-from rejected import consumer
-from rejected import data
+from rejected import consumer, data
 
 
 class ConsumerInitializationTests(unittest.TestCase):
@@ -48,8 +47,8 @@ class ConsumerSetChannelTests(unittest.TestCase):
     def test_set_channel_assigns_to_channel(self):
         obj = consumer.Consumer({}, None)
         channel = mock.Mock()
-        obj._set_channel(channel)
-        self.assertEqual(obj._channel, channel)
+        obj.set_channel('mock', channel)
+        self.assertEqual(obj._channels['mock'], channel)
 
 
 class TestConsumer(consumer.Consumer):
@@ -62,19 +61,19 @@ class ConsumerReceiveTests(testing.AsyncTestCase):
     def setUp(self):
         super(ConsumerReceiveTests, self).setUp()
         self.obj = TestConsumer({}, None)
-        self.message = data.Message(mocks.CHANNEL, mocks.METHOD,
-                                    mocks.PROPERTIES, mocks.BODY)
+        self.message = data.Message('mock', mocks.CHANNEL, mocks.METHOD,
+                                    mocks.PROPERTIES, mocks.BODY, False)
         self.measurement = data.Measurement()
 
     @testing.gen_test
     def test_receive_assigns_message(self):
-        yield self.obj._execute(self.message, self.measurement)
+        yield self.obj.execute(self.message, self.measurement)
         self.assertEqual(self.obj._message, self.message)
 
     @testing.gen_test
     def test_receive_invokes_process(self):
         with mock.patch.object(self.obj, 'process') as process:
-            yield self.obj._execute(self.message, self.measurement)
+            yield self.obj.execute(self.message, self.measurement)
             process.assert_called_once_with()
 
     @testing.gen_test
@@ -83,7 +82,7 @@ class ConsumerReceiveTests(testing.AsyncTestCase):
                            drop_invalid_messages=True,
                            message_type='foo')
         with mock.patch.object(obj, 'process') as process:
-            yield self.obj._execute(self.message, self.measurement)
+            yield self.obj.execute(self.message, self.measurement)
             process.assert_not_called()
 
     @testing.gen_test
@@ -91,7 +90,7 @@ class ConsumerReceiveTests(testing.AsyncTestCase):
         obj = TestConsumer({}, None,
                            drop_invalid_messages=True,
                            message_type='foo')
-        result = yield obj._execute(self.message, self.measurement)
+        result = yield obj.execute(self.message, self.measurement)
         self.assertEqual(result, data.MESSAGE_DROP)
 
 
@@ -101,11 +100,11 @@ class ConsumerPropertyTests(testing.AsyncTestCase):
     def setUp(self):
         super(ConsumerPropertyTests, self).setUp()
         self.config = {'foo': 'bar', 'baz': 1, 'qux': True}
-        self.message = data.Message(mocks.CHANNEL, mocks.METHOD,
-                                    mocks.PROPERTIES, mocks.BODY)
+        self.message = data.Message('mock', mocks.CHANNEL, mocks.METHOD,
+                                    mocks.PROPERTIES, mocks.BODY, False)
         self.measurement = data.Measurement()
         self.obj = TestConsumer(self.config, None)
-        yield self.obj._execute(self.message, self.measurement)
+        yield self.obj.execute(self.message, self.measurement)
 
     def test_app_id_property(self):
         self.assertEqual(self.obj.app_id, mocks.PROPERTIES.app_id)
@@ -177,11 +176,12 @@ class TestSmartConsumerWithJSON(unittest.TestCase):
 
     def setUp(self):
         self.body = {'foo': 'bar', 'baz': 1, 'qux': True}
-        self.message = data.Message(mocks.CHANNEL, mocks.METHOD,
-                                    mocks.PROPERTIES, json.dumps(self.body))
+        self.message = data.Message('mock', mocks.CHANNEL, mocks.METHOD,
+                                    mocks.PROPERTIES, json.dumps(self.body),
+                                    False)
         self.measurement = data.Measurement()
         self.obj = TestSmartConsumer({}, None)
-        self.obj._execute(self.message, self.measurement)
+        self.obj.execute(self.message, self.measurement)
 
     def test_message_body_property(self):
         self.assertDictEqual(self.obj.body, self.body)

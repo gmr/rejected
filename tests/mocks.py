@@ -4,6 +4,7 @@ import time
 
 __version__ = '99.99.99'
 
+CONNECTION = mock.Mock('pika.process.Connection')
 CHANNEL = mock.Mock('pika.channel.Channel')
 METHOD = spec.Basic.Deliver('ctag0', 1, False, 'exchange', 'routing_key')
 PROPERTIES = spec.BasicProperties(content_type='application/json',

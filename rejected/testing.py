@@ -81,7 +81,7 @@ class AsyncTestCase(testing.AsyncTestCase):
     def get_consumer(self):
         """Override to return the consumer class for testing.
 
-        :rtype: class
+        :rtype: :class:`rejected.consumer.Consumer`
 
         """
         return consumer.Consumer
@@ -90,10 +90,48 @@ class AsyncTestCase(testing.AsyncTestCase):
         """Override this method to provide settings to the consumer during
         construction.
 
-        :return:
+        :rtype: dict
 
         """
         return {}
+
+    def create_message(self, message, properties=None,
+                       exchange='rejected', routing_key='test'):
+        """Create a message instance for use with the consumer in testing.
+
+        :param any message: the body of the message to create
+        :param dict properties: AMQP message properties
+        :param str exchange: The exchange the message should appear to be from
+        :param str routing_key: The message's routing key
+        :rtype: :class:`rejected.data.Message`
+
+        """
+        if not properties:
+            properties = {}
+        if isinstance(message, dict) and \
+                properties.get('content_type') == 'application/json':
+            message = json.dumps(message)
+        return data.Message(
+            connection='mock',
+            channel=self.process.connections['mock'].channel,
+            method=spec.Basic.Deliver(
+                'ctag0', 1, False, exchange, routing_key),
+            properties=spec.BasicProperties(
+                app_id=properties.get('app_id', 'rejected.testing'),
+                content_encoding=properties.get('content_encoding'),
+                content_type=properties.get('content_type'),
+                correlation_id=properties.get(
+                    'correlation_id', self.correlation_id),
+                delivery_mode=properties.get('delivery_mode', 1),
+                expiration=properties.get('expiration'),
+                headers=properties.get('headers'),
+                message_id=properties.get('message_id', str(uuid.uuid4())),
+                priority=properties.get('priority'),
+                reply_to=properties.get('reply_to'),
+                timestamp=properties.get('timestamp', int(time.time())),
+                type=properties.get('type'),
+                user_id=properties.get('user_id')
+            ), body=message, returned=False)
 
     @gen.coroutine
     def process_message(self,
@@ -109,7 +147,7 @@ class AsyncTestCase(testing.AsyncTestCase):
         a JSON serializable object, the message body will automatically be
         JSON serialized.
 
-        If an exception is not raised, a :cls:`~rejected.data.Measurement`
+        If an exception is not raised, a :class:`~rejected.data.Measurement`
         instance is returned that will contain all of the measurements
         collected during the processing of the message.
 
@@ -119,10 +157,10 @@ class AsyncTestCase(testing.AsyncTestCase):
         :param dict properties: AMQP message properties
         :param str exchange: The exchange the message should appear to be from
         :param str routing_key: The message's routing key
-        :raises: rejected.consumer.ConsumerException
-        :raises: rejected.consumer.MessageException
-        :raises: rejected.consumer.ProcessingException
-        :rtype: rejected.data.Measurement
+        :raises: :exc:`rejected.consumer.ConsumerException`
+        :raises: :exc:`rejected.consumer.MessageException`
+        :raises: :exc:`rejected.consumer.ProcessingException`
+        :rtype: :class:`rejected.data.Measurement`
 
         """
         properties = properties or {}
@@ -134,8 +172,8 @@ class AsyncTestCase(testing.AsyncTestCase):
         measurement = data.Measurement()
 
         result = yield self.consumer.execute(
-            self._create_message(message_body, properties,
-                                 exchange, routing_key),
+            self.create_message(message_body, properties,
+                                exchange, routing_key),
             measurement)
         if result == data.MESSAGE_ACK:
             raise gen.Return(measurement)
@@ -172,47 +210,9 @@ class AsyncTestCase(testing.AsyncTestCase):
         cls = self.get_consumer()
         obj = cls(config.Data(self.get_settings()), self.process)
         obj.initialize()
-        obj._message = self._create_message('dummy')
+        obj._message = self.create_message('dummy')
         obj.set_channel('mock', self.process.connections['mock'].channel)
         return obj
-
-    def _create_message(self, message, properties=None,
-                        exchange='rejected', routing_key='test'):
-        """Create a message instance for the consumer.
-
-        :param any message: the body of the message to create
-        :param dict properties: AMQP message properties
-        :param str exchange: The exchange the message should appear to be from
-        :param str routing_key: The message's routing key
-        :rtype: rejected.data.Message
-
-        """
-        if not properties:
-            properties = {}
-        if isinstance(message, dict) and \
-                properties.get('content_type') == 'application/json':
-            message = json.dumps(message)
-        return data.Message(
-            connection='mock',
-            channel=self.process.connections['mock'].channel,
-            method=spec.Basic.Deliver(
-                'ctag0', 1, False, exchange, routing_key),
-            properties=spec.BasicProperties(
-                app_id=properties.get('app_id', 'rejected.testing'),
-                content_encoding=properties.get('content_encoding'),
-                content_type=properties.get('content_type'),
-                correlation_id=properties.get(
-                    'correlation_id', self.correlation_id),
-                delivery_mode=properties.get('delivery_mode', 1),
-                expiration=properties.get('expiration'),
-                headers=properties.get('headers'),
-                message_id=properties.get('message_id', str(uuid.uuid4())),
-                priority=properties.get('priority'),
-                reply_to=properties.get('reply_to'),
-                timestamp=properties.get('timestamp', int(time.time())),
-                type=properties.get('type'),
-                user_id=properties.get('user_id')
-            ), body=message, returned=False)
 
     def _create_process(self):
         obj = mock.Mock('rejected.process.Process')

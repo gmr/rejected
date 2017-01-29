@@ -116,8 +116,8 @@ class Consumer(object):
     be dropped.
 
     .. note:: Since 3.17, :class:`~rejected.consumer.Consumer` and
-        :class:`~rejected.consumer.PublishingConsumer` have been combined into the
-        same class.
+        :class:`~rejected.consumer.PublishingConsumer` have been combined
+        into the same class.
 
     """
     DROP_INVALID_MESSAGES = False
@@ -173,7 +173,7 @@ class Consumer(object):
         :meth:`~rejected.consumer.Consumer.process`.
 
         .. note:: Asynchronous support: Decorate this method with
-            :meth:`tornado.gen.coroutine` to make it asynchronous.
+            :func:`tornado.gen.coroutine` to make it asynchronous.
 
         If this method returns a :class:`~tornado.concurrent.Future`, execution
         will not proceed until the Future has completed.
@@ -189,11 +189,11 @@ class Consumer(object):
         :exc:`~rejected.consumer.ConsumerException`.
 
         .. note:: Asynchronous support: Decorate this method with
-            :meth:`tornado.gen.coroutine` to make it asynchronous.
+            :func:`tornado.gen.coroutine` to make it asynchronous.
 
-        :raises: rejected.consumer.ConsumerException
-        :raises: rejected.consumer.MessageException
-        :raises: rejected.consumer.ProcessingException
+        :raises: :exc:`rejected.consumer.ConsumerException`
+        :raises: :exc:`rejected.consumer.MessageException`
+        :raises: :exc:`rejected.consumer.ProcessingException`
 
         """
         raise NotImplementedError
@@ -211,7 +211,7 @@ class Consumer(object):
         :meth:`~rejected.consumer.Consumer.prepare` is not invoked.
 
         .. note:: Asynchronous support: Decorate this method with
-            :meth:`tornado.gen.coroutine` to make it asynchronous.
+            :func:`tornado.gen.coroutine` to make it asynchronous.
 
         """
         self.logger.debug('on_finished invoked')
@@ -221,7 +221,7 @@ class Consumer(object):
 
         Override this method to respond to being blocked.
 
-        .. since:: 3.17
+        .. versionadded:: 3.17
 
         :param str name: The connection name that is blocked
 
@@ -233,7 +233,7 @@ class Consumer(object):
 
         Override this method to respond to being blocked.
 
-        .. since:: 3.17
+        .. versionadded:: 3.17
 
         :param str name: The connection name that is blocked
 
@@ -292,27 +292,31 @@ class Consumer(object):
               reply_to=None):
         """Reply to the received message.
 
-        If auto_id is True, a new uuid4 value will be generated for the
-        message_id and correlation_id will be set to the message_id of the
-        original message. In addition, the timestamp will be assigned the
-        current time of the message. If auto_id is False, neither the
-        message_id or the correlation_id will be changed in the properties.
+        If ``auto_id`` is :data:`True`, a new UUIDv4 value will be generated
+        for the ``message_id`` AMQP message property. The ``correlation_id``
+        AMQP message property will be set to the ``message_id`` of the
+        original message. In addition, the ``timestamp`` will be assigned the
+        current time of the message. If ``auto_id`` is :data:`False`, neither
+        the ``message_id`` and the ``correlation_id`` AMQP properties will be
+        changed in the properties.
 
-        If exchange is not set, the exchange the message was received on will
-        be used.
+        If ``exchange`` is not set, the exchange the message was received on
+        will be used.
 
-        If reply_to is set in the original properties,
-        it will be used as the routing key. If the reply_to is not set
-        in the properties and it is not passed in, a ValueException will be
+        If ``reply_to`` is set in the original properties,
+        it will be used as the routing key. If the ``reply_to`` is not set
+        in the properties and it is not passed in, a :exc:`ValueError` will be
         raised. If reply to is set in the properties, it will be cleared out
         prior to the message being republished.
 
         :param any response_body: The message body to send
-        :param rejected.data.Properties properties: Message properties to use
-        :param bool auto_id: Automatically shuffle message_id & correlation_id
+        :param properties: Message properties to use
+        :type properties: :class:`rejected.data.Properties`
+        :param bool auto_id: Automatically shuffle ``message_id`` &
+            ``correlation_id``
         :param str exchange: Override the exchange to publish to
-        :param str reply_to: Override the reply_to in the properties
-        :raises: ValueError
+        :param str reply_to: Override the ``reply_to`` AMQP property
+        :raises: :exc:`ValueError`
 
         """
         if not properties.reply_to and not reply_to:
@@ -359,6 +363,8 @@ class Consumer(object):
     def stats_add_timing(self, key, duration):
         """Add a timing to the per-message measurements
 
+        .. versionadded:: 3.13.0
+
         :param str key: The key to add the timing to
         :param int|float duration: The timing value
 
@@ -383,6 +389,8 @@ class Consumer(object):
 
     def stats_incr(self, key, value=1):
         """Increment the specified key in the per-message measurements
+
+        .. versionadded:: 3.13.0
 
         :param str key: The key to increment
         :param int value: The value to increment the key by
@@ -409,6 +417,8 @@ class Consumer(object):
     def stats_set_tag(self, key, value=1):
         """Set the specified tag/value in the per-message measurements
 
+        .. versionadded:: 3.13.0
+
         :param str key: The key to increment
         :param int value: The value to increment the key by
 
@@ -420,6 +430,8 @@ class Consumer(object):
 
     def stats_set_value(self, key, value=1):
         """Set the specified key/value in the per-message measurements
+
+        .. versionadded:: 3.13.0
 
         :param str key: The key to increment
         :param int value: The value to increment the key by
@@ -433,6 +445,8 @@ class Consumer(object):
     @contextlib.contextmanager
     def stats_track_duration(self, key):
         """Time around a context and add to the the per-message measurements
+
+        .. versionadded:: 3.13.0
 
         :param str key: The key for the timing to track
 
@@ -503,37 +517,23 @@ class Consumer(object):
         return self._message.body
 
     @property
-    def configuration(self):
-        """Access the configuration stanza for the consumer as specified by
-        the ``config`` section for the consumer in the rejected configuration.
-
-        .. deprecated:: 3.1
-            Use :attr:`.settings` instead.
-
-        :rtype: dict
-
-        """
-        warnings.warn('Consumer.configuration is deprecated '
-                      'in favor of Consumer.settings',
-                      category=DeprecationWarning)
-        return self._settings
-
-    @property
     def content_encoding(self):
-        """Access the current message's ``content-encoding`` property as an
-        attribute of the consumer class.
+        """Access the current message's ``content-encoding`` AMQP message
+        property as an attribute of the consumer class.
 
         :rtype: str
 
         """
         if not self._message:
             return None
-        return (self._message.properties.content_encoding or '').lower() or None
+        return (self._message.properties.content_encoding or
+                '').lower() or None
 
     @property
     def content_type(self):
-        """Access the current message's ``content-type`` property as an
-        attribute of the consumer class.
+        """Access the current message's ``content-type`` AMQP message property
+        as an attribute of the consumer class.
+
         :rtype: str
 
         """
@@ -543,10 +543,10 @@ class Consumer(object):
 
     @property
     def correlation_id(self):
-        """Access the current message's ``correlation-id`` property as an
-        attribute of the consumer class. If the message does not have a
-        correlation-id then, each message is assigned a new UUIDv4 based
-        correlation-id value.
+        """Access the current message's ``correlation-id`` AMAP message
+        property as an attribute of the consumer class. If the message does not
+        have a ``correlation-id`` then, each message is assigned a new UUIDv4
+        based ``correlation-id`` value.
 
         :rtype: str
 
@@ -555,8 +555,8 @@ class Consumer(object):
 
     @property
     def exchange(self):
-        """Access the exchange the message was published to as an attribute
-        of the consumer class.
+        """Access the AMQP exchange the message was published to as an
+        attribute of the consumer class.
 
         :rtype: str
 
@@ -567,8 +567,8 @@ class Consumer(object):
 
     @property
     def expiration(self):
-        """Access the current message's ``expiration`` property as an attribute
-        of the consumer class.
+        """Access the current message's ``expiration`` AMQP message property as
+        an attribute of the consumer class.
 
         :rtype: str
 
@@ -579,8 +579,8 @@ class Consumer(object):
 
     @property
     def headers(self):
-        """Access the current message's ``headers`` property as an attribute
-        of the consumer class.
+        """Access the current message's ``headers`` AMQP message property as an
+        attribute of the consumer class.
 
         :rtype: dict
 
@@ -591,8 +591,9 @@ class Consumer(object):
 
     @property
     def message_id(self):
-        """Access the current message's ``message-id`` property as an
-        attribute of the consumer class.
+        """Access the current message's ``message-id`` AMQP message property as
+        an attribute of the consumer class.
+
         :rtype: str
 
         """
@@ -611,8 +612,8 @@ class Consumer(object):
 
     @property
     def priority(self):
-        """Access the current message's ``priority`` property as an
-        attribute of the consumer class.
+        """Access the current message's ``priority`` AMQP message property as
+        an attribute of the consumer class.
 
         :rtype: int
 
@@ -623,8 +624,8 @@ class Consumer(object):
 
     @property
     def properties(self):
-        """Access the current message's properties in dict form as an attribute
-        of the consumer class.
+        """Access the current message's AMQP message properties in dict form as
+        an attribute of the consumer class.
 
         :rtype: dict
 
@@ -646,8 +647,8 @@ class Consumer(object):
 
     @property
     def reply_to(self):
-        """Access the current message's ``reply-to`` property as an
-        attribute of the consumer class.
+        """Access the current message's ``reply-to`` AMQP message property as
+        an attribute of the consumer class.
 
         :rtype: str
 
@@ -661,7 +662,7 @@ class Consumer(object):
         """Indicates if the message was delivered by consumer previously and
         returned from RabbitMQ.
 
-        .. since:: 3.17
+        .. versionadded:: 3.17
 
         :rtype: bool
 
@@ -683,8 +684,8 @@ class Consumer(object):
 
     @property
     def message_type(self):
-        """Access the current message's ``type`` property as an attribute of
-        the consumer class.
+        """Access the current message's ``type`` AMQP message property as an
+        attribute of the consumer class.
 
         :rtype: str
 
@@ -720,8 +721,8 @@ class Consumer(object):
 
     @property
     def timestamp(self):
-        """Access the unix epoch timestamp value from the properties of the
-        current message.
+        """Access the unix epoch timestamp value from the AMQP message
+        properties of the current message.
 
         :rtype: int
 
@@ -732,7 +733,8 @@ class Consumer(object):
 
     @property
     def user_id(self):
-        """Access the user-id from the current message's properties.
+        """Access the ``user-id`` AMQP message property from the current
+        message's properties.
 
         :rtype: str
 
@@ -750,9 +752,10 @@ class Consumer(object):
 
         This for internal use and should not be extended or used directly.
 
-        :param rejected.data.Message message_in: The message to process
+        :param message_in: The message to process
+        :type message_in: :class:`rejected.data.Message`
         :param measurement: For collecting per-message instrumentation
-        :type measurement: rejected.data.Measurement
+        :type measurement: :class:`rejected.data.Measurement`
         :rtype: bool
 
         """
@@ -887,6 +890,8 @@ class Consumer(object):
 
         This for internal use and should not be extended or used directly.
 
+        .. todo:: integrate this with message publishing
+
         :param str name: The RabbitMQ connection that confirmed the delivery
         :param bool delivered: Was the message was successfully delivered
         :param str delivery_tag: The delivery tag for the message
@@ -913,16 +918,17 @@ class Consumer(object):
         This for internal use and should not be extended or used directly.
 
         :param str name: The channel connection name
-        :param pika.channel.Channel channel: The channel to assign
+        :param channel: The channel to assign
+        :type channel: :class:`pika.channel.Channel`
 
         """
         self._channels[name] = channel
 
     @property
     def _channel(self):
-        """Return the default channel for the consuming connection.
+        """Return the channel of the message that is currently being processed.
 
-        :rtype: pika.channel.Channel
+        :rtype: :class:`pika.channel.Channel`
 
         """
         if not self._message:
@@ -937,11 +943,11 @@ class Consumer(object):
 
     @staticmethod
     def _get_pika_properties(properties_in):
-        """Return a pika.BasicProperties object for a rejected.data.Properties
-        object.
+        """Return a :class:`pika.spec.BasicProperties` object for a
+        :class:`rejected.data.Properties` object.
 
         :param dict properties_in: Properties to convert
-        :rtype: pika.BasicProperties
+        :rtype: :class:`pika.spec.BasicProperties`
 
         """
         properties = pika.BasicProperties()
@@ -958,7 +964,7 @@ class Consumer(object):
 
     def _republish_processing_error(self):
         """Republish the original message that was received because a
-        ProcessingException was raised.
+        :exc:`~rejected.consumer.ProcessingException` was raised.
 
         This for internal use and should not be extended or used directly.
 
@@ -987,9 +993,9 @@ class Consumer(object):
 
 
 class PublishingConsumer(Consumer):
-    """Deprecated, functionality moved to rejected.consumer.Consumer
+    """Deprecated, functionality moved to :class:`rejected.consumer.Consumer`
 
-    .. deprecated:: 3.13.0
+    .. deprecated:: 3.17.0
 
     """
     def __init__(self, *args, **kwargs):
@@ -1063,8 +1069,8 @@ class SmartConsumer(Consumer):
         :param str routing_key: The routing key to publish with
         :param dict properties: The message properties
         :param mixed body: The message body to publish
-        :param no_serialization: Turn off auto-serialization of the body
-        :param no_encoding: Turn off auto-encoding of the body
+        :param bool no_serialization: Turn off auto-serialization of the body
+        :param bool no_encoding: Turn off auto-encoding of the body
         :param str channel: The channel/connection name to use. If it is not
             specified, the channel that the message was delivered on is used.
 
@@ -1425,9 +1431,10 @@ class SmartConsumer(Consumer):
 
 
 class SmartPublishingConsumer(SmartConsumer):
-    """Deprecated, functionality moved to rejected.consumer.SmartConsumer
+    """Deprecated, functionality moved to
+    :class:`rejected.consumer.SmartConsumer`
 
-        .. deprecated:: 3.13.0
+        .. deprecated:: 3.17.0
 
     """
 

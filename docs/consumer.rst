@@ -38,7 +38,7 @@ Consumer Classes
 
 Exceptions
 ----------
-There are two exception types that consumer applications should raise to handle
+There are three exception types that consumer applications should raise to handle
 problems that may arise when processing a message. When these exceptions are raised,
 rejected will reject the message delivery, letting RabbitMQ know that there was
 a failure.

@@ -21,9 +21,10 @@ exclude_patterns = ['_build']
 pygments_style = 'sphinx'
 
 intersphinx_mapping = {
-    'python': ('https://docs.python.org/2.7/', None),
-    'raven': ('https://raven.readthedocs.org/en/latest/', None),
-    'tornado': ('http://tornadoweb.org/en/latest', None)
+    'python': ('https://docs.python.org/3/', None),
+    'pika': ('https://pika.readthedocs.io/en/latest/', None),
+    'raven': ('https://raven.readthedocs.io/en/latest/', None),
+    'tornado': ('http://www.tornadoweb.org/en/latest/', None)
 }
 
 html_theme = 'default'

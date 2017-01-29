@@ -47,6 +47,45 @@ class Message(Data):
     flatter, move convenient way to access the data while supporting the legacy
     methods that were previously in place in rejected < 2.0
 
+    +------------------------------------------------------------------+
+    | Attributes                                                       |
+    +======================+===========================================+
+    | :attr:`body`         |The AMQP message body                      |
+    +----------------------+-------------------------------------------+
+    | :attr:`connection`   | The name of the connection that the       |
+    |                      | message was received on.                  |
+    +----------------------+-------------------------------------------+
+    | :attr:`channel`      | The channel that the message was          |
+    |                      | was received on.                          |
+    +----------------------+-------------------------------------------+
+    | :attr:`consumer_tag` | The consumer tag registered with RabbitMQ |
+    |                      | that identifies which consumer registered |
+    |                      | to receive this message.                  |
+    +----------------------+-------------------------------------------+
+    | :attr:`delivery_tag` | The delivery tag that represents the      |
+    |                      | deliver of this message with RabbitMQ.    |
+    +----------------------+-------------------------------------------+
+    | :attr:`exchange`     | The exchange the message was published to |
+    +----------------------+-------------------------------------------+
+    | :attr:`method`       | The :class:`pika.spec.Basic.Deliver` or   |
+    |                      | :class:`pika.spec.Basic.Return` object    |
+    |                      | that represents how the message was       |
+    |                      | received by rejected.                     |
+    +----------------------+-------------------------------------------+
+    | :attr:`properties`   | The :class:`~pika.spec.BasicProperties`   |
+    |                      | object that represents the message's AMQP |
+    |                      | properties.                               |
+    +----------------------+-------------------------------------------+
+    | :attr:`redelivered`  | A flag that indicates the message was     |
+    |                      | previously delivered by RabbitMQ.         |
+    +----------------------+-------------------------------------------+
+    | :attr:`returned`     | A flag that indicates the message was     |
+    |                      | returned by RabbitMQ.                     |
+    +----------------------+-------------------------------------------+
+    | :attr:`routing_key`  | The routing key that was used to deliver  |
+    |                      | the message.                              |
+    +----------------------+-------------------------------------------+
+
     """
     __slots__ = ['connection', 'channel', 'method', 'properties', 'body',
                  'consumer_tag', 'delivery_tag', 'exchange', 'redelivered',
@@ -83,7 +122,37 @@ class Message(Data):
 
 class Properties(Data):
     """A class that represents all of the field attributes of AMQP's
-    Basic.Properties
+    ``Basic.Properties``.
+
+    +-----------------------------------------------------------------+
+    | Attributes                                                      |
+    +==========================+======================================+
+    | :attr:`app_id`           | Creating application id              |
+    +--------------------------+--------------------------------------+
+    | :attr:`content_type`     | MIME content type                    |
+    +--------------------------+--------------------------------------+
+    | :attr:`content_encoding` | MIME content encoding                |
+    +--------------------------+--------------------------------------+
+    | :attr:`correlation_id`   | Application correlation identifier   |
+    +--------------------------+--------------------------------------+
+    | :attr:`delivery_mode`    | Non-persistent (1) or persistent (2) |
+    +--------------------------+--------------------------------------+
+    | :attr:`expiration`       | Message expiration specification     |
+    +--------------------------+--------------------------------------+
+    | :attr:`headers`          | Message header field table           |
+    +--------------------------+--------------------------------------+
+    | :attr:`message_id`       | Application message identifier       |
+    +--------------------------+--------------------------------------+
+    | :attr:`priority`         | Message priority, 0 to 9             |
+    +--------------------------+--------------------------------------+
+    | :attr:`reply_to`         | Address to reply to                  |
+    +--------------------------+--------------------------------------+
+    | :attr:`timestamp`        | Message timestamp                    |
+    +--------------------------+--------------------------------------+
+    | :attr:`type`             | Message type name                    |
+    +--------------------------+--------------------------------------+
+    | :attr:`user_id`          | Creating user id                     |
+    +--------------------------+--------------------------------------+
 
     """
     __slots__ = ['app_id', 'content_type', 'content_encoding',
@@ -104,8 +173,25 @@ class Properties(Data):
 
 
 class Measurement(object):
-    """
-    Common Measurement Object for
+    """Common Measurement Object that provides common methods for collecting
+    and exposes measurement data that is submitted in
+    :class:`rejected.process.Process` and :class:`rejected.consumer.Consumer`
+    for submission to statsd or influxdb.
+
+    +------------------------------------------------------------------+
+    | Attributes                                                       |
+    +==================+===============================================+
+    | :attr:`counters` | Counters that are affected by                 |
+    |                  | :meth:`~rejected.data.Measurement.decr` and   |
+    |                  | :meth:`~rejected.data.Measurement.incr`       |
+    +------------------+-----------------------------------------------+
+    | :attr:`tags`     | Tag key/value pairs for use with InfluxDB     |
+    +------------------+-----------------------------------------------+
+    | :attr:`values`   | Numeric values such as integers, durations,   |
+    |                  | and such.                                     |
+    +------------------+-----------------------------------------------+
+
+    .. versionadded:: 3.13.0
 
     """
     def __init__(self):
@@ -114,19 +200,49 @@ class Measurement(object):
         self.values = {}
 
     def decr(self, key, value=1):
+        """Decrement a counter.
+
+        :param str key: The key to decrement
+        :param int value: The value to decrement by
+
+        """
         self.counters[key] -= value
 
     def incr(self, key, value=1):
+        """Increment a counter.
+
+        :param str key: The key to increment
+        :param int value: The value to increment by
+
+        """
         self.counters[key] += value
 
     def set_tag(self, key, value):
+        """Set a tag. This is only used for InfluxDB measurements.
+
+        :param str key: The tag name
+        :param str value: The tag value
+
+        """
         self.tags[key] = value
 
     def set_value(self, key, value):
+        """Set a value.
+
+        :param str key: The value name
+        :param mixed value: The value
+
+        """
         self.values[key] = value
 
     @contextlib.contextmanager
     def track_duration(self, key):
+        """Context manager that sets a value with the duration of time that it
+        takes to execute whatever it is wrapping.
+
+        :param str key: The timing name
+
+        """
         start_time = time.time()
         try:
             yield

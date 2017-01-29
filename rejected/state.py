@@ -58,6 +58,15 @@ class State(object):
         self.state_start = time.time()
 
     @property
+    def is_active(self):
+        """Returns a bool specifying if the process is currently active.
+
+        :rtype: bool
+
+        """
+        return self.state == self.STATE_ACTIVE
+
+    @property
     def is_connecting(self):
         """Returns a bool specifying if the process is currently connecting.
 

@@ -11,7 +11,7 @@ source_suffix = '.rst'
 master_doc = 'index'
 
 project = u'rejected'
-copyright = u'2014-16, Gavin M. Roy'
+copyright = u'2009-2017, Gavin M. Roy'
 
 import rejected
 release = rejected.__version__

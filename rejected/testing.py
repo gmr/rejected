@@ -68,9 +68,10 @@ class AsyncTestCase(testing.AsyncTestCase):
 
     def setUp(self):
         super(AsyncTestCase, self).setUp()
+        self.correlation_id = str(uuid.uuid4())
         self.process = self._create_process()
         self.consumer = self._create_consumer()
-        self.correlation_id = str(uuid.uuid4())
+        self.channel = self.process.connections['mock'].channel
 
     def tearDown(self):
         super(AsyncTestCase, self).tearDown()
@@ -171,11 +172,12 @@ class AsyncTestCase(testing.AsyncTestCase):
         cls = self.get_consumer()
         obj = cls(config.Data(self.get_settings()), self.process)
         obj.initialize()
+        obj._message = self._create_message('dummy')
+        obj.set_channel('mock', self.process.connections['mock'].channel)
         return obj
 
-    def _create_message(self, message, properties,
-                        exchange='rejected',
-                        routing_key='test'):
+    def _create_message(self, message, properties=None,
+                        exchange='rejected', routing_key='test'):
         """Create a message instance for the consumer.
 
         :param any message: the body of the message to create
@@ -185,8 +187,10 @@ class AsyncTestCase(testing.AsyncTestCase):
         :rtype: rejected.data.Message
 
         """
+        if not properties:
+            properties = {}
         if isinstance(message, dict) and \
-                properties['content_type'] == 'application/json':
+                properties.get('content_type') == 'application/json':
             message = json.dumps(message)
         return data.Message(
             connection='mock',
@@ -196,7 +200,7 @@ class AsyncTestCase(testing.AsyncTestCase):
             properties=spec.BasicProperties(
                 app_id=properties.get('app_id', 'rejected.testing'),
                 content_encoding=properties.get('content_encoding'),
-                content_type=properties['content_type'],
+                content_type=properties.get('content_type'),
                 correlation_id=properties.get(
                     'correlation_id', self.correlation_id),
                 delivery_mode=properties.get('delivery_mode', 1),
@@ -206,7 +210,7 @@ class AsyncTestCase(testing.AsyncTestCase):
                 priority=properties.get('priority'),
                 reply_to=properties.get('reply_to'),
                 timestamp=properties.get('timestamp', int(time.time())),
-                type=properties['type'],
+                type=properties.get('type'),
                 user_id=properties.get('user_id')
             ), body=message, returned=False)
 

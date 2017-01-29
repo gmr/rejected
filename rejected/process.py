@@ -1100,7 +1100,7 @@ class Process(multiprocessing.Process, state.State):
 
     @property
     def queue_name(self):
-        return not self.consumer_config.get('queue', self.name)
+        return self.consumer_config.get('queue', self.name)
 
     @property
     def stats_queue(self):

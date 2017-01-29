@@ -112,8 +112,8 @@ class ConsumerPropertyTests(testing.AsyncTestCase):
     def test_body_property(self):
         self.assertEqual(self.obj.body, mocks.BODY)
 
-    def test_configuration_property(self):
-        self.assertDictEqual(self.obj.configuration, self.config)
+    def test_settings_property(self):
+        self.assertDictEqual(self.obj.settings, self.config)
 
     def test_content_encoding_property(self):
         self.assertEqual(self.obj.content_encoding,

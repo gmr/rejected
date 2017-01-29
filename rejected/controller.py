@@ -110,7 +110,8 @@ class Controller(helper.Controller):
             kwargs = {'logger': 'rejected.controller',
                       'modules': utils.get_module_data()}
             LOGGER.debug('Sending exception to sentry: %r', kwargs)
-            self._sentry_client.captureException(exc_info, **kwargs)
+            if self._sentry_client:
+                self._sentry_client.captureException(exc_info, **kwargs)
             raise
         if self.is_running:
             self.stop()

@@ -944,10 +944,8 @@ class Consumer(object):
         :rtype: pika.BasicProperties
 
         """
-        if not properties_in:
-            return
         properties = pika.BasicProperties()
-        for key in properties_in:
+        for key in properties_in or {}:
             if properties_in.get(key) is not None:
                 setattr(properties, key, properties_in.get(key))
         return properties

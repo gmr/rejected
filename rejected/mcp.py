@@ -26,8 +26,7 @@ class Consumer(object):
 
     """
 
-    def __init__(self, connections, last_proc_num, processes, qty, queue):
-        self.connections = connections
+    def __init__(self, last_proc_num, processes, qty, queue):
         self.last_proc_num = last_proc_num
         self.processes = processes
         self.qty = qty
@@ -64,7 +63,7 @@ class MasterControlProgram(state.State):
         self.consumers = dict()
         self.config = config
         self.last_poll_results = dict()
-        self.poll_data = {'time': 0, 'processes': list()}
+        self.poll_data = {'time': 0, 'processes': []}
         self.poll_timer = None
         self.profile = profile
         self.results_timer = None
@@ -143,8 +142,7 @@ class MasterControlProgram(state.State):
         consumer_stats = dict()
         for name in data.keys():
             consumer_stats[name] = self.consumer_stats_counter()
-            consumer_stats[name]['processes'] = \
-                self.process_count_by_consumer(name)
+            consumer_stats[name]['processes'] = self.process_count(name)
             for proc in data[name].keys():
                 for key in stats:
                     value = data[name][proc]['counts'].get(key, 0)
@@ -167,12 +165,11 @@ class MasterControlProgram(state.State):
         """
         LOGGER.debug('Checking minimum consumer process levels')
         for name in self.consumers:
-            for connection in self.consumers[name].connections:
-                processes_needed = self.process_spawn_qty(name, connection)
-                if processes_needed:
-                    LOGGER.info('Need to spawn %i processes for %s on %s',
-                                processes_needed, name, connection)
-                    self.start_processes(name, connection, processes_needed)
+            processes_needed = self.process_spawn_qty(name)
+            if processes_needed:
+                LOGGER.info('Need to spawn %i processes for %s',
+                            processes_needed, name)
+                self.start_processes(name, processes_needed)
 
     def collect_results(self, data_values):
         """Receive the data from the consumers polled and process it.
@@ -334,15 +331,15 @@ class MasterControlProgram(state.State):
         :rtype: dict
 
         """
-        return Consumer(dict([(c, []) for c in config['connections']]), 0,
-                        dict(), config.get('qty', self.DEFAULT_CONSUMER_QTY),
+        return Consumer(0,
+                        dict(),
+                        config.get('qty', self.DEFAULT_CONSUMER_QTY),
                         config['queue'])
 
-    def new_process(self, consumer_name, connection_name):
+    def new_process(self, consumer_name):
         """Create a new consumer instances
 
         :param str consumer_name: The name of the consumer
-        :param str connection_name: The name of the connection
         :return tuple: (str, process.Process)
 
         """
@@ -350,7 +347,6 @@ class MasterControlProgram(state.State):
                                   self.new_process_number(consumer_name))
         kwargs = {
             'config': self.config.application,
-            'connection_name': connection_name,
             'consumer_name': consumer_name,
             'profile': self.profile,
             'daemon': False,
@@ -472,38 +468,23 @@ class MasterControlProgram(state.State):
         """
         return self.consumers[name].processes[process_name]
 
-    def process_count(self, name, connection):
-        """Return the process count for the given consumer name and connection.
-
-        :param str name: The consumer name
-        :param str connection: The connection name
-        :rtype: int
-
-        """
-        return len(self.consumers[name].connections[connection])
-
-    def process_count_by_consumer(self, name):
-        """Return the process count by consumer only.
+    def process_count(self, name):
+        """Return the process count for the given consumer name.
 
         :param str name: The consumer name
         :rtype: int
 
         """
-        count = 0
-        for connection in self.consumers[name].connections:
-            count += len(self.consumers[name].connections.get(connection))
-        return count
+        return len(self.consumers[name].processes)
 
-    def process_spawn_qty(self, name, connection):
-        """Return the number of processes to spawn for the given consumer name
-        and connection.
+    def process_spawn_qty(self, name):
+        """Return the number of processes to spawn for the given consumer name.
 
         :param str name: The consumer name
-        :param str connection: The connection name
         :rtype: int
 
         """
-        return self.consumers[name].qty - self.process_count(name, connection)
+        return self.consumers[name].qty - self.process_count(name)
 
     def remove_consumer_process(self, consumer, name):
         """Remove all details for the specified consumer and process name.
@@ -513,9 +494,6 @@ class MasterControlProgram(state.State):
 
         """
         my_pid = os.getpid()
-        for conn in self.consumers[consumer].connections:
-            if name in self.consumers[consumer].connections[conn]:
-                self.consumers[consumer].connections[conn].remove(name)
         if name in self.consumers[consumer].processes:
             child = self.consumers[consumer].processes[name]
             if child.is_alive():
@@ -581,35 +559,6 @@ class MasterControlProgram(state.State):
         # Set the signal timer
         signal.setitimer(signal.ITIMER_REAL, duration, 0)
 
-    def start_process(self, name, connection):
-        """Start a new consumer process for the given consumer & connection name
-
-        :param str name: The consumer name
-        :param str connection: The connection name
-
-        """
-        process_name, proc = self.new_process(name, connection)
-        LOGGER.info('Spawning %s process for %s to %s', process_name, name,
-                    connection)
-
-        # Append the process to the consumer process list
-        self.consumers[name].processes[process_name] = proc
-        self.consumers[name].connections[connection].append(process_name)
-
-        # Start the process
-        proc.start()
-
-    def start_processes(self, name, connection, quantity):
-        """Start the specified quantity of consumer processes for the given
-        consumer and connection.
-
-        :param str name: The consumer name
-        :param str connection: The connection name
-        :param int quantity: The quantity of processes to start
-
-        """
-        [self.start_process(name, connection) for _i in range(0, quantity)]
-
     def setup_consumers(self):
         """Iterate through each consumer in the configuration and kick off the
         minimal amount of processes, setting up the runtime data as well.
@@ -617,8 +566,32 @@ class MasterControlProgram(state.State):
         """
         for name in self.consumer_cfg.keys():
             self.consumers[name] = self.new_consumer(self.consumer_cfg[name])
-            for connection in self.consumers[name].connections:
-                self.start_processes(name, connection, self.consumers[name].qty)
+            self.start_processes(name, self.consumers[name].qty)
+
+    def start_process(self, name):
+        """Start a new consumer process for the given consumer name
+
+        :param str name: The consumer name
+
+        """
+        process_name, proc = self.new_process(name)
+        LOGGER.info('Spawning %s process for %s', process_name, name)
+
+        # Append the process to the consumer process list
+        self.consumers[name].processes[process_name] = proc
+
+        # Start the process
+        proc.start()
+
+    def start_processes(self, name, quantity):
+        """Start the specified quantity of consumer processes for the given
+        consumer.
+
+        :param str name: The consumer name
+        :param int quantity: The quantity of processes to start
+
+        """
+        [self.start_process(name) for _i in range(0, quantity)]
 
     def stop_processes(self):
         """Iterate through all of the consumer processes shutting them down."""

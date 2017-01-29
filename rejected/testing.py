@@ -132,7 +132,7 @@ class AsyncTestCase(testing.AsyncTestCase):
 
         measurement = data.Measurement()
 
-        result = yield self.consumer._execute(
+        result = yield self.consumer.execute(
             self._create_message(message_body, properties,
                                  exchange, routing_key),
             measurement)
@@ -155,10 +155,10 @@ class AsyncTestCase(testing.AsyncTestCase):
         obj.basic_reject = mock.Mock()
         return obj
 
-    @staticmethod
-    def _create_connection():
+    def _create_connection(self):
         obj = mock.Mock('pika.adapters.tornado_connection.TornadoConnection')
         obj.ioloop = ioloop.IOLoop.current()
+        obj.channel = self._create_channel()
         return obj
 
     def _create_consumer(self):
@@ -171,7 +171,6 @@ class AsyncTestCase(testing.AsyncTestCase):
         cls = self.get_consumer()
         obj = cls(config.Data(self.get_settings()), self.process)
         obj.initialize()
-        obj._channel = self.process.channel
         return obj
 
     def _create_message(self, message, properties,
@@ -190,7 +189,8 @@ class AsyncTestCase(testing.AsyncTestCase):
                 properties['content_type'] == 'application/json':
             message = json.dumps(message)
         return data.Message(
-            channel=self.process.channel,
+            connection='mock',
+            channel=self.process.connections['mock'].channel,
             method=spec.Basic.Deliver(
                 'ctag0', 1, False, exchange, routing_key),
             properties=spec.BasicProperties(
@@ -208,12 +208,11 @@ class AsyncTestCase(testing.AsyncTestCase):
                 timestamp=properties.get('timestamp', int(time.time())),
                 type=properties['type'],
                 user_id=properties.get('user_id')
-            ), body=message)
+            ), body=message, returned=False)
 
     def _create_process(self):
         obj = mock.Mock('rejected.process.Process')
-        obj.connection = self._create_connection()
-        obj.channel = self._create_channel()
+        obj.connections = {'mock': self._create_connection()}
         obj.sentry_client = mock.Mock()
         obj.sentry_client.tags = mock.Mock()
         obj.send_exception_to_sentry = mock.Mock()

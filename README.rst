@@ -87,8 +87,8 @@ Example Configuration
       poll_interval: 10.0
       stats:
         log: True
-        backend: statsd
         influxdb:
+          enabled: True
           scheme: http
           host: localhost
           port: 8086
@@ -96,6 +96,7 @@ Example Configuration
           password: password
           database: dbname
         statsd:
+          enabled: True
           host: localhost
           port: 8125
           prefix: applications.rejected
@@ -112,7 +113,9 @@ Example Configuration
         example:
           consumer: rejected.example.Consumer
           sentry_dsn: https://[YOUR-SENTRY-DSN]
-          connections: [rabbitmq]
+          connections:
+            - name: rabbitmq1
+              consume: True
           qty: 2
           queue: generated_messages
           qos_prefetch: 100

@@ -61,15 +61,17 @@ influxdb
 
 statsd
 ^^^^^^
-+----------------+-------------------------------------------------------------------------------+
-| stats > statsd |                                                                               |
-+================+========+======================================================================+
-|                | prefix | An optional prefix to use when creating the statsd metric path (str) |
-+----------------+--------+----------------------------------------------------------------------+
-|                | host   | The hostname or ip address of the statsd server (str)                |
-+----------------+--------+----------------------------------------------------------------------+
-|                | port   | The port of the statsd server. Default: ``8125`` (int)               |
-+----------------+--------+----------------------------------------------------------------------+
++----------------+--------------------------------------------------------------------------------+
+| stats > statsd |                                                                                |
++================+=========+======================================================================+
+|                | enabled | Toggle statsd reporting off and on (bool)                            |
++----------------+---------+----------------------------------------------------------------------+
+|                | prefix  | An optional prefix to use when creating the statsd metric path (str) |
++----------------+---------+----------------------------------------------------------------------+
+|                | host    | The hostname or ip address of the statsd server (str)                |
++----------------+---------+----------------------------------------------------------------------+
+|                | port    | The port of the statsd server. Default: ``8125`` (int)               |
++----------------+---------+----------------------------------------------------------------------+
 
 Connections
 ^^^^^^^^^^^
@@ -97,10 +99,10 @@ Each consumer entry should be a nested object with a unique name with consumer a
 
 +---------------+-----------------------------------------------------------------------------------------------------------+
 | Consumer Name |                                                                                                           |
-+===============+=============+=============================================================================================+
++===============+=======================+===================================================================================+
 |               | consumer              | The package.module.Class path to the consumer code (str)                          |
 |               +-----------------------+-----------------------------------------------------------------------------------+
-|               | connections           | The connections, by name, to connect to from the Connections section (list)       |
+|               | connections           | The connections to connect to (list) - See `Consumer Connections`_                |
 |               +-----------------------+-----------------------------------------------------------------------------------+
 |               | qty                   | The number of consumers per connection to run (int)                               |
 |               +-----------------------+-----------------------------------------------------------------------------------+
@@ -129,6 +131,53 @@ Each consumer entry should be a nested object with a unique name with consumer a
 |               +-----------------------+-----------------------------------------------------------------------------------+
 |               | config                | Free-form key-value configuration section for the consumer (obj)                  |
 +---------------+-----------------------+-----------------------------------------------------------------------------------+
+
+Consumer Connections
+^^^^^^^^^^^^^^^^^^^^
+The consumer connections configuration allows for one or more connections to be
+made by a single consumer. This configuration section supports two formats. If
+a list of connection names are specified, the consumer will connect to and consume
+from the all of the specified connections.
+
+.. code:: yaml
+
+    Consumer Name:
+        connections:
+          - connection1
+          - connection2
+
+If the ``connections`` list include structured values, additional settings can be
+set. For example, you may want to consume from one RabbitMQ broker and publish to
+another, as is illustrated below:
+
+.. code:: yaml
+
+    Consumer Name:
+        connections:
+          - name: connection1
+            consume: True
+          - name: connection2
+            consume: False
+
+In the above example, the consumer will have two connections, ``connection1`` and
+``connection2``. It will only consume from ``connection1`` but can publish
+messages ``connection2`` by specifying the connection name in the
+:py:meth:`~rejected.consumer.Consumer.publish_message` method.
+
+Structured Connections
+!!!!!!!!!!!!!!!!!!!!!!
+
+When specifying a structured consumer connection, the following attributes are
+available.
+
++-----------------------------+------------------------------------------------------------------------------+
+| Consumer Name > connections |                                                                              |
++=============================+=========+====================================================================+
+|                             | name    | The connection name, as specified in the Connections section of    |
+|                             |         | the application configuration.                                     |
+|                             +---------+--------------------------------------------------------------------+
+|                             | consume | Specify if the connection should consume on the connection. (bool) |
++-----------------------------+---------+--------------------------------------------------------------------+
 
 .. _daemon:
 

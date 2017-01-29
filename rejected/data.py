@@ -48,24 +48,30 @@ class Message(Data):
     methods that were previously in place in rejected < 2.0
 
     """
-    __slots__ = ['channel', 'method', 'properties', 'body', 'consumer_tag',
-                 'delivery_tag', 'exchange', 'redelivered', 'routing_key']
+    __slots__ = ['connection', 'channel', 'method', 'properties', 'body',
+                 'consumer_tag', 'delivery_tag', 'exchange', 'redelivered',
+                 'routing_key', 'returned']
 
-    def __init__(self, channel, method, properties, body):
+    def __init__(self, connection, channel, method, properties, body,
+                 returned=False):
         """Initialize a message setting the attributes from the given channel,
         method, header and body.
 
+        :param str connection: The connection name for the message
         :param channel: The channel the message was received on
         :type channel: pika.channel.Channel
         :param pika.frames.Method method: pika Method Frame object
         :param pika.spec.BasicProperties properties: message properties
         :param str body: Opaque message body
+        :param bool returned: Indicates the message was returned
 
         """
+        self.connection = connection
         self.channel = channel
         self.method = method
         self.properties = Properties(properties)
         self.body = copy.copy(body)
+        self.returned = returned
 
         # Map method properties
         self.consumer_tag = method.consumer_tag

@@ -56,7 +56,10 @@ from tornado import gen, ioloop, testing
 from rejected import consumer, data
 
 gen_test = testing.gen_test
-"""Testing equivalent of ``@gen.coroutine``, to be applied to test methods."""
+"""Testing equivalent of :func:`tornado.gen.coroutine`, to be applied to test
+methods.
+
+"""
 
 
 class AsyncTestCase(testing.AsyncTestCase):

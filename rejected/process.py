@@ -888,6 +888,9 @@ class Process(multiprocessing.Process, state.State):
         if not self.config.get('stats') and not self.config.get('statsd'):
             return
 
+        if 'stats' not in self.config:
+            self.config['stats'] = {}
+
         # Backwards compatible statsd config support
         if self.config.get('statsd'):
             warnings.warn('Deprecated statsd configuration detected',

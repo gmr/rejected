@@ -492,11 +492,11 @@ class Process(multiprocessing.Process, state.State):
             elif self.is_waiting_to_shutdown:
                 LOGGER.info(
                     'Requeueing pending message due to pending shutdown')
-                self.reject(message.delivery_tag, True)
+                self.reject(message, True)
                 self.shutdown_connections()
             elif self.is_shutting_down:
                 LOGGER.info('Requeueing pending message due to shutdown')
-                self.reject(message.delivery_tag, True)
+                self.reject(message, True)
                 self.on_ready_to_stop()
             else:
                 LOGGER.warning('Exiting invoke_consumer without processing, '
@@ -544,10 +544,12 @@ class Process(multiprocessing.Process, state.State):
     def on_connection_ready(self, name):
         LOGGER.debug('Connection %s indicated it is ready', name)
         self.consumer.set_channel(name, self.connections[name].channel)
-        if self.connections[name].should_consume:
-            self.connections[name].consume(
-                self.consumer_config['queue'], self.no_ack,
-                self.consumer_config['qos_prefetch'])
+        if all([c.is_idle for c in self.connections.values()]):
+            for key in self.connections.keys():
+                if self.connections[key].should_consume:
+                    self.connections[key].consume(
+                        self.consumer_config['queue'], self.no_ack,
+                        self.consumer_config['qos_prefetch'])
             if self.is_connecting:
                 self.set_state(self.STATE_IDLE)
 

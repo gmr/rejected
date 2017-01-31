@@ -237,7 +237,7 @@ class Connection(state.State):
         LOGGER.debug('Connection %s received delivery confirmation '
                      '(Delivered: %s)', self.name, delivered)
         self.callbacks.on_confirmation(
-            self.name, delivered, frame.delivery_tag)
+            self.name, delivered, frame.method.delivery_tag)
 
     def on_delivery(self, channel, method, properties, body):
         self.callbacks.on_delivery(
@@ -389,7 +389,7 @@ class Process(multiprocessing.Process, state.State):
             name, confirm, consume = connection, False, True
             if isinstance(connection, dict):
                 name = connection['name']
-                confirm = connection.get('publisher_confirmation', True)
+                confirm = connection.get('publisher_confirmation', False)
                 consume = connection.get('consume', True)
             self.connections[name] = Connection(
                 name, self.connection_config[name], consume, confirm,

@@ -277,7 +277,8 @@ class Consumer(object):
             specified, the channel that the message was delivered on is used.
 
         """
-        self.logger.debug('Publishing message to %s:%s', exchange, routing_key)
+        self.logger.debug('Publishing message to %s:%s (%s)',
+                          exchange, routing_key, channel)
         with self._measurement.track_duration(
                 'publish.{}.{}'.format(exchange, routing_key)):
             self._publish_channel(channel).basic_publish(
@@ -957,8 +958,10 @@ class Consumer(object):
         return properties
 
     def _publish_channel(self, name):
+        if not name:
+            return self._message.channel
         try:
-            return self._message.channel if not name else self._channels[name]
+            return self._channels[name]
         except KeyError:
             raise ValueError('Channel {} not found'.format(name))
 

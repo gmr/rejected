@@ -42,6 +42,7 @@ Application:
         - rabbitmq
         - name: rabbitmq2
           consume: False
+          confirm: False
       # sentry_dsn: sentry_dsn: https://[YOUR-SENTRY-DSN]
       qty: 1
       queue: test

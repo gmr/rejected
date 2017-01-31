@@ -156,8 +156,10 @@ another, as is illustrated below:
         connections:
           - name: connection1
             consume: True
+            publisher_confirmation: False
           - name: connection2
             consume: False
+            publisher_confirmation: True
 
 In the above example, the consumer will have two connections, ``connection1`` and
 ``connection2``. It will only consume from ``connection1`` but can publish
@@ -170,14 +172,16 @@ Structured Connections
 When specifying a structured consumer connection, the following attributes are
 available.
 
-+-----------------------------+------------------------------------------------------------------------------+
-| Consumer Name > connections |                                                                              |
-+=============================+=========+====================================================================+
-|                             | name    | The connection name, as specified in the Connections section of    |
-|                             |         | the application configuration.                                     |
-|                             +---------+--------------------------------------------------------------------+
-|                             | consume | Specify if the connection should consume on the connection. (bool) |
-+-----------------------------+---------+--------------------------------------------------------------------+
++-----------------------------+---------------------------------------------------------------------------------------------+
+| Consumer Name > connections |                                                                                             |
++=============================+========================+====================================================================+
+|                             | name                   | The connection name, as specified in the Connections section of    |
+|                             |                        | the application configuration.                                     |
+|                             +------------------------+--------------------------------------------------------------------+
+|                             | consume                | Specify if the connection should consume on the connection. (bool) |
++-----------------------------+------------------------+--------------------------------------------------------------------+
+|                             | publisher_confirmation | Enable publisher confirmations. (bool)                             |
++-----------------------------+------------------------+--------------------------------------------------------------------+
 
 .. _daemon:
 

@@ -859,7 +859,7 @@ class Consumer(object):
             self.logger.error('ConsumerException processing delivery %s: %s',
                               message_in.delivery_tag, error)
             self._measurement.set_tag('exception', error.__class__.__name__)
-            error_text = ' '.join(error.args).strip()
+            error_text = self._get_error_text(error)
             if error_text:
                 self._measurement.set_tag('error', error_text)
             raise gen.Return(data.CONSUMER_EXCEPTION)
@@ -868,7 +868,7 @@ class Consumer(object):
             self.logger.debug('MessageException processing delivery %s: %s',
                               message_in.delivery_tag, error)
             self._measurement.set_tag('exception', error.__class__.__name__)
-            error_text = ' '.join(error.args).strip()
+            error_text = self._get_error_text(error)
             if error_text:
                 self._measurement.set_tag('error', error_text)
             raise gen.Return(data.MESSAGE_EXCEPTION)
@@ -877,7 +877,7 @@ class Consumer(object):
             self.logger.debug('ProcessingException processing delivery %s: %s',
                               message_in.delivery_tag, error)
             self._measurement.set_tag('exception', error.__class__.__name__)
-            error_text = ' '.join(error.args).strip()
+            error_text = self._get_error_text(error)
             if error_text:
                 self._measurement.set_tag('error', error_text)
             self._republish_processing_error(error_text)
@@ -980,6 +980,20 @@ class Consumer(object):
         self._finished = False
         self._message = None
         self._message_body = None
+
+    @staticmethod
+    def _get_error_text(error):
+        """Return the arguments passed into an exception as a space delimited
+        string (or None).
+
+        :param Exception error: The exception to process
+        :rtype: str
+
+        """
+        try:
+            return ' '.join([str(a) for a in error.args]).strip() or None
+        except (TypeError, AttributeError):
+            return
 
     @staticmethod
     def _get_pika_properties(properties_in):

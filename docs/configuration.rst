@@ -114,6 +114,9 @@ Each consumer entry should be a nested object with a unique name with consumer a
 |               +-----------------------+-----------------------------------------------------------------------------------+
 |               | sentry_dsn            | If Sentry support is installed, set a consumer specific sentry DSN (str)          |
 |               +-----------------------+-----------------------------------------------------------------------------------+
+|               | drop_exchange         | The exchange to publish a message to when it is dropped. If not specified,        |
+|               |                       | dropped messages are not republished anywhere.                                    |
+|               +-----------------------+-----------------------------------------------------------------------------------+
 |               | drop_invalid_messages | Drop a message if the type property doesn't match the specified message type (str)|
 |               +-----------------------+-----------------------------------------------------------------------------------+
 |               | message_type          | Used to validate the message type of a message before processing. This attribute  |

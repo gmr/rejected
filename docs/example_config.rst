@@ -44,6 +44,7 @@ with the keys ``foo`` and ``bar``.
         example:
           consumer: example.Consumer
           connections: [rabbit1, rabbit2]
+          drop_exchange: dlxname
           qty: 2
           queue: generated_messages
           dynamic_qos: True

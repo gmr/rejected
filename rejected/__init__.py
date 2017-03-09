@@ -17,7 +17,7 @@ from rejected.consumer import MessageException
 
 __author__ = 'Gavin M. Roy <gavinmroy@gmail.com>'
 __since__ = '2009-09-10'
-__version__ = '3.17.4'
+__version__ = '3.18.0'
 
 __all__ = [
     'Consumer',

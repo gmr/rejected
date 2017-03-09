@@ -72,6 +72,7 @@ except NameError:
 
 
 DEFAULT_CHANNEL = 'default'
+_DROPPED_MESSAGE = 'X-Rejected-Dropped'
 _PROCESSING_EXCEPTIONS = 'X-Processing-Exceptions'
 _EXCEPTION_FROM = 'X-Exception-From'
 
@@ -94,6 +95,21 @@ class Consumer(object):
     ``drop_invalid_messages`` setting is set to ``True`` in the configuration
     (or if the ``DROP_INVALID_MESSAGES`` attribute is set to ``True``).
     If it is ``False``, a :exc:`~rejected.consumer.MessageException` is raised.
+
+    If ``DROP_EXCHANGE`` is specified either as an attribute of the consumer
+    class or in the consumer configuration, if a message is dropped, it is
+    published to the that exchange prior to rejecting the message in RabbitMQ.
+    When the message is republished, four new values are added to the AMQP
+    ``headers`` message property: ``X-Dropped-By``, ``X-Dropped-Reason``,
+    ``X-Dropped-Timestamp``, ``X-Original-Exchange``.
+
+    The ``X-Dropped-By`` header value contains the configured name of the
+    consumer that dropped the message. ``X-Dropped-Reason`` contains the
+    reason the message was dropped (eg invalid message type or maximum error
+    count). ``X-Dropped-Timestamp`` value contains the ISO-8601 formatted
+    timestamp of when the message was dropped. Finally, the
+    ``X-Original-Exchange`` value contains the original exchange that the
+    message was published to.
 
     If a consumer raises a :exc:`~rejected.consumer.ProcessingException`, the
     message that was being processed will be republished to the exchange
@@ -120,6 +136,7 @@ class Consumer(object):
         into the same class.
 
     """
+    DROP_EXCHANGE = None
     DROP_INVALID_MESSAGES = False
     MESSAGE_TYPE = None
     ERROR_EXCHANGE = 'errors'
@@ -129,7 +146,8 @@ class Consumer(object):
                  drop_invalid_messages=None,
                  message_type=None,
                  error_exchange=None,
-                 error_max_retry=None):
+                 error_max_retry=None,
+                 drop_exchange=None):
         """Creates a new instance of the :class:`~rejected.consumer.Consumer`
         class. To perform initialization tasks, extend
         :meth:`~rejected.consumer.Consumer.initialize`.
@@ -137,6 +155,7 @@ class Consumer(object):
         """
         self._channels = {}
         self._correlation_id = None
+        self._drop_exchange = drop_exchange or self.DROP_EXCHANGE
         self._drop_invalid = drop_invalid_messages or \
             self.DROP_INVALID_MESSAGES
         self._error_exchange = error_exchange or self.ERROR_EXCHANGE
@@ -488,7 +507,7 @@ class Consumer(object):
         """
         try:
             yield self._yield_condition.wait(
-                self._channel.connection.ioloop.time() + 0.001)
+                self._message.channel.connection.ioloop.time() + 0.001)
         except gen.TimeoutError:
             pass
 
@@ -785,6 +804,8 @@ class Consumer(object):
                                     self.message_type)
                 # Should the message be dropped or returned to the broker?
                 if self._drop_invalid:
+                    if self._drop_exchange:
+                        self._republish_dropped_message('invalid type')
                     raise gen.Return(data.MESSAGE_DROP)
                 raise gen.Return(data.MESSAGE_EXCEPTION)
 
@@ -795,6 +816,10 @@ class Consumer(object):
                 self.logger.warning('Dropping message with %i deaths due to '
                                     'ERROR_MAX_RETRY',
                                     self.headers[_PROCESSING_EXCEPTIONS])
+                if self._drop_exchange:
+                    self._republish_dropped_message(
+                        'max retries ({})'.format(
+                            self.headers[_PROCESSING_EXCEPTIONS]))
                 raise gen.Return(data.MESSAGE_DROP)
 
         result = None
@@ -964,6 +989,31 @@ class Consumer(object):
             return self._channels[name]
         except KeyError:
             raise ValueError('Channel {} not found'.format(name))
+
+    def _republish_dropped_message(self, reason):
+        """Republish the original message that was received it is being dropped
+        by the consumer.
+
+        This for internal use and should not be extended or used directly.
+
+        :param str reason: The reason the message was dropped
+
+        """
+        self.logger.debug('Republishing due to ProcessingException')
+        properties = dict(self._message.properties) or {}
+        if 'headers' not in properties or not properties['headers']:
+            properties['headers'] = {}
+        properties['headers']['X-Dropped-By'] = self.name
+        properties['headers']['X-Dropped-Reason'] = reason
+        properties['headers']['X-Dropped-Timestamp'] = \
+            datetime.datetime.utcnow().isoformat()
+        properties['headers']['X-Original-Exchange'] = self.message.exchange
+
+        self._message.channel.basic_publish(
+            self._drop_exchange,
+            self._message.routing_key,
+            self._message.body,
+            pika.BasicProperties(**properties))
 
     def _republish_processing_error(self):
         """Republish the original message that was received because a

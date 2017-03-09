@@ -27,6 +27,24 @@ message without an exception if the ``DROP_INVALID_MESSAGES`` attribute is set t
 ``True``. If it is ``False``, a
 :py:class:`ConsumerException <rejected.consumer.ConsumerException>` is raised.
 
+Republishing of Dropped Messages
+--------------------------------
+If the consumer is configured by specifying ``DROP_EXCHANGE`` as an attribute of
+the consumer class or in the consumer configuration with the ``drop_exchange``
+configuration variable, when a message is dropped, it is published to that
+exchange prior to the message being rejected in RabbitMQ. When the
+message is republished, four new values are added to the AMQP ``headers``
+message property: ``X-Dropped-By``, ``X-Dropped-Reason``, ``X-Dropped-Timestamp``,
+``X-Original-Exchange``.
+
+The ``X-Dropped-By`` header value contains the configured name of the
+consumer that dropped the message. ``X-Dropped-Reason`` contains the
+reason the message was dropped (eg invalid message type or maximum error
+count). ``X-Dropped-Timestamp`` value contains the ISO-8601 formatted
+timestamp of when the message was dropped. Finally, the
+``X-Original-Exchange`` value contains the original exchange that the
+message was published to.
+
 Consumer Classes
 ----------------
 .. toctree::

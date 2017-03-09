@@ -116,6 +116,7 @@ Example Configuration
           connections:
             - name: rabbitmq1
               consume: True
+          drop_exchange: dlxname
           qty: 2
           queue: generated_messages
           qos_prefetch: 100

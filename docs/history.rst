@@ -1,6 +1,10 @@
 Release Notes
 =============
 
+What's New in Rejected 3.18
+---------------------------
+- Messages dropped by a consumer can now be republished to a different exchange
+
 What's New in Rejected 3.17
 ---------------------------
 - Consumers can now have multiple connections, with the ability to specify if a connection should consume or not

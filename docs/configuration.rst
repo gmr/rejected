@@ -8,7 +8,7 @@ is a good resource for validating that your configuration file can be parsed.
 
 The configuration file is split into three main sections: Application, Daemon, and Logging.
 
-The :ref:`example configuration <example_config>` file provides a good starting
+The :ref:`example configuration <config_example>` file provides a good starting
 point for creating your own configuration file.
 
 .. _application:

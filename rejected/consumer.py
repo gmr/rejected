@@ -116,10 +116,15 @@ class Consumer(object):
     specified by the ``error`` exchange configuration value or the
     ``ERROR_EXCHANGE`` attribute of the consumer's class. The message will be
     published using the routing key that was last used for the message. The
-    original message body and properties will be used and an additional header
-    ``X-Processing-Exceptions`` will be added that will contain the number of
-    times the message has had a :exc:`~rejected.consumer.ProcessingException`
-    raised for it. In combination with a queue that has ``x-message-ttl`` set
+    original message body and properties will be used and two additional
+    header property values may be added:
+
+        - ``X-Processing-Exception`` contains the string value of the
+            exception that was raised, if specified.
+        - ``X-Processing-Exceptions`` contains the quantity of processing
+            exceptions that have been raised for the message.
+
+    In combination with a queue that has ``x-message-ttl`` set
     and ``x-dead-letter-exchange`` that points to the original exchange for the
     queue the consumer is consuming off of, you can implement a delayed retry
     cycle for messages that are failing to process due to external resource or
@@ -854,19 +859,28 @@ class Consumer(object):
             self.logger.error('ConsumerException processing delivery %s: %s',
                               message_in.delivery_tag, error)
             self._measurement.set_tag('exception', error.__class__.__name__)
+            error_text = ' '.join(error.args).strip()
+            if error_text:
+                self._measurement.set_tag('error', error_text)
             raise gen.Return(data.CONSUMER_EXCEPTION)
 
         except MessageException as error:
             self.logger.debug('MessageException processing delivery %s: %s',
                               message_in.delivery_tag, error)
             self._measurement.set_tag('exception', error.__class__.__name__)
+            error_text = ' '.join(error.args).strip()
+            if error_text:
+                self._measurement.set_tag('error', error_text)
             raise gen.Return(data.MESSAGE_EXCEPTION)
 
         except ProcessingException as error:
             self.logger.debug('ProcessingException processing delivery %s: %s',
                               message_in.delivery_tag, error)
             self._measurement.set_tag('exception', error.__class__.__name__)
-            self._republish_processing_error()
+            error_text = ' '.join(error.args).strip()
+            if error_text:
+                self._measurement.set_tag('error', error_text)
+            self._republish_processing_error(error_text)
             raise gen.Return(data.PROCESSING_EXCEPTION)
 
         except Exception as error:
@@ -1015,7 +1029,7 @@ class Consumer(object):
             self._message.body,
             pika.BasicProperties(**properties))
 
-    def _republish_processing_error(self):
+    def _republish_processing_error(self, error):
         """Republish the original message that was received because a
         :exc:`~rejected.consumer.ProcessingException` was raised.
 
@@ -1024,11 +1038,16 @@ class Consumer(object):
         Add a header that keeps track of how many times this has happened
         for this message.
 
+        :param str error: The string value for the exception
+
         """
         self.logger.debug('Republishing due to ProcessingException')
         properties = dict(self._message.properties) or {}
         if 'headers' not in properties or not properties['headers']:
             properties['headers'] = {}
+
+        if error:
+            properties[headers]['X-Processing-Exception'] = error
 
         if _PROCESSING_EXCEPTIONS not in properties['headers']:
             properties['headers'][_PROCESSING_EXCEPTIONS] = 1

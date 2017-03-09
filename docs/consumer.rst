@@ -78,17 +78,24 @@ the message. This should be done when there is a problem with the message itself
 such as a malformed payload or non-supported properties like ``content-type``
 or ``type``.
 
-If a consumer raises a :py:class:`ProcessingException <rejected.consumer.ProcessingException>`,
-the message that was being processed will be republished to the exchange specified
-by the ``ERROR_EXCHANGE`` attribute of the :py:class:`consumer's class <rejected.consumer.Consumer>`
-using the routing key that was last used for the message. The original message body
-and properties will be used and an additional header ``X-Processing-Exceptions``
-will be added that will contain the number of times the message has had a
-``ProcessingException`` raised for it. In combination with a queue that has
-``x-message-ttl`` set and ``x-dead-letter-exchange`` that points to the original
-exchange for the queue the consumer is consuming off of, you can implement a
-delayed retry cycle for messages that are failing to process due to external
-resource or service issues.
+If a consumer raises a :exc:`~rejected.consumer.ProcessingException`, the
+message that was being processed will be republished to the exchange
+specified by the ``error`` exchange configuration value or the
+``ERROR_EXCHANGE`` attribute of the consumer's class. The message will be
+published using the routing key that was last used for the message. The
+original message body and properties will be used and two additional
+header property values may be added:
+
+- ``X-Processing-Exception`` contains the string value of the exception that was
+raised, if specified.
+- ``X-Processing-Exceptions`` contains the quantity of processing exceptions
+that have been raised for the message.
+
+In combination with a queue that has ``x-message-ttl`` set
+and ``x-dead-letter-exchange`` that points to the original exchange for the
+queue the consumer is consuming off of, you can implement a delayed retry
+cycle for messages that are failing to process due to external resource or
+service issues.
 
 If ``ERROR_MAX_RETRY`` is set on the class, the headers for each method
 will be inspected and if the value of ``X-Processing-Exceptions`` is

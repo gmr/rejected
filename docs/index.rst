@@ -49,6 +49,7 @@ Getting Started
 
    consumer_howto
    configuration
+   example_config
    cli
 
 API Documentation

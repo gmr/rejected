@@ -4,6 +4,7 @@ Release Notes
 What's New in Rejected 3.18
 ---------------------------
 - Messages dropped by a consumer can now be republished to a different exchange
+- When a message raises a ProcessingException, the string value of the exception is added to the AMQP message headers property
 
 What's New in Rejected 3.17
 ---------------------------

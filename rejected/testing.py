@@ -201,6 +201,7 @@ class AsyncTestCase(testing.AsyncTestCase):
         obj = mock.Mock('pika.adapters.tornado_connection.TornadoConnection')
         obj.ioloop = ioloop.IOLoop.current()
         obj.channel = self._create_channel()
+        obj.channel.connection = obj
         return obj
 
     def _create_consumer(self):

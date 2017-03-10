@@ -1061,7 +1061,7 @@ class Consumer(object):
             properties['headers'] = {}
 
         if error:
-            properties[headers]['X-Processing-Exception'] = error
+            properties['headers']['X-Processing-Exception'] = error
 
         if _PROCESSING_EXCEPTIONS not in properties['headers']:
             properties['headers'][_PROCESSING_EXCEPTIONS] = 1

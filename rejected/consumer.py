@@ -949,7 +949,7 @@ class Consumer(object):
         :param str feature: A friendly name for the setting feature
 
         """
-        if not self.settings.get(name):
+        if name not in self.settings:
             raise Exception("You must define the '%s' setting in your "
                             "application to use %s" % (name, feature))
 

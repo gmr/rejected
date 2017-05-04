@@ -31,6 +31,7 @@ Supported `SmartConsumer` MIME types are:
 import bz2
 import contextlib
 import csv
+import datetime
 import io
 import json
 import logging
@@ -1035,7 +1036,7 @@ class Consumer(object):
         properties['headers']['X-Dropped-Reason'] = reason
         properties['headers']['X-Dropped-Timestamp'] = \
             datetime.datetime.utcnow().isoformat()
-        properties['headers']['X-Original-Exchange'] = self.message.exchange
+        properties['headers']['X-Original-Exchange'] = self._message.exchange
 
         self._message.channel.basic_publish(
             self._drop_exchange,

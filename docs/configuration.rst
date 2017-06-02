@@ -106,7 +106,7 @@ Each consumer entry should be a nested object with a unique name with consumer a
 |               +-----------------------+-----------------------------------------------------------------------------------+
 |               | qty                   | The number of consumers per connection to run (int)                               |
 |               +-----------------------+-----------------------------------------------------------------------------------+
-|               | queue                 | The RabbitMQ queue name to consume from (int)                                     |
+|               | queue                 | The RabbitMQ queue name to consume from (str)                                     |
 |               +-----------------------+-----------------------------------------------------------------------------------+
 |               | ack                   | Explicitly acknowledge messages (no_ack = not ack) (bool)                         |
 |               +-----------------------+-----------------------------------------------------------------------------------+

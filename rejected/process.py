@@ -385,7 +385,7 @@ class Process(multiprocessing.Process, state.State):
 
         """
         self.set_state(self.STATE_CONNECTING)
-        for connection in self.consumer_config['connections']:
+        for connection in self.connection_config:
             name, confirm, consume = connection, False, True
             if isinstance(connection, dict):
                 name = connection['name']
@@ -549,8 +549,7 @@ class Process(multiprocessing.Process, state.State):
             for key in self.connections.keys():
                 if self.connections[key].should_consume:
                     self.connections[key].consume(
-                        self.consumer_config['queue'], self.no_ack,
-                        self.consumer_config['qos_prefetch'])
+                        self.queue_name, self.no_ack, self.qos_prefetch)
             if self.is_connecting:
                 self.set_state(self.STATE_IDLE)
 

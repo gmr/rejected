@@ -36,7 +36,8 @@ setup(name='rejected',
           'html': ['beautifulsoup4'],
           'influxdb': ['sprockets-influxdb'],
           'msgpack': ['u-msgpack-python'],
-          'sentry': ['raven']
+          'sentry': ['raven'],
+          'testing': ['mock']
       },
       tests_require=['mock', 'nose', 'coverage'],
       entry_points=dict(console_scripts=['rejected=rejected.controller:main']),

@@ -96,9 +96,9 @@ with the keys ``foo`` and ``bar``.
           level: WARNING
           propagate: false
           handlers: [console, syslog]
-      root:
-        level: INFO
-        propagate: true
-        handlers: [console, syslog]
+        root:
+          level: INFO
+          propagate: true
+          handlers: [console, syslog]
       disable_existing_loggers: true
       incremental: false

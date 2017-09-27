@@ -896,6 +896,12 @@ class Consumer(object):
             self._republish_processing_error(error_text)
             raise gen.Return(data.PROCESSING_EXCEPTION)
 
+        except NotImplementedError as error:
+            self.log_exception('NotImplementedError processing delivery'
+                               ' %s: %s', message_in.delivery_tag, error)
+            self._measurement.set_tag('exception', error.__class__.__name__)
+            raise gen.Return(NotImplementedError)
+
         except Exception as error:
             exc_info = sys.exc_info()
             if concurrent.is_future(result):

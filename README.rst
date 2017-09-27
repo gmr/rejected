@@ -12,7 +12,7 @@ data from the consumer processes and report on it.
 
 Rejected supports Python 2.7 and 3.4+.
 
-|Version| |Downloads| |Status| |License|
+|Version| |Status| |Coverage| |License|
 
 Features
 --------
@@ -202,9 +202,6 @@ Available at https://rejected.readthedocs.org/en/latest/history.html
 
 .. |Coverage| image:: https://img.shields.io/codecov/c/github/gmr/rejected.svg?
    :target: https://codecov.io/github/gmr/rejected?branch=master
-
-.. |Downloads| image:: https://img.shields.io/pypi/dm/rejected.svg?
-   :target: https://pypi.python.org/pypi/rejected
 
 .. |License| image:: https://img.shields.io/pypi/l/rejected.svg?
    :target: https://rejected.readthedocs.org

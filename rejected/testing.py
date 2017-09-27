@@ -178,14 +178,14 @@ class AsyncTestCase(testing.AsyncTestCase):
             self.create_message(message_body, properties,
                                 exchange, routing_key),
             measurement)
-        if result == data.MESSAGE_ACK:
-            raise gen.Return(measurement)
-        elif result == data.CONSUMER_EXCEPTION:
+        if result == data.CONSUMER_EXCEPTION:
             raise consumer.ConsumerException()
         elif result == data.MESSAGE_EXCEPTION:
             raise consumer.MessageException()
         elif result == data.PROCESSING_EXCEPTION:
             raise consumer.ProcessingException()
+        elif result == data.UNHANDLED_EXCEPTION:
+            raise AssertionError('UNHANDLED_EXCEPTION')
         raise gen.Return(measurement)
 
     @staticmethod

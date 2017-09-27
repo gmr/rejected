@@ -900,7 +900,7 @@ class Consumer(object):
             self.log_exception('NotImplementedError processing delivery'
                                ' %s: %s', message_in.delivery_tag, error)
             self._measurement.set_tag('exception', error.__class__.__name__)
-            raise gen.Return(NotImplementedError)
+            raise gen.Return(data.UNHANDLED_EXCEPTION)
 
         except Exception as error:
             exc_info = sys.exc_info()

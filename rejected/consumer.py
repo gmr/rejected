@@ -392,7 +392,7 @@ class Consumer(object):
         .. versionadded:: 3.13.0
 
         :param str key: The key to add the timing to
-        :param int|float duration: The timing value
+        :param int|float duration: The timing value in seconds
 
         """
         if not self._measurement:
@@ -404,7 +404,7 @@ class Consumer(object):
         """Add a timing to the per-message measurements
 
         :param str key: The key to add the timing to
-        :param int|float duration: The timing value
+        :param int|float duration: The timing value in seconds
 
         .. deprecated:: 3.13.0
 
@@ -614,6 +614,18 @@ class Consumer(object):
         if not self._message:
             return None
         return self._message.properties.headers or dict()
+
+    @property
+    def io_loop(self):
+        """Access the :py:class:`tornado.ioloop.IOLoop` instance for the
+        current message.
+
+        .. versionadded:: 3.18.4
+
+        :rtype: tornado.ioloop.IOLoop
+
+        """
+        return self._message.channel.connection.ioloop
 
     @property
     def message_id(self):

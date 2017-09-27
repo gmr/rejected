@@ -62,7 +62,7 @@ class Client(object):
         """Add a timer value to statsd for the specified key
 
         :param str key: The key to add the timing to
-        :param int|float value: The value of the timing in milliseconds
+        :param int|float value: The value of the timing in seconds
 
         """
         self._send(key, value * 1000, 'ms')

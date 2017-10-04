@@ -289,8 +289,6 @@ class Process(multiprocessing.Process, state.State):
     TIME_SPENT = 'processing_time'
     TIME_WAITED = 'idle_time'
 
-    MESSAGE_AGE = 'message_age'
-
     CONSUMER_EXCEPTION = 'consumer_exception'
     MESSAGE_EXCEPTION = 'message_exception'
     PROCESSING_EXCEPTION = 'processing_exception'
@@ -471,13 +469,6 @@ class Process(multiprocessing.Process, state.State):
                 if message.method.redelivered:
                     self.counters[self.REDELIVERED] += 1
                     self.measurement.set_tag(self.REDELIVERED, True)
-
-                if message.properties.timestamp:
-                    self.measurement.set_value(
-                        self.MESSAGE_AGE,
-                        float(
-                            max(message.properties.timestamp, start_time) -
-                            message.properties.timestamp))
 
                 try:
                     result = yield self.consumer.execute(message,

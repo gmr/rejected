@@ -137,6 +137,19 @@ class Consumer(object):
     greater than or equal to the specified value, the message will
     be dropped.
 
+    As of 3.18.6, the ``MESSAGE_AGE_KEY`` class level attribute contains the
+    default key part to used when recording stats for the message age. You can
+    also override the :py:meth:`~rejected.consumer.Consumer.message_age_key`
+    method to create compound keys. For example, to create a key that includes
+    the message priority:
+
+    .. code:: python
+
+        class Consumer(consumer.Consumer):
+
+            def message_age_key(self):
+                return 'priority-{}.message_age'.format(self.priority or 0)
+
     .. note:: Since 3.17, :class:`~rejected.consumer.Consumer` and
         :class:`~rejected.consumer.PublishingConsumer` have been combined
         into the same class.
@@ -147,6 +160,7 @@ class Consumer(object):
     MESSAGE_TYPE = None
     ERROR_EXCHANGE = 'errors'
     ERROR_MAX_RETRY = None
+    MESSAGE_AGE_KEY = 'message_age'
 
     def __init__(self, settings, process,
                  drop_invalid_messages=None,
@@ -222,6 +236,18 @@ class Consumer(object):
 
         """
         raise NotImplementedError
+
+    def message_age_key(self):
+        """Return the key part that is used in submitting message age stats.
+        Override this method to change the key part. This could be used to
+        include message priority in the key, for example.
+
+        .. versionadded:: 3.18.6
+
+        :rtype: str
+
+        """
+        return self.MESSAGE_AGE
 
     def on_finish(self):
         """Called after a message has been processed.
@@ -801,6 +827,14 @@ class Consumer(object):
         self._clear()
         self._message = message_in
         self._measurement = measurement
+
+        # If timestamp is set, record age of the message coming in
+        if message_in.properties.timestamp:
+            message_age = float(
+                    max(message_in.properties.timestamp, time.time()) -
+                    message_in.properties.timestamp)
+            if message_age > 0:
+                measurement.set_value(self.message_age_key(), message_age)
 
         # Ensure there is a correlation ID
         self._correlation_id = message_in.properties.correlation_id or \

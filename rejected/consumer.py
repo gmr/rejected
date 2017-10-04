@@ -247,7 +247,7 @@ class Consumer(object):
         :rtype: str
 
         """
-        return self.MESSAGE_AGE
+        return self.MESSAGE_AGE_KEY
 
     def on_finish(self):
         """Called after a message has been processed.

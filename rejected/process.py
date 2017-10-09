@@ -562,7 +562,7 @@ class Process(multiprocessing.Process, state.State):
         """Process a message from Rabbit
 
         :param str name: The connection name
-        :param pika.channel.Channel channel: The channel the message was sent on
+        :param pika.channel.Channel channel: The message's delivery channel
         :param pika.frames.MethodFrame method: The method frame
         :param pika.spec.BasicProperties properties: The message properties
         :param str body: The message body

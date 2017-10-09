@@ -447,7 +447,8 @@ class MasterControlProgram(state.State):
         :rtype: bool
 
         """
-        return (time.time() - self.poll_data['timestamp']) >= self.poll_interval
+        return ((time.time() - self.poll_data['timestamp']) >=
+                self.poll_interval)
 
     def poll_results_check(self):
         """Check the polling results by checking to see if the stats queue is

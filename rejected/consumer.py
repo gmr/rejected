@@ -409,7 +409,8 @@ class Consumer(object):
 
         """
         if self.sentry_client:
-            self.logger.debug('Setting sentry context for %s to %s', tag, value)
+            self.logger.debug(
+                'Setting sentry context for %s to %s', tag, value)
             self.sentry_client.tags_context({tag: value})
 
     def stats_add_timing(self, key, duration):

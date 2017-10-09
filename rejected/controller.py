@@ -143,6 +143,8 @@ def add_parser_arguments():
                            dest='quantity',
                            help='Run the specified quantity of consumer '
                            'processes when used in conjunction with -o')
+    argparser.add_argument('--version', action='version',
+                           version='%(prog)s {}'.format(__version__))
 
 
 def main():

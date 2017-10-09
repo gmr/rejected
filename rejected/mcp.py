@@ -19,6 +19,9 @@ from rejected import state, process, __version__
 
 LOGGER = logging.getLogger(__name__)
 
+_PROCESS_RUNNING = [psutil.STATUS_RUNNING, psutil.STATUS_SLEEPING]
+_PROCESS_STOPPED_OR_DEAD = [psutil.STATUS_STOPPED, psutil.STATUS_DEAD]
+
 
 class Consumer(object):
     """Class used for keeping track of each consumer type being managed by
@@ -256,24 +259,23 @@ class MasterControlProgram(state.State):
         :rtype: bool
 
         """
-        status = proc.status()
+        try:
+            status = proc.status()
+        except psutil.NoSuchProcess:
+            LOGGER.debug('Process is gone')
+            return True
+
         LOGGER.debug('Process %s (%s) status: %r (Unresponsive Count: %s)',
                      name, proc.pid, status, self.unresponsive[name])
-        try:
-            if status in [psutil.STATUS_RUNNING,
-                          psutil.STATUS_SLEEPING]:
-                return False
-            if status == psutil.STATUS_ZOMBIE:
+        if status in _PROCESS_RUNNING:
+            return False
+        elif status == psutil.STATUS_ZOMBIE:
+            try:
                 proc.terminate()
-                return True
-            elif status == psutil.STATUS_STOPPED:
-                return True
-            elif status == psutil.STATUS_DEAD:
-                return True
-        except psutil.NoSuchProcess:
-            LOGGER.debug('Process is dead and does not exist')
-            return True
-        return False
+                status = proc.status()
+            except psutil.NoSuchProcess:
+                LOGGER.debug('Process is gone')
+        return status in _PROCESS_STOPPED_OR_DEAD
 
     def kill_processes(self):
         """Gets called on shutdown by the timer when too much time has gone by,
@@ -367,6 +369,12 @@ class MasterControlProgram(state.State):
         return self.consumers[name].last_proc_num
 
     def on_abort(self, _signum, _unused_frame):
+        """Invoked when a child sends up an abort signal.
+
+        :param int _signum: The signal that was invoked
+        :param frame _unused_frame: The frame that was interrupted
+
+        """
         LOGGER.debug('Abort signal received from child')
         time.sleep(1)
         if not self.active_processes():
@@ -374,6 +382,12 @@ class MasterControlProgram(state.State):
             self.set_state(self.STATE_STOPPED)
 
     def on_timer(self, _signum, _unused_frame):
+        """Invoked by the Poll timer singal.
+
+        :param int _signum: The signal that was invoked
+        :param frame _unused_frame: The frame that was interrupted
+
+        """
         if self.is_shutting_down:
             LOGGER.debug('Polling timer fired while shutting down')
             return
@@ -496,14 +510,19 @@ class MasterControlProgram(state.State):
         my_pid = os.getpid()
         if name in self.consumers[consumer].processes:
             child = self.consumers[consumer].processes[name]
-            if child.is_alive():
-                if child.pid != my_pid:
+            try:
+                alive = child.is_alive()
+            except AssertionError:
+                LOGGER.debug('Tried to test non-child process (%r to %r)',
+                             os.getpid(), child.pid)
+            else:
+                if child.pid == my_pid:
+                    LOGGER.debug('Child has my pid? %r, %r', my_pid, child.pid)
+                elif alive:
                     try:
                         child.terminate()
                     except OSError:
                         pass
-                else:
-                    LOGGER.debug('Child has my pid? %r, %r', my_pid, child.pid)
             del self.consumers[consumer].processes[name]
 
     def run(self):
@@ -581,7 +600,12 @@ class MasterControlProgram(state.State):
         self.consumers[name].processes[process_name] = proc
 
         # Start the process
-        proc.start()
+        try:
+            proc.start()
+        except IOError as error:
+            LOGGER.critical('Failed to start %s for %s: %r',
+                            process_name, name, error)
+            del self.consumers[name].process[process_name]
 
     def start_processes(self, name, quantity):
         """Start the specified quantity of consumer processes for the given
@@ -591,7 +615,7 @@ class MasterControlProgram(state.State):
         :param int quantity: The quantity of processes to start
 
         """
-        [self.start_process(name) for _i in range(0, quantity)]
+        [self.start_process(name) for _i in range(0, quantity or 0)]
 
     def stop_processes(self):
         """Iterate through all of the consumer processes shutting them down."""

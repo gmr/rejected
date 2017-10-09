@@ -7,6 +7,7 @@ try:
 except ImportError:
     import unittest
 
+import pika
 from pika import channel
 from pika import connection
 from pika import credentials
@@ -119,39 +120,6 @@ class TestProcess(test_state.TestState):
                 group=None,
                 name='MockProcess',
                 kwargs=kwargs or self.new_kwargs(self.mock_args))
-
-    def new_mock_channel(self):
-        return mock.Mock(spec=channel.Channel)
-
-    def new_mock_connection(self):
-        return mock.Mock(spec=connection.Connection)
-
-    def new_mock_parameters(self, host, port, vhost, user, password):
-        mock_credentials = credentials.PlainCredentials(user, password)
-        mock_credentials.username = user
-        mock_credentials.password = password
-        mock_parameters = connection.ConnectionParameters(host, port, vhost,
-                                                          mock_credentials)
-        return mock_parameters
-
-    def get_connection_parameters(self, host, port, vhost, user, password):
-        with patch('pika.credentials.PlainCredentials'):
-            with patch('pika.connection.ConnectionParameters'):
-                return self._obj.get_connection_parameters(host, port, vhost,
-                                                           user, password, 500)
-
-    def default_connection_parameters(self):
-        return {
-            'host': 'rabbitmq',
-            'port': 5672,
-            'user': 'nose',
-            'password': 'mock',
-            'vhost': 'unittest'
-        }
-
-    def mock_parameters(self):
-        kwargs = self.default_connection_parameters()
-        return self.get_connection_parameters(**kwargs)
 
     def test_app_id(self):
         expectation = 'rejected/%s' % __version__
@@ -301,3 +269,8 @@ class TestProcess(test_state.TestState):
         self._obj.state = self._obj.STATE_PROCESSING
         self.assertEqual(self._obj.state_description,
                          self._obj.STATES[self._obj.STATE_PROCESSING])
+
+    def test_connection_config(self):
+        self.assertEqual(self._obj.connection_config,
+                         {'MockConnection':
+                              self.config['Connections']['MockConnection']})

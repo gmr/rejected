@@ -1041,7 +1041,10 @@ class Process(multiprocessing.Process, state.State):
 
     @property
     def connection_config(self):
-        return self.config['Connections']
+        name = self._kwargs['consumer_name']
+        return {name: self.config['Connections'][name]
+                for name in
+                self._kwargs['config']['Consumers'][name]['connections']}
 
     @property
     def consumer_config(self):

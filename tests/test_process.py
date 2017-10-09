@@ -273,4 +273,4 @@ class TestProcess(test_state.TestState):
     def test_connection_config(self):
         self.assertEqual(self._obj.connection_config,
                          {'MockConnection':
-                              self.config['Connections']['MockConnection']})
+                          self.config['Connections']['MockConnection']})

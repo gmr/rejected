@@ -1,5 +1,9 @@
 # ChangeLog
 
+## 3.18.8
+
+- Fix the mocks in `rejected.testing`
+
 ## 3.18.7
 
 - Fix child process errors in shutdown

@@ -50,10 +50,12 @@ import uuid
 
 from helper import config
 import mock
-from pika import spec
+import raven
+from pika import channel, spec
+from pika.adapters import tornado_connection
 from tornado import gen, ioloop, testing
 
-from rejected import consumer, data
+from rejected import consumer, data, process
 
 gen_test = testing.gen_test
 """Testing equivalent of :func:`tornado.gen.coroutine`, to be applied to test
@@ -190,15 +192,10 @@ class AsyncTestCase(testing.AsyncTestCase):
 
     @staticmethod
     def _create_channel():
-        obj = mock.Mock('pika.channel.Channel')
-        obj.basic_ack = mock.Mock()
-        obj.basic_nack = mock.Mock()
-        obj.basic_publish = mock.Mock()
-        obj.basic_reject = mock.Mock()
-        return obj
+        return mock.Mock(spec=channel.Channel)
 
     def _create_connection(self):
-        obj = mock.Mock('pika.adapters.tornado_connection.TornadoConnection')
+        obj = mock.Mock(spec=tornado_connection.TornadoConnection)
         obj.ioloop = ioloop.IOLoop.current()
         obj.channel = self._create_channel()
         obj.channel.connection = obj
@@ -219,9 +216,7 @@ class AsyncTestCase(testing.AsyncTestCase):
         return obj
 
     def _create_process(self):
-        obj = mock.Mock('rejected.process.Process')
+        obj = mock.Mock(spec=process.Process)
         obj.connections = {'mock': self._create_connection()}
-        obj.sentry_client = mock.Mock()
-        obj.sentry_client.tags = mock.Mock()
-        obj.send_exception_to_sentry = mock.Mock()
+        obj.sentry_client = mock.Mock(spec=raven.Client)
         return obj

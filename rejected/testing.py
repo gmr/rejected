@@ -179,6 +179,21 @@ class AsyncTestCase(testing.AsyncTestCase):
         instance is returned that will contain all of the measurements
         collected during the processing of the message.
 
+        Example:
+
+        .. code:: python
+
+            class ConsumerTestCase(testing.AsyncTestCase):
+
+                @testing.gen_test
+                def test_consumer_raises_message_exception(self):
+                    with self.assertRaises(consumer.MessageException):
+                        result = yield self.process_message({'foo': 'bar'})
+
+
+        .. note:: This method is a co-routine and must be yielded to ensure
+                  that your tests are functioning properly.
+
         :param any message_body: the body of the message to create
         :param str content_type: The mime type
         :param str message_type: identifies the type of message to create

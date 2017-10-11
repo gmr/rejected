@@ -1,6 +1,14 @@
 Changelog
 =========
 
+3.18.9
+------
+
+- Added :meth:`rejected.testing.AsyncTestCase.published_messages` and :class:`rejected.testing.PublishedMessage`
+- Updated testing documentation
+- Updated the setup.py extras install for testing to install all testing dependencies
+- Made `raven` optional in `rejected.testing`
+
 3.18.8
 ------
 

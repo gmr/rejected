@@ -4,4 +4,5 @@ msgpack-python
 pika>=0.10.0
 psutil
 pyyaml
+raven
 tornado>=4.2.0

@@ -50,10 +50,14 @@ import uuid
 
 from helper import config
 import mock
-import raven
 from pika import channel, spec
 from pika.adapters import tornado_connection
 from tornado import gen, ioloop, testing
+
+try:
+    import raven
+except ImportError:
+    raven = None
 
 from rejected import consumer, data, process
 
@@ -65,8 +69,8 @@ methods.
 
 
 class AsyncTestCase(testing.AsyncTestCase):
-    """:class:`~unittest.TestCase` subclass for testing
-    :class:`~tornado.ioloop.IOLoop`-based asynchronous code.
+    """:class:`tornado.testing.AsyncTestCase` subclass for testing
+    :class:`~rejected.consumer.Consumer` classes.
 
     """
     _consumer = None
@@ -83,6 +87,24 @@ class AsyncTestCase(testing.AsyncTestCase):
         if not self.consumer._finished:
             self.consumer.finish()
 
+    @property
+    def published_messages(self):
+        """Return a list of :class:`~rejected.testing.PublishedMessage`
+        that are extracted from all calls to
+        :meth:`~pika.channel.Channel.basic_publish` that are invoked during the
+        test. The properties attribute is the
+        :class:`pika.spec.BasicProperties`
+        instance that was created during publishing.
+
+        .. versionadded:: 3.18.9
+
+        :returns: list([:class:`~rejected.testing.PublishedMessage`])
+
+        """
+        return [PublishedMessage(c[2]['exchange'], c[2]['routing_key'],
+                                 c[2]['properties'], c[2]['body'])
+                for c in self.channel.basic_publish.mock_calls]
+
     def get_consumer(self):
         """Override to return the consumer class for testing.
 
@@ -93,7 +115,8 @@ class AsyncTestCase(testing.AsyncTestCase):
 
     def get_settings(self):
         """Override this method to provide settings to the consumer during
-        construction.
+        construction. These settings should be from the `config` stanza
+        of the Consumer configuration.
 
         :rtype: dict
 
@@ -218,5 +241,43 @@ class AsyncTestCase(testing.AsyncTestCase):
     def _create_process(self):
         obj = mock.Mock(spec=process.Process)
         obj.connections = {'mock': self._create_connection()}
-        obj.sentry_client = mock.Mock(spec=raven.Client)
+        obj.sentry_client = mock.Mock(spec=raven.Client) if raven else None
         return obj
+
+
+class PublishedMessage(object):
+    """Contains information about messages published during a test when
+    using :class:`rejected.testing.AsyncTestCase`.
+
+    :param str exchange: The exchange the message was published to
+    :param str routing_key: The routing key the message was published with
+    :param pika.spec.BasicProperties properties: AMQP message properties
+    :param bytes body: AMQP message body
+
+    .. versionadded:: 3.18.9
+
+    """
+    __slots__ = ['exchange', 'routing_key', 'properties', 'body']
+
+    def __init__(self, exchange, routing_key, properties, body):
+        """Create a new instance of the object.
+
+        :param str exchange: The exchange the message was published to
+        :param str routing_key: The routing key the message was published with
+        :param pika.spec.BasicProperties properties: AMQP message properties
+        :param bytes body: AMQP message body
+
+        """
+        self.exchange = exchange
+        self.routing_key = routing_key
+        self.properties = properties
+        self.body = body
+
+    def __repr__(self):
+        """Return the string representation of the object.
+
+        :rtype: str
+
+        """
+        return '<PublishedMessage exchange="{}" routing_key="{}">'.format(
+            self.exchange, self.routing_key)

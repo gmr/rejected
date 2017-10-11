@@ -1,7 +1,7 @@
 from setuptools import setup
 
 setup(name='rejected',
-      version='3.18.8',
+      version='3.18.9',
       description='Rejected is a Python RabbitMQ Consumer Framework and '
                   'Controller Daemon',
       long_description=open('README.rst').read(),
@@ -37,7 +37,15 @@ setup(name='rejected',
           'influxdb': ['sprockets-influxdb'],
           'msgpack': ['u-msgpack-python'],
           'sentry': ['raven'],
-          'testing': ['mock']
+          'testing': [
+              'beautifulsoup4',
+              'coverage',
+              'mock',
+              'nose',
+              'raven',
+              'sprockets-influxdb',
+              'u-msgpack-python'
+          ]
       },
       tests_require=['mock', 'nose', 'coverage'],
       entry_points=dict(console_scripts=['rejected=rejected.controller:main']),

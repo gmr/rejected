@@ -38,6 +38,7 @@ For additional dependencies for optional features:
   - To install InfluxDB support, run :command:`pip install rejected[influxdb]`
   - To install MessagePack support, run :command:`pip install rejected[msgpack]`
   - To install Sentry support, run :command:`pip install rejected[sentry]`
+  - For testing, including all dependencies, run :command:`pip install rejected[testing]`
 
 
 Getting Started

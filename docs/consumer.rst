@@ -10,11 +10,11 @@ While the :py:class:`Consumer <rejected.consumer.Consumer>` class provides all
 the structure required for implementing a rejected consumer,
 the :py:class:`SmartConsumer <rejected.consumer.SmartConsumer>` adds
 functionality designed to make writing consumers even easier. When messages
-are received by consumers extending :py:class:`SmartConsumer <rejected.consumer.SmartConsumer>`, if the message's
-``content_type`` property contains one of the supported mime-types, the message
-body will automatically be deserialized, making the deserialized message body
-available via the ``body`` attribute. Additionally, should one of the supported
-``content_encoding`` types (``gzip`` or ``bzip2``) be specified in the
+are received by consumers extending :py:class:`SmartConsumer <rejected.consumer.SmartConsumer>`,
+if the message's ``content_type`` property contains one of the supported mime-types,
+the message body will automatically be deserialized, making the deserialized
+message body available via the ``body`` attribute. Additionally, should one of
+the supported ``content_encoding`` types (``gzip`` or ``bzip2``) be specified in the
 message's property, it will automatically be decoded.
 
 Message Type Validation
@@ -103,6 +103,9 @@ greater than or equal to the ``ERROR_MAX_RETRY`` value, the message will
 be dropped.
 
 .. note:: If unhandled exceptions are raised by a consumer, they will be caught by rejected, logged, and turned into a :py:class:`ConsumerException <rejected.consumer.ConsumerException>`.
+
+.. autoclass:: rejected.consumer.RejectedException
+   :members:
 
 .. autoclass:: rejected.consumer.ConsumerException
    :members:

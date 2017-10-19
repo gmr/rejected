@@ -57,6 +57,7 @@ Application:
         - rabbitmq
         - name: rabbitmq2
           consume: False
+        - foo
       qty: 1
       queue: generated_messages
       ack: True
@@ -68,6 +69,9 @@ Application:
         foo: True
         bar: baz
 
+    empty:
+      connections:
+        - rabbitmq
 
 Daemon:
   user: rejected
@@ -135,7 +139,7 @@ Logging:
       propagate: false
       handlers: [console, console_correlation, syslog, syslog_correlation]
     rejected.mcp:
-      level: INFO
+      level: DEBUG
       propagate: false
       handlers: [console, console_correlation, syslog, syslog_correlation]
     rejected.process:

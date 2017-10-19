@@ -43,7 +43,10 @@ with the keys ``foo`` and ``bar``.
       Consumers:
         example:
           consumer: example.Consumer
-          connections: [rabbit1, rabbit2]
+          connections:
+            - rabbit1
+            - name: rabbit2
+              consume: False
           drop_exchange: dlxname
           qty: 2
           queue: generated_messages

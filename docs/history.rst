@@ -1,6 +1,43 @@
 Changelog
 =========
 
+3.19.0
+------
+
+- Sentry client changes:
+  - Do not assign version, let the client figure that out
+  - Do not specify the versions of loaded modules, let the client figure that out
+- Add `rejected.data.Measurement.add_duration`, changing the behavior of
+  recorded durations, creating a stack of timings instead of a single timing
+  for the key. For InfluxDB submissions, if there is a only a single value,
+  that metric will continue to submit as previous versions. If there are multiple,
+  the average, min, max, median, and 95th percentile values will be submitted.
+- Add `rejected.consumer.Consumer.stats_add_duration`
+- Deprecate `rejected.consumer.Consumer.stats_add_timing`
+- Deprecate `rejected.consumer.Consumer.stats_add_timing`
+- Consumer tags are now in the format `[consumer-name]-[os PID]`
+- Created a base exception class `rejected.consumer.RejectedException`
+- `rejected.consumer.ConsumerException`, `rejected.consumer.MessageException`,
+  and `rejected.consumer.ProcessingException` extend `rejected.consumer.RejectedException`
+- If a `rejected.consumer.ConsumerException`, `rejected.consumer.MessageException`,
+  or `rejected.consumer.ProcessingException` are passed a keyword of `metric`,
+  the consumer will automatically instrument a counter (statsd) or tag (InfluxDB)
+  using the `metric` value.
+- `rejected.consumer.ConsumerException`, `rejected.consumer.MessageException`,
+  and `rejected.consumer.ProcessingException` now support "new style" string formatting,
+  automatically applying the args and keyword args that are passed into the creation
+  of the exception.
+- Logging levels for exceptions changed:
+  - `rejected.consumer.ConsumerException` are logged with error
+  - `rejected.consumer.MessageException` are logged with info
+  - `rejected.consumer.ProcessingException` are logged with warning
+- Fix the handling of child startup failures in the MCP
+- Fix a bug where un-configured consumers caused an exception in the MCP
+- Handle the edge case when a connection specified in the consumer config does not exist
+- Refactor how the version of the consumer module or package is determined
+- Add `ProcessingException` as a top-level package export
+- Fix misc docstrings
+
 3.18.9
 ------
 

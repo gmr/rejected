@@ -94,6 +94,7 @@ class MasterControlProgram(state.State):
         :rtype: list
 
         """
+        LOGGER.debug('Checking active processes (cache: %s)', use_cache)
         if use_cache and self._active_cache and \
                 self._active_cache[0] > time.time() - self.poll_interval:
             return self._active_cache[1]
@@ -262,10 +263,11 @@ class MasterControlProgram(state.State):
         :rtype: bool
 
         """
+        LOGGER.debug('Checking %s (%r)', name, proc)
         try:
             status = proc.status()
         except psutil.NoSuchProcess:
-            LOGGER.debug('Process is gone')
+            LOGGER.debug('NoSuchProcess: %s (%r)', name, proc)
             return True
 
         LOGGER.debug('Process %s (%s) status: %r (Unresponsive Count: %s)',
@@ -273,11 +275,13 @@ class MasterControlProgram(state.State):
         if status in _PROCESS_RUNNING:
             return False
         elif status == psutil.STATUS_ZOMBIE:
+            proc.wait(0.1)
             try:
                 proc.terminate()
                 status = proc.status()
             except psutil.NoSuchProcess:
-                LOGGER.debug('Process is gone')
+                LOGGER.debug('NoSuchProcess: %s (%r)', name, proc)
+                return True
         return status in _PROCESS_STOPPED_OR_DEAD
 
     def kill_processes(self):
@@ -329,17 +333,18 @@ class MasterControlProgram(state.State):
                         self.stats['consumers'][key]['processed'],
                         self.stats['consumers'][key]['failed'])
 
-    def new_consumer(self, config):
+    def new_consumer(self, config, consumer_name):
         """Return a consumer dict for the given name and configuration.
 
         :param dict config: The consumer configuration
+        :param str consumer_name: The consumer name
         :rtype: dict
 
         """
         return Consumer(0,
                         dict(),
                         config.get('qty', self.DEFAULT_CONSUMER_QTY),
-                        config['queue'])
+                        config.get('queue', consumer_name))
 
     def new_process(self, consumer_name):
         """Create a new consumer instances
@@ -378,10 +383,10 @@ class MasterControlProgram(state.State):
         :param frame _unused_frame: The frame that was interrupted
 
         """
-        LOGGER.debug('Abort signal received from child')
-        time.sleep(1)
-        if not self.active_processes():
+        LOGGER.info('Abort signal received from child')
+        if not self.active_processes(False):
             LOGGER.info('Stopping with no active processes and child error')
+            signal.setitimer(signal.ITIMER_REAL, 0, 0)
             self.set_state(self.STATE_STOPPED)
 
     def on_timer(self, _signum, _unused_frame):
@@ -588,7 +593,8 @@ class MasterControlProgram(state.State):
 
         """
         for name in self.consumer_cfg.keys():
-            self.consumers[name] = self.new_consumer(self.consumer_cfg[name])
+            self.consumers[name] = self.new_consumer(
+                self.consumer_cfg[name], name)
             self.start_processes(name, self.consumers[name].qty)
 
     def start_process(self, name):
@@ -619,7 +625,7 @@ class MasterControlProgram(state.State):
         :param int quantity: The quantity of processes to start
 
         """
-        [self.start_process(name) for _i in range(0, quantity or 0)]
+        [self.start_process(name) for i in range(0, quantity or 0)]
 
     def stop_processes(self):
         """Iterate through all of the consumer processes shutting them down."""
@@ -636,7 +642,10 @@ class MasterControlProgram(state.State):
         LOGGER.info('Sending SIGABRT to active children')
         for proc in multiprocessing.active_children():
             if int(proc.pid) != os.getpid():
-                os.kill(int(proc.pid), signal.SIGABRT)
+                try:
+                    os.kill(int(proc.pid), signal.SIGABRT)
+                except OSError:
+                    pass
 
         # Wait for them to finish up to MAX_SHUTDOWN_WAIT
         for iteration in range(0, self.MAX_SHUTDOWN_WAIT):

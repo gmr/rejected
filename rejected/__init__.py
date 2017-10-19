@@ -14,10 +14,11 @@ from rejected.consumer import SmartConsumer
 from rejected.consumer import SmartPublishingConsumer
 from rejected.consumer import ConsumerException
 from rejected.consumer import MessageException
+from rejected.consumer import ProcessingException
 
 __author__ = 'Gavin M. Roy <gavinmroy@gmail.com>'
 __since__ = '2009-09-10'
-__version__ = '3.18.9'
+__version__ = '3.19.0'
 
 __all__ = [
     'Consumer',
@@ -25,5 +26,6 @@ __all__ = [
     'SmartConsumer',
     'SmartPublishingConsumer',
     'ConsumerException',
-    'MessageException'
+    'MessageException',
+    'ProcessingException'
 ]

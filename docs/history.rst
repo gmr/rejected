@@ -1,6 +1,11 @@
 Changelog
 =========
 
+3.19.1
+------
+
+- Fix a bug in the new durations code
+
 3.19.0
 ------
 

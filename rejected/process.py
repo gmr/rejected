@@ -1014,7 +1014,7 @@ class Process(multiprocessing.Process, state.State):
         """Submit a measurement for a message to statsd as individual items."""
         for key, value in self.measurement.counters.items():
             self.statsd.incr(key, value)
-        for key, values in self.measurement.duration.items():
+        for key, values in self.measurement.durations.items():
             [self.statsd.add_timing(key, value) for value in values]
         for key, value in self.measurement.values.items():
             self.statsd.set_gauge(key, value)

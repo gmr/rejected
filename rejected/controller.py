@@ -14,7 +14,7 @@ try:
 except ImportError:
     raven = None
 
-from rejected import mcp, utils, __version__
+from rejected import mcp, __version__
 
 LOGGER = logging.getLogger(__name__)
 
@@ -31,14 +31,11 @@ class Controller(helper.Controller):
         if raven and self.config.application.get('sentry_dsn'):
             kwargs = {
                 'exclude_paths': ['tornado'],
-                'include_paths': ['pika',
-                                  'helper',
-                                  'rejected'],
+                'include_paths': ['pika', 'helper', 'rejected'],
                 'processors': ['raven.processors.SanitizePasswordsProcessor']
             }
             if os.environ.get('ENVIRONMENT'):
                 kwargs['environment'] = os.environ['ENVIRONMENT']
-            kwargs['version'] = __version__
             self._sentry_client = raven.Client(
                 self.config.application['sentry_dsn'], **kwargs)
 
@@ -107,8 +104,7 @@ class Controller(helper.Controller):
             LOGGER.info('Caught CTRL-C, shutting down')
         except Exception:
             exc_info = sys.exc_info()
-            kwargs = {'logger': 'rejected.controller',
-                      'modules': utils.get_module_data()}
+            kwargs = {'logger': 'rejected.controller'}
             LOGGER.debug('Sending exception to sentry: %r', kwargs)
             if self._sentry_client:
                 self._sentry_client.captureException(exc_info, **kwargs)

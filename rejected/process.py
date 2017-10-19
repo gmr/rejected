@@ -582,7 +582,7 @@ class Process(multiprocessing.Process, state.State):
         """
         duration = max(start_time, time.time()) - start_time
         self.counters[self.TIME_SPENT] += duration
-        self.measurement.set_value(self.TIME_SPENT, duration)
+        self.measurement.add_timing(self.TIME_SPENT, duration)
 
         if result == data.MESSAGE_DROP:
             LOGGER.debug('Rejecting message due to drop return from consumer')
@@ -1015,7 +1015,8 @@ class Process(multiprocessing.Process, state.State):
         for key, value in self.measurement.counters.items():
             self.statsd.incr(key, value)
         for key, values in self.measurement.durations.items():
-            [self.statsd.add_timing(key, value) for value in values]
+            for value in values:
+                self.statsd.add_timing(key, value)
         for key, value in self.measurement.values.items():
             self.statsd.set_gauge(key, value)
         for key, value in self.measurement.tags.items():

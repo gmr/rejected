@@ -850,7 +850,7 @@ class Consumer(object):
                     max(message_in.properties.timestamp, time.time()) -
                     message_in.properties.timestamp)
             if message_age > 0:
-                measurement.set_value(self.message_age_key(), message_age)
+                measurement.add_duration(self.message_age_key(), message_age)
 
         # Ensure there is a correlation ID
         self._correlation_id = message_in.properties.correlation_id or \

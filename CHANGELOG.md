@@ -1,5 +1,13 @@
 # ChangeLog
 
+## 3.19.2
+
+- Fix a bug with the processing time and message age metrics
+
+## 3.19.1
+
+- Fix a bug in the new durations code
+
 ## 3.19.0
 
 - Sentry client changes:

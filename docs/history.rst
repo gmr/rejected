@@ -1,6 +1,11 @@
 Changelog
 =========
 
+3.19.2
+------
+
+- Fix a bug with the processing time and message age metrics
+
 3.19.1
 ------
 

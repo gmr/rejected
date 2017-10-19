@@ -101,7 +101,10 @@ class MasterControlProgram(state.State):
         for consumer in self.consumers:
             for name in self.consumers[consumer].processes:
                 child = self.get_consumer_process(consumer, name)
-                if int(child.pid) == os.getpid():
+                if child.pid is None:
+                    dead_processes.append((consumer, name))
+                    continue
+                elif int(child.pid) == os.getpid():
                     continue
                 try:
                     proc = psutil.Process(child.pid)

@@ -185,9 +185,11 @@ class Measurement(object):
     |                  | :meth:`~rejected.data.Measurement.decr` and   |
     |                  | :meth:`~rejected.data.Measurement.incr`       |
     +------------------+-----------------------------------------------+
+    | :attr:`values`   | List of duration values (float or int)        |
+    +------------------+-----------------------------------------------+
     | :attr:`tags`     | Tag key/value pairs for use with InfluxDB     |
     +------------------+-----------------------------------------------+
-    | :attr:`values`   | Numeric values such as integers, durations,   |
+    | :attr:`values`   | Numeric values such as integers, gauges,      |
     |                  | and such.                                     |
     +------------------+-----------------------------------------------+
 
@@ -195,6 +197,7 @@ class Measurement(object):
 
     """
     def __init__(self):
+        self.durations = {}
         self.counters = collections.Counter()
         self.tags = {}
         self.values = {}
@@ -217,11 +220,25 @@ class Measurement(object):
         """
         self.counters[key] += value
 
+    def add_duration(self, key, value):
+        """Add a duration for the specified key
+
+        :param str key: The value name
+        :param float value: The value
+
+        .. versionadded:: 3.19.0
+
+        """
+        if key not in self.durations:
+            self.durations[key] = []
+        self.durations[key].append(value)
+
     def set_tag(self, key, value):
         """Set a tag. This is only used for InfluxDB measurements.
 
         :param str key: The tag name
-        :param str value: The tag value
+        :param value: The tag value
+        :type value: str or bool or int
 
         """
         self.tags[key] = value
@@ -230,7 +247,8 @@ class Measurement(object):
         """Set a value.
 
         :param str key: The value name
-        :param mixed value: The value
+        :type value: int or float
+        :param value: The value
 
         """
         self.values[key] = value
@@ -243,8 +261,11 @@ class Measurement(object):
         :param str key: The timing name
 
         """
+        if key not in self.durations:
+            self.durations[key] = []
         start_time = time.time()
         try:
             yield
         finally:
-            self.values[key] = max(start_time, time.time()) - start_time
+            self.durations[key].append(
+                max(start_time, time.time()) - start_time)

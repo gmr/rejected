@@ -168,23 +168,6 @@ class ConsumerPropertyTests(testing.AsyncTestCase):
         self.assertEqual(self.obj.user_id, mocks.PROPERTIES.user_id)
 
 
-class TestErrorText(unittest.TestCase):
-
-    def test_string_value(self):
-        error = consumer.ProcessingException('error text')
-        self.assertEqual(consumer.Consumer._get_error_text(error),
-                         'error text')
-
-    def test_multiple_values(self):
-        error = consumer.ProcessingException('error text', 10)
-        self.assertEqual(consumer.Consumer._get_error_text(error),
-                         'error text 10')
-
-    def test_empty_values(self):
-        error = consumer.ProcessingException()
-        self.assertIsNone(consumer.Consumer._get_error_text(error))
-
-
 class TestSmartConsumer(consumer.SmartConsumer):
     def process(self):
         pass

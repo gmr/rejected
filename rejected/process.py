@@ -688,7 +688,6 @@ class Process(multiprocessing.Process, state.State):
         """
         LOGGER.critical('Could not start %s: %s', self.consumer_name, error)
         self.set_state(self.STATE_STOPPED)
-        os.kill(os.getppid(), signal.SIGABRT)
 
     def reject(self, message, requeue=True):
         """Reject the message on the broker and log it.
@@ -1039,7 +1038,7 @@ class Process(multiprocessing.Process, state.State):
 
     @property
     def config(self):
-        return self._kwargs['config'].dict()
+        return self._kwargs['config']
 
     @property
     def consumer_config(self):

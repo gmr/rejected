@@ -23,29 +23,6 @@ from . import test_state
 from . import mocks
 
 
-class TestImportNamspacedClass(unittest.TestCase):
-
-    def test_import_consumer(self):
-        import logging
-        (result_class,
-         result_version) = process.import_consumer('logging.Logger')
-        self.assertEqual(result_class, logging.Logger)
-
-    def test_import_consumer_version(self):
-        import logging
-        (result_class,
-         result_version) = process.import_consumer('logging.Logger')
-        self.assertEqual(result_version, logging.__version__)
-
-    def test_import_consumer_no_version(self):
-        (result_class,
-         result_version) = process.import_consumer('signal.ItimerError')
-        self.assertIsNone(result_version)
-
-    def test_import_consumer_failure(self):
-        self.assertRaises(ImportError, process.import_consumer,
-                          'rejected.fake_module.Classname')
-
 
 class TestProcess(test_state.TestState):
 
@@ -169,8 +146,7 @@ class TestProcess(test_state.TestState):
         config = {'consumer': 'rejected.consumer.Consumer'}
         with patch('logging.Logger.info') as info:
             self._obj.get_consumer(config)
-            info.assert_called_with('Creating consumer %s v%s',
-                                    config['consumer'], __version__)
+            info.assert_called_with('Creating consumer %s', config['consumer'])
 
     @patch.object(consumer.Consumer, '__init__', side_effect=ImportError)
     def test_get_consumer_with_config_is_none(self, mock_method):
@@ -198,7 +174,7 @@ class TestProcess(test_state.TestState):
 
     def mock_setup(self, new_process=None, side_effect=None):
         with patch('signal.signal', side_effect=side_effect):
-            with patch('rejected.process.import_consumer',
+            with patch('rejected.utils.import_consumer',
                        return_value=(mock.Mock, None)):
                 if not new_process:
                     new_process = self.new_process(self.mock_args)
@@ -269,8 +245,3 @@ class TestProcess(test_state.TestState):
         self._obj.state = self._obj.STATE_PROCESSING
         self.assertEqual(self._obj.state_description,
                          self._obj.STATES[self._obj.STATE_PROCESSING])
-
-    def test_connection_config(self):
-        self.assertEqual(self._obj.connection_config,
-                         {'MockConnection':
-                          self.config['Connections']['MockConnection']})

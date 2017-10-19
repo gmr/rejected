@@ -376,21 +376,21 @@ class MasterControlProgram(state.State):
         self.consumers[name].last_proc_num += 1
         return self.consumers[name].last_proc_num
 
-    def on_abort(self, _signum, _unused_frame):
-        """Invoked when a child sends up an abort signal.
+    def on_sigchld(self, _signum, _unused_frame):
+        """Invoked when a child sends up an SIGCHLD signal.
 
         :param int _signum: The signal that was invoked
         :param frame _unused_frame: The frame that was interrupted
 
         """
-        LOGGER.info('Abort signal received from child')
+        LOGGER.info('SIGCHLD received from child')
         if not self.active_processes(False):
             LOGGER.info('Stopping with no active processes and child error')
             signal.setitimer(signal.ITIMER_REAL, 0, 0)
             self.set_state(self.STATE_STOPPED)
 
     def on_timer(self, _signum, _unused_frame):
-        """Invoked by the Poll timer singal.
+        """Invoked by the Poll timer signal.
 
         :param int _signum: The signal that was invoked
         :param frame _unused_frame: The frame that was interrupted
@@ -542,8 +542,8 @@ class MasterControlProgram(state.State):
         self.set_state(self.STATE_ACTIVE)
         self.setup_consumers()
 
-        # Set the SIGABRT handler for child creation errors
-        signal.signal(signal.SIGABRT, self.on_abort)
+        # Set the SIGCHLD handler for child creation errors
+        signal.signal(signal.SIGCHLD, self.on_sigchld)
 
         # Set the SIGALRM handler for poll interval
         signal.signal(signal.SIGALRM, self.on_timer)

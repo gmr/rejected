@@ -35,6 +35,8 @@
 - Refactor how the version of the consumer module or package is determined
 - Add `ProcessingException` as a top-level package export
 - Fix misc docstrings
+- Fix the use of SIGABRT being used from child processes to notify the MCP when 
+  processes exit, instead register for SIGCHLD in the MCP.
 
 ## 3.18.9
 

@@ -44,44 +44,20 @@ Callbacks = collections.namedtuple(
 Delivery = collections.namedtuple('Delivery', ['connection', 'message'])
 
 
-def import_consumer(value):
-    """Pass in a string in the format of foo.Bar, foo.bar.Baz, foo.bar.baz.Qux
-    and it will return a handle to the class
-
-    :param str value: The consumer class in module.Consumer format
-    :return: tuple(Class, str)
-
-    """
-    parts = value.split('.')
-    import_name = '.'.join(parts[0:-1])
-    import_handle = importlib.import_module(import_name)
-    version = None
-    if hasattr(import_handle, '__version__'):
-        version = import_handle.__version__
-    elif len(parts) > 2:
-        package_handle = importlib.import_module(parts[0])
-        if hasattr(package_handle, '__version__'):
-            version = package_handle.__version__
-
-    # Return the class handle
-    return getattr(import_handle, parts[-1]), version
-
-
 class Connection(state.State):
 
     HB_INTERVAL = 300
     STATE_CLOSED = 0x08
 
-    def __init__(self, name, config, should_consume, publisher_confirmations,
-                 io_loop, callbacks):
+    def __init__(self, name, config, consumer_name, should_consume,
+                 publisher_confirmations, io_loop, callbacks):
         super(Connection, self).__init__()
         self.blocked = False
         self.callbacks = callbacks
         self.channel = None
         self.config = config
         self.should_consume = should_consume
-        self.consumer_tag = None
-        self.id = 0
+        self.consumer_tag = '{}-{}'.format(consumer_name, os.getpid())
         self.io_loop = io_loop
         self.name = name
         self.publisher_confirm = publisher_confirmations
@@ -139,7 +115,6 @@ class Connection(state.State):
         self.set_state(self.STATE_CLOSED)
         LOGGER.debug('Connection %s closed (%s) %s',
                      self.name, status_code, status_text)
-        self.consumer_tag = None
         self.callbacks.on_closed(self.name)
 
     def on_blocked(self, frame):
@@ -187,7 +162,6 @@ class Connection(state.State):
         del self.channel
         if self.is_running:
             self.set_state(self.STATE_CONNECTING)
-            self.consumer_tag = None
             self.handle.channel(self.on_channel_open)
         elif self.is_shutting_down:
             LOGGER.debug('Connection %s closing', self.name)
@@ -199,7 +173,7 @@ class Connection(state.State):
         self.channel.basic_consume(consumer_callback=self.on_delivery,
                                    queue=queue_name,
                                    no_ack=no_ack,
-                                   consumer_tag=self.name)
+                                   consumer_tag=self.consumer_tag)
 
     def on_qos_set(self, frame):
         """Invoked by pika when the QoS is set
@@ -217,7 +191,6 @@ class Connection(state.State):
 
         """
         LOGGER.debug('Connection %s consumer has been cancelled', self.name)
-        self.consumer_tag = None
         if self.is_shutting_down:
             self.channel.close()
         else:
@@ -377,21 +350,27 @@ class Process(multiprocessing.Process, state.State):
         LOGGER.debug('Message processing velocity: %.2f/s', velocity)
         return velocity
 
-    def create_rabbitmq_connections(self):
+    def create_connections(self):
         """Create and start the RabbitMQ connections, assigning the connection
         object to the connections dict.
 
         """
         self.set_state(self.STATE_CONNECTING)
-        for connection in self.connection_config:
+        for connection in self.consumer_config.get('connections', []):
             name, confirm, consume = connection, False, True
             if isinstance(connection, dict):
                 name = connection['name']
                 confirm = connection.get('publisher_confirmation', False)
                 consume = connection.get('consume', True)
+
+            if name not in self.config['Connections']:
+                LOGGER.critical('Connection "%s" for %s not found',
+                                name, self.consumer_name)
+                continue
+
             self.connections[name] = Connection(
-                name, self.connection_config[name], consume, confirm,
-                self.ioloop, self.callbacks)
+                name, self.config['Connections'][name], self.consumer_name,
+                consume, confirm, self.ioloop, self.callbacks)
 
     @staticmethod
     def get_config(cfg, number, name, connection):
@@ -419,7 +398,7 @@ class Process(multiprocessing.Process, state.State):
 
         """
         try:
-            consumer_, version = import_consumer(cfg['consumer'])
+            handle, version = utils.import_consumer(cfg['consumer'])
         except ImportError as error:
             LOGGER.exception('Error importing the consumer %s: %s',
                              cfg['consumer'], error)
@@ -445,7 +424,7 @@ class Process(multiprocessing.Process, state.State):
         }
 
         try:
-            return consumer_(**kwargs)
+            return handle(**kwargs)
         except Exception as error:
             LOGGER.exception('Error creating the consumer "%s": %s',
                              cfg['consumer'], error)
@@ -614,27 +593,23 @@ class Process(multiprocessing.Process, state.State):
             LOGGER.debug('Rejecting message due to MessageException')
             self.reject(message, False)
             self.counters[self.MESSAGE_EXCEPTION] += 1
-            self.measurement.set_tag('exception', 'MessageException')
 
         elif result == data.PROCESSING_EXCEPTION:
             LOGGER.debug('Rejecting message due to ProcessingException')
             self.reject(message, False)
             self.counters[self.PROCESSING_EXCEPTION] += 1
-            self.measurement.set_tag('exception', 'ProcessingException')
 
         elif result == data.CONSUMER_EXCEPTION:
             LOGGER.debug('Re-queueing message due to ConsumerException')
             self.reject(message, True)
             self.on_processing_error()
             self.counters[self.CONSUMER_EXCEPTION] += 1
-            self.measurement.set_tag('exception', 'ConsumerException')
 
         elif result == data.UNHANDLED_EXCEPTION:
             LOGGER.debug('Re-queueing message due to UnhandledException')
             self.reject(message, True)
             self.on_processing_error()
             self.counters[self.UNHANDLED_EXCEPTION] += 1
-            self.measurement.set_tag('exception', 'UnhandledException')
 
         elif result == data.MESSAGE_REQUEUE:
             LOGGER.debug('Re-queueing message due Consumer request')
@@ -645,6 +620,7 @@ class Process(multiprocessing.Process, state.State):
             self.ack_message(message)
 
         self.counters[self.PROCESSED] += 1
+        self.measurement.set_tag(self.PROCESSED, True)
         self.maybe_submit_measurement()
         self.reset_state()
 
@@ -666,6 +642,7 @@ class Process(multiprocessing.Process, state.State):
             self.shutdown_connections()
 
     def on_ready_to_stop(self):
+        """Invoked when the consumer is ready to stop."""
 
         # Set the state to shutting down if it wasn't set as that during loop
         self.set_state(self.STATE_SHUTTING_DOWN)
@@ -677,7 +654,8 @@ class Process(multiprocessing.Process, state.State):
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
 
         # Allow the consumer to gracefully stop and then stop the IOLoop
-        self.stop_consumer()
+        if self.consumer:
+            self.stop_consumer()
 
         # Clear IOLoop constructs
         self.consumer_lock = None
@@ -702,6 +680,15 @@ class Process(multiprocessing.Process, state.State):
         self.stats_queue.put(self.report_stats(), True)
         self.last_stats_time = time.time()
         signal.siginterrupt(signal.SIGPROF, False)
+
+    def on_startup_error(self, error):
+        """Invoked when a pre-condition for starting the consumer has failed.
+        Log the error and then exit the process.
+
+        """
+        LOGGER.critical('Could not start %s: %s', self.consumer_name, error)
+        self.set_state(self.STATE_STOPPED)
+        os.kill(os.getppid(), signal.SIGABRT)
 
     def reject(self, message, requeue=True):
         """Reject the message on the broker and log it.
@@ -783,17 +770,14 @@ class Process(multiprocessing.Process, state.State):
         self.consumer_lock = locks.Lock()
 
         self.sentry_client = self.setup_sentry(
-            self._kwargs['config'], self._kwargs['consumer_name'])
+            self._kwargs['config'], self.consumer_name)
 
         try:
             self.setup()
-        except (AttributeError, ImportError) as error:
-            name = self._kwargs['consumer_name']
-            class_name = self._kwargs['config']['Consumers'][name]['consumer']
-            LOGGER.exception('Could not start %s, stopping process: %r',
-                             class_name, error)
-            os.kill(os.getppid(), signal.SIGABRT)
-            sys.exit(1)
+        except (AttributeError, ImportError):
+            return self.on_startup_error(
+                'Failed to import the Python module for {}'.format(
+                    self.consumer_name))
 
         if not self.is_stopped:
             try:
@@ -831,18 +815,23 @@ class Process(multiprocessing.Process, state.State):
 
         """
         LOGGER.info('Initializing for %s', self.name)
+
+        if 'consumer' not in self.consumer_config:
+            return self.on_startup_error(
+                '"consumer" not specified in configuration')
+
         self.consumer = self.get_consumer(self.consumer_config)
 
         if not self.consumer:
-            LOGGER.critical('Could not import and start processor')
-            self.set_state(self.STATE_STOPPED)
-            self.on_ready_to_stop()
-            return
+            return self.on_startup_error(
+                'Could not import "{}"'.format(
+                    self.consumer_config.get(
+                        'consumer', 'unconfigured consumer')))
 
         self.setup_instrumentation()
         self.reset_error_counter()
         self.setup_sighandlers()
-        self.create_rabbitmq_connections()
+        self.create_connections()
 
     def setup_influxdb(self, config):
         """Configure the InfluxDB module for measurement submission.
@@ -1005,6 +994,20 @@ class Process(multiprocessing.Process, state.State):
             measurement.set_tag(key, value)
         for key, value in self.measurement.values.items():
             measurement.set_field(key, value)
+
+        for key, values in self.measurement.durations.items():
+            if len(values) == 1:
+                measurement.set_field(key, values[0])
+            elif len(values) > 1:
+                measurement.set_field('{}-average'.format(key),
+                                      sum(values) / len(values))
+                measurement.set_field('{}-max'.format(key), max(values))
+                measurement.set_field('{}-min'.format(key), min(values))
+                measurement.set_field('{}-median'.format(key),
+                                      utils.percentile(values, 50))
+                measurement.set_field('{}-95th'.format(key),
+                                      utils.percentile(values, 95))
+
         influxdb.add_measurement(measurement)
         LOGGER.debug('InfluxDB Measurement: %r', measurement.marshall())
 
@@ -1012,11 +1015,10 @@ class Process(multiprocessing.Process, state.State):
         """Submit a measurement for a message to statsd as individual items."""
         for key, value in self.measurement.counters.items():
             self.statsd.incr(key, value)
+        for key, values in self.measurement.duration.items():
+            [self.statsd.add_timing(key, value) for value in values]
         for key, value in self.measurement.values.items():
-            if isinstance(value, float):
-                self.statsd.add_timing(key, value)
-            else:
-                self.statsd.set_gauge(key, value)
+            self.statsd.set_gauge(key, value)
         for key, value in self.measurement.tags.items():
             if isinstance(value, bool):
                 if value:
@@ -1037,18 +1039,11 @@ class Process(multiprocessing.Process, state.State):
 
     @property
     def config(self):
-        return self._kwargs['config']
-
-    @property
-    def connection_config(self):
-        name = self._kwargs['consumer_name']
-        return {name: self.config['Connections'][name]
-                for name in
-                self._kwargs['config']['Consumers'][name]['connections']}
+        return self._kwargs['config'].dict()
 
     @property
     def consumer_config(self):
-        return self.config['Consumers'][self.consumer_name]
+        return self.config['Consumers'][self.consumer_name] or {}
 
     @property
     def consumer_name(self):

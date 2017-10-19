@@ -413,10 +413,10 @@ class Consumer(object):
                 'Setting sentry context for %s to %s', tag, value)
             self.sentry_client.tags_context({tag: value})
 
-    def stats_add_timing(self, key, duration):
-        """Add a timing to the per-message measurements
+    def stats_add_duration(self, key, duration):
+        """Add a duration to the per-message measurements
 
-        .. versionadded:: 3.13.0
+        .. versionadded:: 3.19.0
 
         :param str key: The key to add the timing to
         :param int|float duration: The timing value in seconds
@@ -425,7 +425,21 @@ class Consumer(object):
         if not self._measurement:
             LOGGER.warning('stats_add_timing invoked outside execution')
             return
-        self._measurement.set_value(key, duration)
+        self._measurement.add_duration(key, duration)
+
+    def stats_add_timing(self, key, duration):
+        """Add a timing to the per-message measurements
+
+        .. versionadded:: 3.13.0
+        .. deprecated:: 3.19.0
+
+        :param str key: The key to add the timing to
+        :param int|float duration: The timing value in seconds
+
+        """
+        warnings.warn('Deprecated, use Consumer.stats_add_duration',
+                      DeprecationWarning)
+        self.stats_add_duration(key, duration)
 
     def statsd_add_timing(self, key, duration):
         """Add a timing to the per-message measurements
@@ -436,9 +450,9 @@ class Consumer(object):
         .. deprecated:: 3.13.0
 
         """
-        warnings.warn('Deprecated, use Consumer.stats_add_timing',
+        warnings.warn('Deprecated, use Consumer.stats_add_duration',
                       DeprecationWarning)
-        self.stats_add_timing(key, duration)
+        self.stats_add_duration(key, duration)
 
     def stats_incr(self, key, value=1):
         """Increment the specified key in the per-message measurements
@@ -500,6 +514,7 @@ class Consumer(object):
         """Time around a context and add to the the per-message measurements
 
         .. versionadded:: 3.13.0
+        .. deprecated:: 3.19.0
 
         :param str key: The key for the timing to track
 
@@ -508,7 +523,7 @@ class Consumer(object):
         try:
             yield
         finally:
-            self.stats_add_timing(
+            self.stats_add_duration(
                 key, max(start_time, time.time()) - start_time)
 
     def statsd_track_duration(self, key):
@@ -907,34 +922,33 @@ class Consumer(object):
             self.logger.error('ConsumerException processing delivery %s: %s',
                               message_in.delivery_tag, error)
             self._measurement.set_tag('exception', error.__class__.__name__)
-            error_text = self._get_error_text(error)
-            if error_text:
-                self._measurement.set_tag('error', error_text)
+            if error.metric:
+                self._measurement.set_tag('error', error.metric)
             raise gen.Return(data.CONSUMER_EXCEPTION)
 
         except MessageException as error:
-            self.logger.debug('MessageException processing delivery %s: %s',
-                              message_in.delivery_tag, error)
+            self.logger.info('MessageException processing delivery %s: %s',
+                             message_in.delivery_tag, error)
             self._measurement.set_tag('exception', error.__class__.__name__)
-            error_text = self._get_error_text(error)
-            if error_text:
-                self._measurement.set_tag('error', error_text)
+            if error.metric:
+                self._measurement.set_tag('error', error.metric)
             raise gen.Return(data.MESSAGE_EXCEPTION)
 
         except ProcessingException as error:
-            self.logger.debug('ProcessingException processing delivery %s: %s',
-                              message_in.delivery_tag, error)
+            self.logger.warning(
+                'ProcessingException processing delivery %s: %s',
+                message_in.delivery_tag, error)
             self._measurement.set_tag('exception', error.__class__.__name__)
-            error_text = self._get_error_text(error)
-            if error_text:
-                self._measurement.set_tag('error', error_text)
-            self._republish_processing_error(error_text)
+            if error.metric:
+                self._measurement.set_tag('error', error.metric)
+            self._republish_processing_error(
+                error.metric or error.__class__.__name__)
             raise gen.Return(data.PROCESSING_EXCEPTION)
 
         except NotImplementedError as error:
             self.log_exception('NotImplementedError processing delivery'
                                ' %s: %s', message_in.delivery_tag, error)
-            self._measurement.set_tag('exception', error.__class__.__name__)
+            self._measurement.set_tag('exception', 'UnhandledException')
             raise gen.Return(data.UNHANDLED_EXCEPTION)
 
         except Exception as error:
@@ -945,7 +959,7 @@ class Consumer(object):
             self.log_exception('Exception processing delivery %s: %s',
                                message_in.delivery_tag, error,
                                exc_info=exc_info)
-            self._measurement.set_tag('exception', error.__class__.__name__)
+            self._measurement.set_tag('exception', 'UnhandledException')
             raise gen.Return(data.UNHANDLED_EXCEPTION)
 
         if not self._finished:
@@ -1036,20 +1050,6 @@ class Consumer(object):
         self._message_body = None
 
     @staticmethod
-    def _get_error_text(error):
-        """Return the arguments passed into an exception as a space delimited
-        string (or None).
-
-        :param Exception error: The exception to process
-        :rtype: str
-
-        """
-        try:
-            return ' '.join([str(a) for a in error.args]).strip() or None
-        except (TypeError, AttributeError):
-            return
-
-    @staticmethod
     def _get_pika_properties(properties_in):
         """Return a :class:`pika.spec.BasicProperties` object for a
         :class:`rejected.data.Properties` object.
@@ -1064,7 +1064,14 @@ class Consumer(object):
                 setattr(properties, key, properties_in.get(key))
         return properties
 
-    def _publish_channel(self, name):
+    def _publish_channel(self, name=None):
+        """Return the channel to publish onm optionally specifying the channel
+        name to use.
+
+        :param str name:
+        :rtype: pika.channel.Channel
+
+        """
         if not name:
             return self._message.channel
         try:
@@ -1395,7 +1402,7 @@ class SmartConsumer(Consumer):
     def _dump_json_value(value):
         """Serialize a value into JSON
 
-        :param str|dict|list: The value to serialize as JSON
+        :param object value: The value to serialize
         :rtype: bytes
 
         """
@@ -1405,7 +1412,8 @@ class SmartConsumer(Consumer):
     def _dump_msgpack_value(value):
         """Serialize a value into MessagePack
 
-        :param str|dict|list: The value to serialize as msgpack
+        :param object value: The value to serialize
+        :type value: str or dict or list
         :rtype: bytes
 
         """
@@ -1415,7 +1423,7 @@ class SmartConsumer(Consumer):
     def _dump_pickle_value(value):
         """Serialize a value into the pickle format
 
-        :param any value: The object to pickle
+        :param object value: The object to pickle
         :rtype: bytes
 
         """
@@ -1438,9 +1446,9 @@ class SmartConsumer(Consumer):
 
     @staticmethod
     def _dump_yaml_value(value):
-        """Dump a dict into a YAML string
+        """Dump an object into a YAML string
 
-        :param dict value: The value to dump as a YAML string
+        :param object value: The value to dump as a YAML string
         :rtype: str
 
         """
@@ -1584,27 +1592,72 @@ class SmartPublishingConsumer(SmartConsumer):
         super(SmartPublishingConsumer, self).__init__(*args, **kwargs)
 
 
-class ConsumerException(Exception):
+class RejectedException(Exception):
+    """Base exception for :py:class:`~rejected.consumer.Consumer` related
+    exceptions.
+
+    If provided, the metric will be used to automatically record exception
+    metric counts using the path
+    `[prefix].[consumer-name].exceptions.[exception-type].[metric]`.
+
+    Positional and keyword arguments are used to format the value that is
+    passed in when providing the string value of the exception.
+
+    :param str value: An optional value used in string representation
+    :param str metric: An optional value for auto-instrumentation of exceptions
+
+    .. versionadded:: 3.19.0
+
+    """
+    METRIC_NAME = 'rejected-exception'
+
+    def __init__(self, value=None, metric=None, *args, **kwargs):
+        self.args = args
+        self.kwargs = kwargs
+        self.metric = metric
+        self.value = value or ''
+
+    def __str__(self):
+        return self.value.format(*self.args, **self.kwargs)
+
+    def __repr__(self):
+        return '{}({})'.format(self.__class__.__name__, str(self))
+
+
+class ConsumerException(RejectedException):
     """May be called when processing a message to indicate a problem that the
     Consumer may be experiencing that should cause it to stop.
 
+    :param str value: An optional value used in string representation
+    :param str metric: An optional value for auto-instrumentation of exceptions
+
     """
-    pass
+    def __init__(self, value=None, metric=None, *args, **kwargs):
+        super(ConsumerException, self).__init__(value, metric, *args, **kwargs)
 
 
-class MessageException(Exception):
-    """Invoke when a message should be rejected and not requeued, but not due
+class MessageException(RejectedException):
+    """Invoke when a message should be rejected and not re-queued, but not due
     to a processing error that should cause the consumer to stop.
 
+    :param str value: An optional value used in string representation
+    :param str metric: An optional value for auto-instrumentation of exceptions
+
     """
-    pass
+    def __init__(self, value=None, metric=None, *args, **kwargs):
+        super(MessageException, self).__init__(value, metric, *args, **kwargs)
 
 
-class ProcessingException(Exception):
-    """Invoke when a message should be rejected and not requeued, but not due
+class ProcessingException(RejectedException):
+    """Invoke when a message should be rejected and not re-queued, but not due
     to a processing error that should cause the consumer to stop. This should
     be used for when you want to reject a message which will be republished to
     a retry queue, without anything being stated about the exception.
 
+    :param str value: An optional value used in string representation
+    :param str metric: An optional value for auto-instrumentation of exceptions
+
     """
-    pass
+    def __init__(self, value=None, metric=None, *args, **kwargs):
+        super(ProcessingException, self).__init__(
+            value, metric, *args, **kwargs)

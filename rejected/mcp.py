@@ -275,7 +275,10 @@ class MasterControlProgram(state.State):
         if status in _PROCESS_RUNNING:
             return False
         elif status == psutil.STATUS_ZOMBIE:
-            proc.wait(0.1)
+            try:
+                proc.wait(0.1)
+            except psutil.TimeoutExpired:
+                pass
             try:
                 proc.terminate()
                 status = proc.status()

@@ -5,6 +5,7 @@ Changelog
 ------
 
 - Fix a bug with the processing time and message age metrics
+- Catch a timeout when waiting on a zombie
 
 3.19.1
 ------

@@ -1,5 +1,9 @@
 # ChangeLog
 
+## 3.19.4
+
+- Try to handle a MCP process cleanup race condition better (Sentry REJECTED-DA)
+
 ## 3.19.3
 
 - Really fix a bug with the processing time and message age metrics

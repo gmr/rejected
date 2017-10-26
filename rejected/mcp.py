@@ -520,7 +520,7 @@ class MasterControlProgram(state.State):
 
         """
         my_pid = os.getpid()
-        if name in self.consumers[consumer].processes:
+        if name in self.consumers[consumer].processes.keys():
             child = self.consumers[consumer].processes[name]
             try:
                 alive = child.is_alive()
@@ -535,7 +535,10 @@ class MasterControlProgram(state.State):
                         child.terminate()
                     except OSError:
                         pass
-            del self.consumers[consumer].processes[name]
+            try:
+                del self.consumers[consumer].processes[name]
+            except KeyError:
+                pass
 
     def run(self):
         """When the consumer is ready to start running, kick off all of our

@@ -233,6 +233,7 @@ class Connection(state.State):
             pika.PlainCredentials(
                 self.config.get('user', 'guest'),
                 self.config.get('password', self.config.get('pass', 'guest'))),
+            ssl=self.config.get('ssl', False),
             frame_max=self.config.get('frame_max', spec.FRAME_MAX_SIZE),
             socket_timeout=self.config.get('socket_timeout', 10),
             heartbeat_interval=self.config.get(

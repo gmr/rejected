@@ -178,20 +178,20 @@ class Measurement(object):
     :class:`rejected.process.Process` and :class:`rejected.consumer.Consumer`
     for submission to statsd or influxdb.
 
-    +------------------------------------------------------------------+
-    | Attributes                                                       |
-    +==================+===============================================+
-    | :attr:`counters` | Counters that are affected by                 |
-    |                  | :meth:`~rejected.data.Measurement.decr` and   |
-    |                  | :meth:`~rejected.data.Measurement.incr`       |
-    +------------------+-----------------------------------------------+
-    | :attr:`values`   | List of duration values (float or int)        |
-    +------------------+-----------------------------------------------+
-    | :attr:`tags`     | Tag key/value pairs for use with InfluxDB     |
-    +------------------+-----------------------------------------------+
-    | :attr:`values`   | Numeric values such as integers, gauges,      |
-    |                  | and such.                                     |
-    +------------------+-----------------------------------------------+
+    +-------------------------------------------------------------------+
+    | Attributes                                                        |
+    +===================+===============================================+
+    | :attr:`counters`  | Counters that are affected by                 |
+    |                   | :meth:`~rejected.data.Measurement.decr` and   |
+    |                   | :meth:`~rejected.data.Measurement.incr`       |
+    +-------------------+-----------------------------------------------+
+    | :attr:`durations` | List of duration values (float or int)        |
+    +-------------------+-----------------------------------------------+
+    | :attr:`tags`      | Tag key/value pairs for use with InfluxDB     |
+    +-------------------+-----------------------------------------------+
+    | :attr:`values`    | Numeric values such as integers, gauges,      |
+    |                   | and such.                                     |
+    +-------------------+-----------------------------------------------+
 
     .. versionadded:: 3.13.0
 

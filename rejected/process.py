@@ -499,14 +499,15 @@ class Process(multiprocessing.Process, state.State):
 
     def on_connection_closed(self, name):
         if self.is_running:
+            LOGGER.warning('Connection %s was closed, reconnecting', name)
             return self.connections[name].connect()
 
         ready = all([c.is_closed for c in self.connections.values()])
         if (self.is_shutting_down or self.is_waiting_to_shutdown) and ready:
             self.on_ready_to_stop()
 
-    def on_connection_failure(self, name):
-        LOGGER.debug('Connection %s indicated it failed to connect', name)
+    def on_connection_failure(self, *args, **kwargs):
+        LOGGER.warning('Connection failure %r %r', args, kwargs)
         ready = all([c.is_closed for c in self.connections.values()])
         if (self.is_connecting or
                 self.is_shutting_down or
@@ -525,12 +526,12 @@ class Process(multiprocessing.Process, state.State):
                 self.set_state(self.STATE_IDLE)
 
     def on_connection_blocked(self, name):
-        LOGGER.debug('Connection %s blocked', name)
+        LOGGER.warning('Connection %s blocked', name)
         if self.is_processing:
             self.consumer.on_blocked(name)
 
     def on_connection_unblocked(self, name):
-        LOGGER.debug('Connection %s unblocked', name)
+        LOGGER.info('Connection %s unblocked', name)
         if self.is_processing:
             self.consumer.on_blocked(name)
 

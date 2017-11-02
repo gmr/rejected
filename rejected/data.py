@@ -31,21 +31,18 @@ class Data(object):
             yield (attribute, getattr(self, attribute))
 
     def __repr__(self):
-        """Return a string representation of the object and all of its
-        attributes.
+        """Return a string representation of the object
 
         :rtype: str
 
         """
-        items = ['%s=%s' % (k, getattr(self, k))
-                 for k in self.__slots__ if getattr(self, k)]
-        return '<%s(%s)>' % (self.__class__.__name__, items)
+        return '<%s id=%s>' % (self.__class__.__name__, id(self))
 
 
 class Message(Data):
-    """Class for containing all the attributes about a message object creating a
-    flatter, move convenient way to access the data while supporting the legacy
-    methods that were previously in place in rejected < 2.0
+    """Class for containing all the attributes about a message object creating
+    a flatter, move convenient way to access the data while supporting the
+    legacy methods that were previously in place in rejected < 2.0
 
     +------------------------------------------------------------------+
     | Attributes                                                       |
@@ -160,19 +157,25 @@ class Properties(Data):
                  'priority', 'reply_to', 'message_id', 'timestamp', 'type',
                  'user_id']
 
-    def __init__(self, properties=None):
-        """Create a base object to contain all of the properties we need
+    def __init__(self, properties=None, **kwargs):
+        """Create a base object to contain all of the properties we need,
+        allowing for properties to be passed in as
+        :class:`~pika.spec.BasicProperties` or as keyword arguments.
 
-        :param pika.spec.BasicProperties properties: pika.spec.BasicProperties
+        :param properties: AMQP message properties
+        :type: properties: pika.spec.BasicProperties
 
         """
-        for attr in self.__slots__:
-            setattr(self, attr, None)
-            if properties and getattr(properties, attr):
-                setattr(self, attr, getattr(properties, attr))
+        print(properties, kwargs)
+        for attribute in self.__slots__:
+            setattr(self, attribute, None)
+            if properties and getattr(properties, attribute) is not None:
+                setattr(self, attribute, getattr(properties, attribute))
+            elif kwargs.get(attribute, None) is not None:
+                setattr(self, attribute, kwargs[attribute])
 
 
-class Measurement(object):
+class Measurement(Data):
     """Common Measurement Object that provides common methods for collecting
     and exposes measurement data that is submitted in
     :class:`rejected.process.Process` and :class:`rejected.consumer.Consumer`
@@ -196,6 +199,8 @@ class Measurement(object):
     .. versionadded:: 3.13.0
 
     """
+    __slots__ = ['durations', 'counters', 'tags', 'values']
+
     def __init__(self):
         self.durations = {}
         self.counters = collections.Counter()

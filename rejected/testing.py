@@ -161,6 +161,16 @@ class AsyncTestCase(testing.AsyncTestCase):
                 user_id=properties.get('user_id')
             ), body=message, returned=False)
 
+    @property
+    def measurement(self):
+        """Return the :py:class:`rejected.data.Measurement` for the currently
+        assigned measurement object to the consumer.
+
+        :rtype: :class:`rejected.data.Measurement`
+
+        """
+        return self.consumer._measurement
+
     @gen.coroutine
     def process_message(self,
                         message_body=None,

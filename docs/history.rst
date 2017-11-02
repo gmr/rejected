@@ -7,6 +7,7 @@ Changelog
 - Add SSL connection flag support to configuration `#20 <https://github.com/gmr/rejected/pull/20>`_ - `code-fabriek <https://github.com/code-fabriek>`_
 - Fix documentation for :py:class:`rejected.data.Measurement`
 - Alter logging levels for connection failures
+- Add :py:attr:`rejected.testing.AsyncTestCase.measurement`
 
 3.19.4
 ------

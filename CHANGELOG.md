@@ -5,6 +5,7 @@
 - Add SSL connection flag support to configuration (#20) - code-fabriek
 - Fix documentation for `rejected.data.Measurement`
 - Alter logging levels for connection failures
+- Add `rejected.testing.AsyncTestCase.measurement`
 
 ## 3.19.4
 

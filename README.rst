@@ -26,7 +26,7 @@ Features
 Documentation
 -------------
 
-https://rejected.readthedocs.org
+https://rejected.readthedocs.io
 
 Example Consumers
 -----------------
@@ -39,6 +39,7 @@ Example Consumers
 
 
     class Test(consumer.Consumer):
+
         def process(self, message):
             LOGGER.debug('In Test.process: %s' % message.body)
 

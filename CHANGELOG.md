@@ -1,5 +1,10 @@
 # ChangeLog
 
+## 3.19.5
+
+- Add SSL connection flag support to configuration (#20) - code-fabriek
+- Fix documentation for `rejected.data.Measurement`
+
 ## 3.19.4
 
 - Try to handle a MCP process cleanup race condition better (Sentry REJECTED-DA)

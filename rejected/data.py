@@ -166,7 +166,6 @@ class Properties(Data):
         :type: properties: pika.spec.BasicProperties
 
         """
-        print(properties, kwargs)
         for attribute in self.__slots__:
             setattr(self, attribute, None)
             if properties and getattr(properties, attribute) is not None:

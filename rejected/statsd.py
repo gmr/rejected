@@ -43,7 +43,7 @@ class Client(object):
         self._socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM,
                                      socket.IPPROTO_UDP)
 
-    def stop(self):
+    def stop(self):  # pragma: nocover
         pass
 
     def _setting(self, key, default):
@@ -62,7 +62,7 @@ class Client(object):
         """Add a timer value to statsd for the specified key
 
         :param str key: The key to add the timing to
-        :param int|float value: The value of the timing in seconds
+        :param int or float value: The value of the timing in seconds
 
         """
         self._send(key, value * 1000, 'ms')
@@ -80,7 +80,7 @@ class Client(object):
         """Set a gauge value in statsd
 
         :param str key: The key to set the value for
-        :param int value: The value to set
+        :param int or float value: The value to set
 
         """
         self._send(key, value, 'g')
@@ -90,7 +90,7 @@ class Client(object):
         direct socket connection.
 
         :param str key: The key name to send
-        :param int|float value: The value for the key
+        :param int or float value: The value for the key
 
         """
         try:
@@ -99,5 +99,5 @@ class Client(object):
                                                  value, metric_type).encode()
             LOGGER.debug('Sending statsd payload: %r', payload)
             self._socket.sendto(payload, self._address)
-        except socket.error:
+        except socket.error:  # pragma: nocover
             LOGGER.exception('Error sending statsd metric')

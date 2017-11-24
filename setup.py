@@ -1,7 +1,23 @@
 from setuptools import setup
 
+
+def read_requirements_file(name):
+    reqs = []
+    try:
+        with open(name) as req_file:
+            for line in req_file:
+                if '#' in line:
+                    line = line[0:line.index('#')]
+                line = line.strip()
+                if line:
+                    reqs.append(line)
+    except IOError:
+        pass
+    return reqs
+
+
 setup(name='rejected',
-      version='3.19.5',
+      version='4.0.0',
       description='Rejected is a Python RabbitMQ Consumer Framework and '
                   'Controller Daemon',
       long_description=open('README.rst').read(),
@@ -25,28 +41,13 @@ setup(name='rejected',
       packages=['rejected'],
       package_data={'': ['LICENSE', 'README.rst']},
       include_package_data=True,
-      install_requires=[
-          'helper',
-          'pika>=0.10.0',
-          'psutil',
-          'pyyaml',
-          'tornado>=4.2,<4.3'
-      ],
+      install_requires=read_requirements_file('requires/installation.txt'),
       extras_require={
           'html': ['beautifulsoup4'],
           'influxdb': ['sprockets-influxdb'],
           'msgpack': ['u-msgpack-python'],
-          'sentry': ['raven'],
-          'testing': [
-              'beautifulsoup4',
-              'coverage',
-              'mock',
-              'nose',
-              'raven',
-              'sprockets-influxdb',
-              'u-msgpack-python'
-          ]
+          'sentry': ['raven']
       },
-      tests_require=['mock', 'nose', 'coverage'],
+      tests_require=read_requirements_file('requires/development.txt'),
       entry_points=dict(console_scripts=['rejected=rejected.controller:main']),
       zip_safe=True)

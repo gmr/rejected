@@ -258,7 +258,6 @@ class AsyncTestCase(testing.AsyncTestCase):
         """
         cls = self.get_consumer()
         obj = cls(config.Data(self.get_settings()), self.process)
-        obj.initialize()
         obj._message = self.create_message('dummy')
         obj.set_channel('mock', self.process.connections['mock'].channel)
         return obj

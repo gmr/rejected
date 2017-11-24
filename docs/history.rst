@@ -1,6 +1,12 @@
 Changelog
 =========
 
+Next Release
+------------
+
+- Remove extra call to :py:meth:`rejected.consumer.Consumer.initialize` in
+  :py:meth:`rejected.testing.AsyncTestCase._create_consumer`
+
 3.19.5
 ------
 

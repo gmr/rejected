@@ -1,0 +1,8 @@
+beautifulsoup4
+coverage
+mock
+u-msgpack-python
+nose
+raven
+sprockets-influxdb
+-r installation.txt

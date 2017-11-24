@@ -3,10 +3,10 @@
 .coverage
 .idea
 .DS_Store
+atlassian-ide-plugin.xml
 build
 dist
-tests/cover
 cover
-atlassian-ide-plugin.xml
-cli.py
 docs/_build
+env
+examples/env

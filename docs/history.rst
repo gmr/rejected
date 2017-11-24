@@ -21,7 +21,7 @@ Other Changes
 - Updated and rewritten tests
 - Added :attr:`rejected.consumer.Consumer.IGNORE_OOB_STATS_CALLS` to not log when `rejected.consumer.Consumer.stats_*` calls are made when no message is currently being processed.
 - Added :class:`rejected.log.CorrelationID` and :class:`rejected.log.NoCorrelationID` as a replacement of :class:`rejected.log.CorrelationFilter`
-- Remove extra call to :py:meth:`rejected.consumer.Consumer.initialize` in :py:meth:`rejected.testing.AsyncTestCase._create_consumer` - #21 Contributed by @dave-shawley
+- Remove extra call to :py:meth:`rejected.consumer.Consumer.initialize` in :py:meth:`rejected.testing.AsyncTestCase._create_consumer` - PR #21 Contributed by @dave-shawley
 
 3.19.5
 ------

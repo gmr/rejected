@@ -6,30 +6,36 @@ Changelog
 
 Breaking Changes
 ^^^^^^^^^^^^^^^^
-- **REMOVED** `rejected.consumer.Consumer.reply` as it was wonky and problematic
-- **REMOVED** `rejected.consumer.Consumer.statsd_*` functions that have been deprecated since `3.13.0`
-- **REMOVED** `rejected.consumer.PublishingConsumer` as the functionality was merged into :class:`rejected.consumer.Consumer` since `3.17.0`.
-- **REMOVED** `rejected.consumer.SmartPublishingConsumer` as the functionality was merged into :class:`rejected.consumer.SmartConsumer` since `3.17.0`.
-- **CHANGED** When a message is returned from RabbitMQ, it will no longer invoke :meth:`rejected.consumer.Consumer.process`.
+- REMOVED ``rejected.consumer.Consumer.reply`` as it was wonky and problematic
+- REMOVED ``rejected.consumer.Consumer.statsd_*`` functions that were deprecated in v3.13.0
+- REMOVED ``rejected.consumer.PublishingConsumer`` class that was deprecated in v3.17.0
+- REMOVED ``rejected.consumer.SmartPublishingConsumer`` class that was deprecated in v3.17.0
+- CHANGED when a message is returned from RabbitMQ so that it will no longer invoke ``rejected.consumer.Consumer.process``
+
+High-Level Changes
+^^^^^^^^^^^^^^^^^^
+- Refactored publishing with publisher confirmations enabled to return a ``tornado.concurrent.Future`` that can be yielded on to wait for confirmations to be returned
+- When publisher confirmations are enabled, all publishing is done with the ``mandatory`` flag set
+- Documentation cleaned up and rewritten in parts
 
 Other Changes
 ^^^^^^^^^^^^^
-- Documentation cleanup
-- Added :class:`rejected.consumer.Consumer.rpc_reply` as a replacement of `rejected.consumer.Consumer.reply`
-- Refactored publishing with publisher confirmations enabled to return a :class:`~tornado.concurrent.Future` that can be yielded on to wait for confirmations to be returned.
-- Updated :class:`rejected.data.Properties` to allow for keyword arguments
-- Updated and rewritten tests
-- Added :attr:`rejected.consumer.Consumer.IGNORE_OOB_STATS_CALLS` to not log when `rejected.consumer.Consumer.stats_*` calls are made when no message is currently being processed.
-- Added :class:`rejected.log.CorrelationID` and :class:`rejected.log.NoCorrelationID` as a replacement of :class:`rejected.log.CorrelationFilter`
-- Remove extra call to :py:meth:`rejected.consumer.Consumer.initialize` in :py:meth:`rejected.testing.AsyncTestCase._create_consumer` - PR #21 Contributed by @dave-shawley
+- ADDED ``rejected.consumer.Consumer.rpc_reply`` as a replacement of ``rejected.consumer.Consumer.reply``
+- ADDED ability to ``rejected.data.Properties`` to allow for keyword arguments
+- ADDED ``rejected.consumer.Consumer.IGNORE_OOB_STATS_CALLS`` to not log when ``rejected.consumer.Consumer.stats_*`` calls are made when no message is currently being processed
+- ADDED ``rejected.log.CorrelationID`` and ``rejected.log.NoCorrelationID`` as a replacement of ``rejected.log.CorrelationFilter``
+
+Bug Fixes
+^^^^^^^^^
+- REMOVED extra call to ``rejected.consumer.Consumer.initialize`` in ``rejected.testing.AsyncTestCase._create_consumer`` `#21 <https://github.com/gmr/rejected/pull/21>`_ - `dave-shawley <https://github.com/dave-shawley>`_
 
 3.19.5
 ------
 
 - Add SSL connection flag support to configuration `#20 <https://github.com/gmr/rejected/pull/20>`_ - `code-fabriek <https://github.com/code-fabriek>`_
-- Fix documentation for :py:class:`rejected.data.Measurement`
+- Fix documentation for ``rejected.data.Measurement``
 - Alter logging levels for connection failures
-- Add :py:attr:`rejected.testing.AsyncTestCase.measurement`
+- Add ``rejected.testing.AsyncTestCase.measurement``
 
 3.19.4
 ------
@@ -58,57 +64,57 @@ Other Changes
 - Sentry client changes:
   - Do not assign version, let the client figure that out
   - Do not specify the versions of loaded modules, let the client figure that out
-- Add `rejected.data.Measurement.add_duration`, changing the behavior of
+- Add ``rejected.data.Measurement.add_duration``, changing the behavior of
   recorded durations, creating a stack of timings instead of a single timing
   for the key. For InfluxDB submissions, if there is a only a single value,
   that metric will continue to submit as previous versions. If there are multiple,
   the average, min, max, median, and 95th percentile values will be submitted.
-- Add `rejected.consumer.Consumer.stats_add_duration`
-- Deprecate `rejected.consumer.Consumer.stats_add_timing`
-- Deprecate `rejected.consumer.Consumer.stats_add_timing`
-- Consumer tags are now in the format `[consumer-name]-[os PID]`
-- Created a base exception class `rejected.consumer.RejectedException`
-- `rejected.consumer.ConsumerException`, `rejected.consumer.MessageException`,
-  and `rejected.consumer.ProcessingException` extend `rejected.consumer.RejectedException`
-- If a `rejected.consumer.ConsumerException`, `rejected.consumer.MessageException`,
-  or `rejected.consumer.ProcessingException` are passed a keyword of `metric`,
+- Add ``rejected.consumer.Consumer.stats_add_duration``
+- Deprecate ``rejected.consumer.Consumer.stats_add_timing``
+- Deprecate ``rejected.consumer.Consumer.stats_add_timing``
+- Consumer tags are now in the format ``[consumer-name]-[os PID]``
+- Created a base exception class ``rejected.consumer.RejectedException``
+- ``rejected.consumer.ConsumerException``, ``rejected.consumer.MessageException``,
+  and ``rejected.consumer.ProcessingException`` extend ``rejected.consumer.RejectedException``
+- If a ``rejected.consumer.ConsumerException``, ``rejected.consumer.MessageException``,
+  or ``rejected.consumer.ProcessingException`` are passed a keyword of ``metric``,
   the consumer will automatically instrument a counter (statsd) or tag (InfluxDB)
-  using the `metric` value.
-- `rejected.consumer.ConsumerException`, `rejected.consumer.MessageException`,
-  and `rejected.consumer.ProcessingException` now support "new style" string formatting,
+  using the ``metric`` value.
+- ``rejected.consumer.ConsumerException``, ``rejected.consumer.MessageException``,
+  and ``rejected.consumer.ProcessingException`` now support "new style" string formatting,
   automatically applying the args and keyword args that are passed into the creation
   of the exception.
 - Logging levels for exceptions changed:
-  - `rejected.consumer.ConsumerException` are logged with error
-  - `rejected.consumer.MessageException` are logged with info
-  - `rejected.consumer.ProcessingException` are logged with warning
+  - ``rejected.consumer.ConsumerException`` are logged with error
+  - ```rejected.consumer.MessageException`` are logged with info
+  - ```rejected.consumer.ProcessingException`` are logged with warning
 - Fix the handling of child startup failures in the MCP
 - Fix a bug where un-configured consumers caused an exception in the MCP
 - Handle the edge case when a connection specified in the consumer config does not exist
 - Refactor how the version of the consumer module or package is determined
-- Add `ProcessingException` as a top-level package export
+- Add ``ProcessingException`` as a top-level package export
 - Fix misc docstrings
-- Fix the use of `SIGABRT` being used from child processes to notify the MCP when
-  processes exit, instead register for `SIGCHLD` in the MCP.
+- Fix the use of ``SIGABRT`` being used from child processes to notify the MCP when
+  processes exit, instead register for ``SIGCHLD`` in the MCP.
 
 3.18.9
 ------
 
-- Added :meth:`rejected.testing.AsyncTestCase.published_messages` and :class:`rejected.testing.PublishedMessage`
+- Added ``rejected.testing.AsyncTestCase.published_messages`` and ``rejected.testing.PublishedMessage``
 - Updated testing documentation
 - Updated the setup.py extras install for testing to install all testing dependencies
-- Made `raven` optional in `rejected.testing`
+- Made ``raven`` optional in ``rejected.testing``
 
 3.18.8
 ------
 
-- Fix the mocks in `rejected.testing`
+- Fix the mocks in ``rejected.testing``
 
 3.18.7
 ------
 
 - Fix child process errors in shutdown
-- Fix unfiltered connection list returned to a process, introduced in 3.18.4
+- Fix unfiltered connection list returned to a process, introduced in v3.18.4
 
 3.18.6
 ------
@@ -124,8 +130,8 @@ Other Changes
 ------
 
 - Handle UNHANDLED_EXCEPTION in rejected.testing
-- Add the `rejected.consumer.Consumer.io_loop` property
-- Add the `testing` setup.py `extras_require` entry
+- Add the ``rejected.consumer.Consumer.io_loop`` property
+- Add the ``testing`` setup.py ``extras_require`` entry
 
 3.18.3
 ------
@@ -163,7 +169,7 @@ Other Changes
 3.17.2
 ------
 
-- Don't blow up if `stats` is not defined in config
+- Don't blow up if ``stats`` is not defined in config
 
 3.17.1
 ------
@@ -174,17 +180,17 @@ Other Changes
 3.17.0
 ------
 
-- `rejected.testing` updates
-- Add automatic assignment of `correlation-id` to `rejected.consumer.Consumer`
-- Only use `sentry_client` if it’s configured
-- Behavior change: Don't spawn a process per connection, Spawn `qty` consumers with N connections
+- ``rejected.testing`` updates
+- Add automatic assignment of ``correlation-id`` to ``rejected.consumer.Consumer``
+- Only use ``sentry_client`` if it’s configured
+- Behavior change: Don't spawn a process per connection, Spawn ``qty`` consumers with N connections
 - Add State.is_active
 - Add attributes for the connection the message was received on and if the message was published by the consumer and returned by RabbitMQ
-- Deprecate `PublishingConsumer` and `SmartPublishingConsumer`, folding them into `Consumer` and `SmartConsumer` respectively
+- Deprecate ``PublishingConsumer`` and ``SmartPublishingConsumer``, folding them into ``Consumer`` and ``SmartConsumer`` respectively
 - Refactor to not have a singular channel instance, but rather a dict of channels for all connections
 - Add the ability to specify a channel to publish a message on, defaulting to the channel the message was delivered on
 - Add a property that indicates the current message that is being processed was returned by RabbitMQ
-- Change `Consumer._execute` and `Consumer._set_channel` to be “public” but will hide from docs.
+- Change ``Consumer._execute`` and ``Consumer._set_channel`` to be “public” but will hide from docs.
 - Major Process refactor
     - Create a new Connection class to isolate direct AMQP connection/channel management from the Process class.
     - Alter Process to allow for multiple connections. This allows a consumer to consume from multiple AMQP broker connections or have AMQP broker connections that are not used for consuming. This could be useful for consuming from one broker and publishing to another broker in a different data center.
@@ -211,7 +217,7 @@ Other Changes
 3.16.4
 ------
 
-- Update logging levels in `rejected.consumer.Consumer._execute`
+- Update logging levels in ``rejected.consumer.Consumer._execute``
 - Set exception error strings in per-request measurements
 
 3.16.3
@@ -227,12 +233,12 @@ Other Changes
 3.16.1
 ------
 
-- Add `rejected.consumer.Consumer.send_exception_to_sentry`
+- Add ``rejected.consumer.Consumer.send_exception_to_sentry``
 
 3.16.0
 ------
 
-- Add `rejected.testing` testing framework
+- Add ``rejected.testing`` testing framework
 
 3.15.1
 ------
@@ -256,18 +262,18 @@ Other Changes
 3.13.4
 ------
 
-- Properly handle finishing in `rejected.consumer.Consumer.prepare`
+- Properly handle finishing in ``rejected.consumer.Consumer.prepare``
 - Fix default/class level config of error exchange, etc
 
 3.13.3
 ------
 
-- Fix `rejected.consumer.Consumer.stats_track_duration`
+- Fix ``rejected.consumer.Consumer.stats_track_duration``
 
 3.13.2
 ------
 
-- Better backwards compatibility with `rejected.consumer.Consumer` "stats" commands
+- Better backwards compatibility with ``rejected.consumer.Consumer`` "stats" commands
 
 3.13.1
 ------

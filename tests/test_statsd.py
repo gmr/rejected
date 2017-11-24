@@ -43,7 +43,7 @@ class SendTestCase(TestCase):
         return self.statsd.PAYLOAD_FORMAT.format(self.settings['prefix'],
                                                  self.statsd._hostname,
                                                  self.name, key, value,
-                                                 metric_type)
+                                                 metric_type).encode('utf-8')
 
     def test_add_timing(self):
         self.statsd.add_timing('foo', 2.5)

@@ -4,7 +4,6 @@ connection state and collects stats about the consuming process.
 
 """
 import collections
-import importlib
 import logging
 import math
 import multiprocessing
@@ -15,7 +14,6 @@ try:
 except ImportError:
     import profile
 import signal
-import sys
 import time
 import warnings
 
@@ -23,17 +21,18 @@ try:
     import sprockets_influxdb as influxdb
 except ImportError:
     influxdb = None
+
 from tornado import gen, ioloop, locks
 import pika
+
 try:
     import raven
     from raven import breadcrumbs
     from raven.contrib.tornado import AsyncSentryClient
 except ImportError:
     breadcrumbs, raven, AsyncSentryClient = None, None, None
-from pika import spec
 
-from rejected import __version__, data, state, statsd, utils
+from rejected import __version__, connection, data, state, statsd, utils
 
 LOGGER = logging.getLogger(__name__)
 
@@ -42,202 +41,6 @@ Callbacks = collections.namedtuple(
                   'on_unblocked', 'on_confirmation', 'on_delivery',
                   'on_return'])
 Delivery = collections.namedtuple('Delivery', ['connection', 'message'])
-
-
-class Connection(state.State):
-
-    HB_INTERVAL = 300
-    STATE_CLOSED = 0x08
-
-    def __init__(self, name, config, consumer_name, should_consume,
-                 publisher_confirmations, io_loop, callbacks):
-        super(Connection, self).__init__()
-        self.blocked = False
-        self.callbacks = callbacks
-        self.channel = None
-        self.config = config
-        self.should_consume = should_consume
-        self.consumer_tag = '{}-{}'.format(consumer_name, os.getpid())
-        self.io_loop = io_loop
-        self.name = name
-        self.publisher_confirm = publisher_confirmations
-        self.handle = self.connect()
-
-        # Override STOPPED with CLOSED
-        self.STATES[0x08] = 'CLOSED'
-
-    @property
-    def is_closed(self):
-        return self.is_stopped
-
-    def connect(self):
-        self.set_state(self.STATE_CONNECTING)
-        return pika.TornadoConnection(
-            self._connection_parameters,
-            on_open_callback=self.on_open,
-            on_open_error_callback=self.on_open_error,
-            on_close_callback=self.on_closed,
-            stop_ioloop_on_close=False,
-            custom_ioloop=self.io_loop)
-
-    def shutdown(self):
-        if self.is_shutting_down:
-            LOGGER.debug('Connection %s is already shutting down', self.name)
-            return
-
-        self.set_state(self.STATE_SHUTTING_DOWN)
-        LOGGER.debug('Connection %s is shutting down', self.name)
-        if self.is_active:
-            LOGGER.debug('Connection %s is sending a Basic.Cancel to RabbitMQ',
-                         self.name)
-            self.channel.basic_cancel(self.on_consumer_cancelled,
-                                      self.consumer_tag)
-        else:
-            self.channel.close()
-
-    def on_open(self, _handle):
-        """Invoked when the connection is opened
-
-        :type _handle: pika.adapters.tornado_connection.TornadoConnection
-
-        """
-        LOGGER.debug('Connection %s is open', self.name)
-        self.handle.channel(self.on_channel_open)
-        self.handle.add_on_connection_blocked_callback(self.on_blocked)
-        self.handle.add_on_connection_unblocked_callback(self.on_unblocked)
-
-    def on_open_error(self, *args, **kwargs):
-        LOGGER.error('Connection %s failure %r %r', self.name, args, kwargs)
-        self.set_state(self.STATE_CLOSED)
-        self.callbacks.on_open_error(self.name)
-
-    def on_closed(self, _connection, status_code, status_text):
-        self.set_state(self.STATE_CLOSED)
-        LOGGER.debug('Connection %s closed (%s) %s',
-                     self.name, status_code, status_text)
-        self.callbacks.on_closed(self.name)
-
-    def on_blocked(self, frame):
-        LOGGER.warning('Connection %s is blocked: %r', frame)
-        self.blocked = True
-        self.callbacks.on_blocked(self.name)
-
-    def on_unblocked(self, frame):
-        LOGGER.warning('Connection %s is unblocked: %r', frame)
-        self.blocked = False
-        self.callbacks.on_unblocked(self.name)
-
-    def on_channel_open(self, channel):
-        """This method is invoked by pika when the channel has been opened. It
-        will change the state to IDLE, add the callbacks and setup the channel
-        to start consuming.
-
-        :param pika.channel.Channel channel: The channel object
-
-        """
-        LOGGER.debug('Connection %s channel is now open', self.name)
-        self.set_state(self.STATE_IDLE)
-        self.channel = channel
-        self.channel.add_on_close_callback(self.on_channel_closed)
-        self.channel.add_on_cancel_callback(self.on_consumer_cancelled)
-        self.channel.add_on_return_callback(self.on_return)
-        if self.publisher_confirm:
-            self.channel.confirm_delivery(self.on_confirmation)
-        self.callbacks.on_ready(self.name)
-
-    def on_channel_closed(self, _channel, reply_code, reply_text):
-        """Invoked by pika when RabbitMQ unexpectedly closes the channel.
-        Channels are usually closed if you attempt to do something that
-        violates the protocol, such as re-declare an exchange or queue with
-        different parameters. In this case, we'll close the connection
-        to shutdown the object.
-
-        :param pika.channel.Channel _channel: The AMQP Channel
-        :param int reply_code: The AMQP reply code
-        :param str reply_text: The AMQP reply text
-
-        """
-        LOGGER.debug('Connection %s channel was closed: (%s) %s',
-                     self.name, reply_code, reply_text)
-        del self.channel
-        if self.is_running:
-            self.set_state(self.STATE_CONNECTING)
-            self.handle.channel(self.on_channel_open)
-        elif self.is_shutting_down:
-            LOGGER.debug('Connection %s closing', self.name)
-            self.handle.close()
-
-    def consume(self, queue_name, no_ack, prefetch_count):
-        self.set_state(self.STATE_ACTIVE)
-        self.channel.basic_qos(self.on_qos_set, 0, prefetch_count, False)
-        self.channel.basic_consume(consumer_callback=self.on_delivery,
-                                   queue=queue_name,
-                                   no_ack=no_ack,
-                                   consumer_tag=self.consumer_tag)
-
-    def on_qos_set(self, frame):
-        """Invoked by pika when the QoS is set
-
-        :param pika.frame.Frame frame: The QoS Frame
-
-        """
-        LOGGER.debug("Connection %s QoS was set: %r", self.name, frame)
-
-    def on_consumer_cancelled(self, frame):
-        """Invoked by pika when a ``Basic.Cancel`` or ``Basic.CancelOk``
-        is received.
-
-        :param pika.frame.Frame frame: The QoS Frame
-
-        """
-        LOGGER.debug('Connection %s consumer has been cancelled', self.name)
-        if self.is_shutting_down:
-            self.channel.close()
-        else:
-            self.set_state(self.STATE_IDLE)
-
-    def on_confirmation(self, frame):
-        """Invoked by pika when RabbitMQ responds to a Basic.Publish RPC
-        command, passing in either a Basic.Ack or Basic.Nack frame with
-        the delivery tag of the message that was published. The delivery tag
-        is an integer counter indicating the message number that was sent
-        on the channel via Basic.Publish.
-
-        :param pika.frame.Method frame: Basic.Ack or Basic.Nack frame
-
-        """
-        delivered = frame.method.NAME.split('.')[1].lower() == 'ack'
-        LOGGER.debug('Connection %s received delivery confirmation '
-                     '(Delivered: %s)', self.name, delivered)
-        self.callbacks.on_confirmation(
-            self.name, delivered, frame.method.delivery_tag)
-
-    def on_delivery(self, channel, method, properties, body):
-        self.callbacks.on_delivery(
-            self.name, channel, method, properties, body)
-
-    def on_return(self, channel, method, properties, body):
-        self.callbacks.on_return(self.name, channel, method, properties, body)
-
-    @property
-    def _connection_parameters(self):
-        """Return connection parameters for a pika connection.
-
-        :rtype: pika.ConnectionParameters
-
-        """
-        return pika.ConnectionParameters(
-            self.config.get('host', 'localhost'),
-            self.config.get('port', 5672),
-            self.config.get('vhost', '/'),
-            pika.PlainCredentials(
-                self.config.get('user', 'guest'),
-                self.config.get('password', self.config.get('pass', 'guest'))),
-            ssl=self.config.get('ssl', False),
-            frame_max=self.config.get('frame_max', spec.FRAME_MAX_SIZE),
-            socket_timeout=self.config.get('socket_timeout', 10),
-            heartbeat_interval=self.config.get(
-                'heartbeat_interval', self.HB_INTERVAL))
 
 
 class Process(multiprocessing.Process, state.State):
@@ -279,7 +82,7 @@ class Process(multiprocessing.Process, state.State):
                  name=None,
                  args=(),
                  kwargs=None):
-        if kwargs is None:
+        if kwargs is None:  # pragma: nocover
             kwargs = {}
         super(Process, self).__init__(group, target, name, args, kwargs)
         self.active_message = None
@@ -331,61 +134,41 @@ class Process(multiprocessing.Process, state.State):
         self.counters[self.ACKED] += 1
         self.measurement.set_tag(self.ACKED, True)
 
-    def calc_velocity(self, values):
-        """Return the message consuming velocity for the process.
-
-        :param dict values: The dict with velocity data
-        :rtype: float
-
-        """
-        processed = (values['counts'].get(self.PROCESSED, 0) -
-                     values['previous'].get(self.PROCESSED, 0))
-        duration = time.time() - self.last_stats_time
-
-        # If there were no messages, do not calculate, use the base
-        if not processed or not duration:
-            return 0
-
-        # Calculate the velocity as the basis for the calculation
-        velocity = float(processed) / float(duration)
-        LOGGER.debug('Message processing velocity: %.2f/s', velocity)
-        return velocity
-
     def create_connections(self):
         """Create and start the RabbitMQ connections, assigning the connection
         object to the connections dict.
 
         """
         self.set_state(self.STATE_CONNECTING)
-        for connection in self.consumer_config.get('connections', []):
-            name, confirm, consume = connection, False, True
-            if isinstance(connection, dict):
-                name = connection['name']
-                confirm = connection.get('publisher_confirmation', False)
-                consume = connection.get('consume', True)
+        for conn in self.consumer_config.get('connections', []):
+            name, confirm, consume = conn, False, True
+            if isinstance(conn, dict):
+                name = conn['name']
+                confirm = conn.get('publisher_confirmation', False)
+                consume = conn.get('consume', True)
 
             if name not in self.config['Connections']:
                 LOGGER.critical('Connection "%s" for %s not found',
                                 name, self.consumer_name)
                 continue
 
-            self.connections[name] = Connection(
+            self.connections[name] = connection.Connection(
                 name, self.config['Connections'][name], self.consumer_name,
                 consume, confirm, self.ioloop, self.callbacks)
 
     @staticmethod
-    def get_config(cfg, number, name, connection):
+    def get_config(cfg, number, name, connection_name):
         """Initialize a new consumer thread, setting defaults and config values
 
         :param dict cfg: Consumer config section from YAML File
         :param int number: The identification number for the consumer
         :param str name: The name of the consumer
-        :param str connection: The name of the connection):
+        :param str connection_name: The name of the connection):
         :rtype: dict
 
         """
         return {
-            'connection': cfg['Connections'][connection],
+            'connection': cfg['Connections'][connection_name],
             'consumer_name': name,
             'process_name': '%s_%i_tag_%i' % (name, os.getpid(), number)
         }
@@ -516,7 +299,7 @@ class Process(multiprocessing.Process, state.State):
 
     def on_connection_ready(self, name):
         LOGGER.debug('Connection %s indicated it is ready', name)
-        self.consumer.set_channel(name, self.connections[name].channel)
+        self.consumer.set_connection(self.connections[name])
         if all([c.is_idle for c in self.connections.values()]):
             for key in self.connections.keys():
                 if self.connections[key].should_consume:
@@ -538,6 +321,10 @@ class Process(multiprocessing.Process, state.State):
     def on_confirmation(self, name, delivered, delivery_tag):
         if self.is_processing:
             self.consumer.on_confirmation(name, delivered, delivery_tag)
+        else:
+            LOGGER.warning('Publisher Confirmation received on connection %s '
+                           'while not processing (%r %r)',
+                           name, delivered, delivery_tag)
 
     def on_delivery(self, name, channel, method, properties, body):
         """Process a message from Rabbit
@@ -549,11 +336,10 @@ class Process(multiprocessing.Process, state.State):
         :param str body: The message body
 
         """
-        message = data.Message(name, channel, method, properties, body, False)
+        message = data.Message(name, channel, method, properties, body)
         if self.is_processing:
-            self.pending.append(message)
-        else:
-            self.invoke_consumer(message)
+            return self.pending.append(message)
+        self.invoke_consumer(message)
 
     def on_returned(self, name, channel, method, properties, body):
         """Send a message to the consumer that was returned by RabbitMQ
@@ -566,11 +352,9 @@ class Process(multiprocessing.Process, state.State):
         :param str body: The message body
 
         """
-        message = data.Message(name, channel, method, properties, body, True)
-        if self.is_processing:
-            self.pending.append(message)
-        else:
-            self.invoke_consumer(message)
+        message = data.Message(name, channel, method, properties, body)
+
+        # @TODO This should do something here
 
     def on_processed(self, message, result, start_time):
         """Invoked after a message is processed by the consumer and
@@ -1075,14 +859,12 @@ class Process(multiprocessing.Process, state.State):
         :return: str
 
         """
-        if not self._kwargs['profile']:
-            return None
-        if os.path.exists(self._kwargs['profile']) and \
-                os.path.isdir(self._kwargs['profile']):
-            return '%s/%s-%s.prof' % (path.normpath(self._kwargs['profile']),
-                                      os.getpid(),
-                                      self._kwargs['consumer_name'])
-        return None
+        if 'profile' in self._kwargs and self._kwargs['profile']:
+            profile_path = path.normpath(self._kwargs['profile'])
+            if os.path.exists(profile_path) and os.path.isdir(profile_path):
+                return path.join(
+                    profile_path, '{}-{}.prof'.format(
+                        os.getpid(), self._kwargs['consumer_name']))
 
     @property
     def qos_prefetch(self):

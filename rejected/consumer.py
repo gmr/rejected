@@ -40,7 +40,6 @@ import plistlib
 import sys
 import time
 import uuid
-import warnings
 import zlib
 
 import pika
@@ -50,25 +49,23 @@ import yaml
 
 from rejected import data, log
 
-LOGGER = logging.getLogger(__name__)
-
 # Optional imports
 try:
     import bs4
-except ImportError:
-    LOGGER.warning('BeautifulSoup not found, disabling html and xml support')
+except ImportError:  # pragma: nocover
+    logging.warning('BeautifulSoup not found, disabling html and xml support')
     bs4 = None
 
 try:
     import umsgpack
-except ImportError:
-    LOGGER.warning('umsgpack not found, disabling msgpack support')
+except ImportError:  # pragma: nocover
+    logging.warning('umsgpack not found, disabling msgpack support')
     umsgpack = None
 
 # Python3 Support
 try:
     unicode()
-except NameError:
+except NameError:  # pragma: nocover
     unicode = str
 
 
@@ -86,113 +83,134 @@ YAML_MIME_TYPES = ('text/yaml', 'text/x-yaml')
 
 class Consumer(object):
     """Base consumer class that defines the contract between rejected and
-    consumer applications.
+    consumer applications. You must extend the
+    :meth:`~rejected.consumer.Consumer.process` method in your child class
+    to properly implement a consumer application. All other methods are
+    optional.
 
-    In any of the consumer base classes, if the ``message_type`` is specified
-    in the configuration (or set with the ``MESSAGE_TYPE`` attribute), the
-    ``type`` property of incoming messages will be validated against when a
-    message is received. If there is no match, the consumer will not
-    process the message and will drop the message without an exception if the
-    ``drop_invalid_messages`` setting is set to ``True`` in the configuration
-    (or if the ``DROP_INVALID_MESSAGES`` attribute is set to ``True``).
-    If it is ``False``, a :exc:`~rejected.consumer.MessageException` is raised.
+    """
+    MESSAGE_TYPE = None
+    """A value or list of values that are compared against the AMQP `type`
+    message property to determine if the consumer can support the
+    processing of the received message. If not specified, type checking is
+    not performed. Use in conjunction with
+    :const:`~rejected.consumer.Consumer.DROP_INVALID_MESSAGES`.
 
-    If ``DROP_EXCHANGE`` is specified either as an attribute of the consumer
-    class or in the consumer configuration, if a message is dropped, it is
-    published to the that exchange prior to rejecting the message in RabbitMQ.
-    When the message is republished, four new values are added to the AMQP
-    ``headers`` message property: ``X-Dropped-By``, ``X-Dropped-Reason``,
-    ``X-Dropped-Timestamp``, ``X-Original-Exchange``.
+    :default: :class:`None`
+    :type: str or list(str)
+    """
 
-    The ``X-Dropped-By`` header value contains the configured name of the
-    consumer that dropped the message. ``X-Dropped-Reason`` contains the
-    reason the message was dropped (eg invalid message type or maximum error
-    count). ``X-Dropped-Timestamp`` value contains the ISO-8601 formatted
-    timestamp of when the message was dropped. Finally, the
-    ``X-Original-Exchange`` value contains the original exchange that the
-    message was published to.
+    DROP_INVALID_MESSAGES = False
+    """Set to :class:`True` to automatically drop messages that do not match a
+    supported message type as defined in
+    :const:`~rejected.consumer.Consumer.MESSAGE_TYPE`.
 
-    If a consumer raises a :exc:`~rejected.consumer.ProcessingException`, the
-    message that was being processed will be republished to the exchange
-    specified by the ``error`` exchange configuration value or the
-    ``ERROR_EXCHANGE`` attribute of the consumer's class. The message will be
-    published using the routing key that was last used for the message. The
-    original message body and properties will be used and two additional
-    header property values may be added:
+    :default: :class:`False`
+    :type: bool
+    """
 
-        - ``X-Processing-Exception`` contains the string value of the
-            exception that was raised, if specified.
-        - ``X-Processing-Exceptions`` contains the quantity of processing
-            exceptions that have been raised for the message.
+    DROP_EXCHANGE = None
+    """Assign an exchange to publish dropped messages to. If set to
+    :class:`None`, dropped messages are not republished.
 
-    In combination with a queue that has ``x-message-ttl`` set
-    and ``x-dead-letter-exchange`` that points to the original exchange for the
-    queue the consumer is consuming off of, you can implement a delayed retry
-    cycle for messages that are failing to process due to external resource or
-    service issues.
+    :default: :class:`None`
+    :type: :class:`str` or :class:`None`
+    """
 
-    If ``error_max_retry`` is specified in the configuration or
-    ``ERROR_MAX_RETRY`` is set on the class, the headers for each method
-    will be inspected and if the value of ``X-Processing-Exceptions`` is
-    greater than or equal to the specified value, the message will
-    be dropped.
+    ERROR_MAX_RETRIES = None
+    """Assign an integer value to limit the number of times a
+    :exc:`~rejected.consumer.ProcessingException` is raised for a message
+    before it is dropped. `None` disables the dropping of messages due to
+    :exc:`~rejected.consumer.ProcessingException`.
+    Replaces the deprecated :const:`ERROR_MAX_RETRY` attribute.
 
-    As of 3.18.6, the ``MESSAGE_AGE_KEY`` class level attribute contains the
-    default key part to used when recording stats for the message age. You can
-    also override the :py:meth:`~rejected.consumer.Consumer.message_age_key`
-    method to create compound keys. For example, to create a key that includes
-    the message priority:
+    .. versionadded:: 4.0.0
 
-    .. code:: python
+    :default: :class:`None`
+    :type: int or None
+    """
+
+    ERROR_MAX_RETRY = None
+    """Assign an integer value to limit the number of times a
+    :exc:`~rejected.consumer.ProcessingException` is raised for a message
+    before it is dropped. `None` disables the dropping of messages due to
+    :exc:`~rejected.consumer.ProcessingException`.
+    Deprecated by the :const:`ERROR_MAX_RETRIES` attribute.
+
+    .. deprecated:: 4.0.0
+
+    :default: :class:`None`
+    :type: int or None
+    """
+
+    ERROR_EXCHANGE = 'errors'
+    """The exchange a message will be published to if a
+    :exc:`~rejected.consumer.ProcessingException` is raised.
+
+    :default: :const:`errors`
+    :type: str
+    """
+
+    IGNORE_OOB_STATS = False
+    """Suppress warnings when calls to the stats methods are made while no
+    message is currently being processed.
+
+    .. versionadded:: 4.0.0
+
+    :default: :class:`False`
+    :type: bool
+    """
+
+    MESSAGE_AGE_KEY = 'message_age'
+    """Specify a value that is used for the automatic recording of per-message
+    statistics for the message age. You can also override the
+    :meth:`~rejected.consumer.Consumer.message_age_key` method to create
+    compound keys. For example, to create a key that includes the message
+    priority:
+
+    .. code-block:: python
 
         class Consumer(consumer.Consumer):
 
             def message_age_key(self):
                 return 'priority-{}.message_age'.format(self.priority or 0)
 
-    .. note:: Since 3.17, :class:`~rejected.consumer.Consumer` and
-        :class:`~rejected.consumer.PublishingConsumer` have been combined
-        into the same class.
+    .. versionadded:: 3.18.6
 
+    :default: :const:`message_age`
+    :type: str
     """
-    DROP_EXCHANGE = None
-    DROP_INVALID_MESSAGES = False
-    MESSAGE_TYPE = None
-    ERROR_EXCHANGE = 'errors'
-    ERROR_MAX_RETRY = None
-    MESSAGE_AGE_KEY = 'message_age'
 
-    def __init__(self, settings, process,
-                 drop_invalid_messages=None,
-                 message_type=None,
-                 error_exchange=None,
-                 error_max_retry=None,
-                 drop_exchange=None):
+    def __init__(self, *args, **kwargs):
         """Creates a new instance of the :class:`~rejected.consumer.Consumer`
         class. To perform initialization tasks, extend
         :meth:`~rejected.consumer.Consumer.initialize`.
 
         """
-        self._channels = {}
+        self._confirmation_futures = {}
+        self._connections = {}
         self._correlation_id = None
-        self._drop_exchange = drop_exchange or self.DROP_EXCHANGE
-        self._drop_invalid = drop_invalid_messages or \
-            self.DROP_INVALID_MESSAGES
-        self._error_exchange = error_exchange or self.ERROR_EXCHANGE
-        self._error_max_retry = error_max_retry or self.ERROR_MAX_RETRY
+        self._drop_exchange = kwargs.get('drop_exchange') or self.DROP_EXCHANGE
+        self._drop_invalid = (kwargs.get('drop_invalid_messages') or
+                              self.DROP_INVALID_MESSAGES)
+        self._error_exchange = (kwargs.get('error_exchange') or
+                                self.ERROR_EXCHANGE)
+        self._error_max_retry = (kwargs.get('error_max_retry') or
+                                 self.ERROR_MAX_RETRIES or
+                                 self.ERROR_MAX_RETRY)
         self._finished = False
         self._message = None
-        self._message_type = message_type or self.MESSAGE_TYPE
+        self._message_type = kwargs.get('message_type') or self.MESSAGE_TYPE
         self._measurement = None
         self._message_body = None
-        self._process = process
-        self._settings = settings
+        self._process = kwargs['process']
+        self._settings = kwargs['settings']
         self._yield_condition = locks.Condition()
 
         # Create a logger that attaches correlation ID to the record
-        self._logger = logging.getLogger(
-            settings.get('_import_module', __name__))
-        self.logger = log.CorrelationAdapter(self._logger, self)
+        logger = logging.getLogger(
+            kwargs.get('settings').get('_import_module', __name__))
+        self.logger = log.CorrelationIDAdapter(logger, {'consumer': self})
 
         # Set a Sentry context for the consumer
         self.set_sentry_context('consumer', self.name)
@@ -209,7 +227,9 @@ class Consumer(object):
 
     def prepare(self):
         """Called when a message is received before
-        :meth:`~rejected.consumer.Consumer.process`.
+        :meth:`~rejected.consumer.Consumer.process`. One use for extending
+        this method is to pre-process messages and isolate logic that
+        validates messages and rejected them if data is missing.
 
         .. note:: Asynchronous support: Decorate this method with
             :func:`tornado.gen.coroutine` to make it asynchronous.
@@ -217,14 +237,19 @@ class Consumer(object):
         If this method returns a :class:`~tornado.concurrent.Future`, execution
         will not proceed until the Future has completed.
 
+        :raises: :exc:`rejected.consumer.ConsumerException`
+        :raises: :exc:`rejected.consumer.MessageException`
+        :raises: :exc:`rejected.consumer.ProcessingException`
+
         """
         pass
 
     def process(self):
-        """Extend this method for implementing your Consumer logic.
+        """Implement this method for the primary, top-level message processing
+        logic for your consumer.
 
         If the message can not be processed and the Consumer should stop after
-        n failures to process messages, raise the
+        ``N`` failures to process messages, raise the
         :exc:`~rejected.consumer.ConsumerException`.
 
         .. note:: Asynchronous support: Decorate this method with
@@ -258,306 +283,48 @@ class Consumer(object):
         not produce any output, as it is called after all processing has
         taken place.
 
-        If an exception is raised during the processing of a message,
-        :meth:`~rejected.consumer.Consumer.prepare` is not invoked.
+        If any exception is raised during the processing of a message,
+        :meth:`~rejected.consumer.Consumer.on_finish` is not called.
 
         .. note:: Asynchronous support: Decorate this method with
             :func:`tornado.gen.coroutine` to make it asynchronous.
 
         """
-        self.logger.debug('on_finished invoked')
+        pass
 
-    def on_blocked(self, name):
+    def on_blocked(self, name):  # pragma: nocover
         """Called when a connection for this consumer is blocked.
 
-        Override this method to respond to being blocked.
+        Implement this method to respond to being blocked.
 
         .. versionadded:: 3.17
 
         :param str name: The connection name that is blocked
 
         """
-        self.logger.debug('Connection %s has been blocked', name)
+        pass
 
-    def on_unblocked(self, name):
+    def on_unblocked(self, name):  # pragma: nocover
         """Called when a connection for this consumer is unblocked.
 
-        Override this method to respond to being blocked.
+        Implement this method to respond to being blocked.
 
         .. versionadded:: 3.17
 
         :param str name: The connection name that is blocked
 
         """
-        self.logger.debug('Connection %s has been unblocked', name)
+        pass
 
-    def shutdown(self):
-        """Override to cleanly shutdown when rejected is stopping the consumer.
+    def shutdown(self):  # pragma: nocover
+        """Implement to cleanly shutdown your application code when rejected is
+        stopping the consumer.
 
         This could be used for closing database connections or other such
         activities.
 
         """
-        self.logger.debug('shutdown invoked')
-
-    """Utility Methods for use by Consumer Code"""
-
-    def finish(self):
-        """Finishes message processing for the current message. If this is
-        called in :meth:`~rejected.consumer.Consumer.prepare`, the
-        :meth:`~rejected.consumer.Consumer.process` method is not invoked
-        for the current message.
-
-        """
-        if self._finished:
-            self.logger.warning('Finished called when already finished')
-            return
-        self._finished = True
-        self.on_finish()
-
-    def publish_message(self, exchange, routing_key, properties, body,
-                        channel=None):
-        """Publish a message to RabbitMQ on the same channel the original
-        message was received on.
-
-        :param str exchange: The exchange to publish to
-        :param str routing_key: The routing key to publish with
-        :param dict properties: The message properties
-        :param str body: The message body
-        :param str channel: The channel/connection name to use. If it is not
-            specified, the channel that the message was delivered on is used.
-
-        """
-        self.logger.debug('Publishing message to %s:%s (%s)',
-                          exchange, routing_key, channel)
-        with self._measurement.track_duration(
-                'publish.{}.{}'.format(exchange, routing_key)):
-            self._publish_channel(channel).basic_publish(
-                exchange=exchange,
-                routing_key=routing_key,
-                properties=self._get_pika_properties(properties),
-                body=body)
-
-    def reply(self, response_body, properties,
-              auto_id=True,
-              exchange=None,
-              reply_to=None):
-        """Reply to the received message.
-
-        If ``auto_id`` is :data:`True`, a new UUIDv4 value will be generated
-        for the ``message_id`` AMQP message property. The ``correlation_id``
-        AMQP message property will be set to the ``message_id`` of the
-        original message. In addition, the ``timestamp`` will be assigned the
-        current time of the message. If ``auto_id`` is :data:`False`, neither
-        the ``message_id`` and the ``correlation_id`` AMQP properties will be
-        changed in the properties.
-
-        If ``exchange`` is not set, the exchange the message was received on
-        will be used.
-
-        If ``reply_to`` is set in the original properties,
-        it will be used as the routing key. If the ``reply_to`` is not set
-        in the properties and it is not passed in, a :exc:`ValueError` will be
-        raised. If reply to is set in the properties, it will be cleared out
-        prior to the message being republished.
-
-        :param any response_body: The message body to send
-        :param properties: Message properties to use
-        :type properties: :class:`rejected.data.Properties`
-        :param bool auto_id: Automatically shuffle ``message_id`` &
-            ``correlation_id``
-        :param str exchange: Override the exchange to publish to
-        :param str reply_to: Override the ``reply_to`` AMQP property
-        :raises: :exc:`ValueError`
-
-        """
-        if not properties.reply_to and not reply_to:
-            raise ValueError('Missing reply_to in properties or as argument')
-
-        if auto_id and properties.message_id:
-            properties.app_id = __name__
-            properties.correlation_id = properties.message_id
-            properties.message_id = str(uuid.uuid4())
-            properties.timestamp = int(time.time())
-            self.logger.debug('New message_id: %s', properties.message_id)
-            self.logger.debug('Correlation_id: %s', properties.correlation_id)
-
-        # Redefine the reply to if needed
-        reply_to = reply_to or properties.reply_to
-
-        # Wipe out reply_to if it's set
-        if properties.reply_to:
-            properties.reply_to = None
-
-        self.publish_message(exchange or self._message.exchange, reply_to,
-                             dict(properties), response_body)
-
-    def send_exception_to_sentry(self, exc_info):
-        """Send an exception to Sentry if enabled.
-
-        :param tuple exc_info: exception information as returned from
-            :func:`sys.exc_info`
-
-        """
-        self._process.send_exception_to_sentry(exc_info)
-
-    def set_sentry_context(self, tag, value):
-        """Set a context tag in Sentry for the given key and value.
-
-        :param str tag: The context tag name
-        :param str value: The context value
-
-        """
-        if self.sentry_client:
-            self.logger.debug(
-                'Setting sentry context for %s to %s', tag, value)
-            self.sentry_client.tags_context({tag: value})
-
-    def stats_add_duration(self, key, duration):
-        """Add a duration to the per-message measurements
-
-        .. versionadded:: 3.19.0
-
-        :param str key: The key to add the timing to
-        :param int|float duration: The timing value in seconds
-
-        """
-        if not self._measurement:
-            LOGGER.warning('stats_add_timing invoked outside execution')
-            return
-        self._measurement.add_duration(key, duration)
-
-    def stats_add_timing(self, key, duration):
-        """Add a timing to the per-message measurements
-
-        .. versionadded:: 3.13.0
-        .. deprecated:: 3.19.0
-
-        :param str key: The key to add the timing to
-        :param int|float duration: The timing value in seconds
-
-        """
-        warnings.warn('Deprecated, use Consumer.stats_add_duration',
-                      DeprecationWarning)
-        self.stats_add_duration(key, duration)
-
-    def statsd_add_timing(self, key, duration):
-        """Add a timing to the per-message measurements
-
-        :param str key: The key to add the timing to
-        :param int|float duration: The timing value in seconds
-
-        .. deprecated:: 3.13.0
-
-        """
-        warnings.warn('Deprecated, use Consumer.stats_add_duration',
-                      DeprecationWarning)
-        self.stats_add_duration(key, duration)
-
-    def stats_incr(self, key, value=1):
-        """Increment the specified key in the per-message measurements
-
-        .. versionadded:: 3.13.0
-
-        :param str key: The key to increment
-        :param int value: The value to increment the key by
-
-        """
-        if not self._measurement:
-            LOGGER.warning('stats_incr invoked outside execution')
-            return
-        self._measurement.incr(key, value)
-
-    def statsd_incr(self, key, value=1):
-        """Increment the specified key in the per-message measurements
-
-        :param str key: The key to increment
-        :param int value: The value to increment the key by
-
-        .. deprecated:: 3.13.0
-
-        """
-        warnings.warn('Deprecated, use Consumer.stats_incr',
-                      DeprecationWarning)
-        self.stats_incr(key, value)
-
-    def stats_set_tag(self, key, value=1):
-        """Set the specified tag/value in the per-message measurements
-
-        .. versionadded:: 3.13.0
-
-        :param str key: The key to increment
-        :param int value: The value to increment the key by
-
-        """
-        if not self._measurement:
-            LOGGER.warning('stats_set_tag invoked outside execution')
-            return
-        self._measurement.set_tag(key, value)
-
-    def stats_set_value(self, key, value=1):
-        """Set the specified key/value in the per-message measurements
-
-        .. versionadded:: 3.13.0
-
-        :param str key: The key to increment
-        :param int value: The value to increment the key by
-
-        """
-        if not self._measurement:
-            LOGGER.warning('stats_set_value invoked outside execution')
-            return
-        self._measurement.set_value(key, value)
-
-    @contextlib.contextmanager
-    def stats_track_duration(self, key):
-        """Time around a context and add to the the per-message measurements
-
-        .. versionadded:: 3.13.0
-        .. deprecated:: 3.19.0
-
-        :param str key: The key for the timing to track
-
-        """
-        start_time = time.time()
-        try:
-            yield
-        finally:
-            self.stats_add_duration(
-                key, max(start_time, time.time()) - start_time)
-
-    def statsd_track_duration(self, key):
-        """Time around a context and add to the the per-message measurements
-
-        :param str key: The key for the timing to track
-
-        .. deprecated:: 3.13.0
-
-        """
-        warnings.warn('Deprecated, use Consumer.stats_track_duration',
-                      DeprecationWarning)
-        return self.stats_track_duration(key)
-
-    def unset_sentry_context(self, tag):
-        """Remove a context tag from sentry
-
-        :param str tag: The context tag to remove
-
-        """
-        if self.sentry_client:
-            self.sentry_client.tags.pop(tag, None)
-
-    @gen.coroutine
-    def yield_to_ioloop(self):
-        """Function that will allow Rejected to process IOLoop events while
-        in a tight-loop inside an asynchronous consumer.
-
-        """
-        try:
-            yield self._yield_condition.wait(
-                self._message.channel.connection.ioloop.time() + 0.001)
-        except gen.TimeoutError:
-            pass
+        pass
 
     """Quick-access properties"""
 
@@ -658,6 +425,18 @@ class Consumer(object):
         return self._message.properties.headers or dict()
 
     @property
+    def is_finished(self):
+        """Returns a boolean indicating if the consumer has finished processing
+        the current message.
+
+        .. versionadded:: 4.0.0
+
+        :rtype: bool
+
+        """
+        return self._finished
+
+    @property
     def io_loop(self):
         """Access the :py:class:`tornado.ioloop.IOLoop` instance for the
         current message.
@@ -680,6 +459,18 @@ class Consumer(object):
         if not self._message:
             return None
         return self._message.properties.message_id
+
+    @property
+    def measurement(self):
+        """Access the current message's :class:`rejected.data.Measurement`
+        instance.
+
+        .. versionadded:: 4.0.0
+
+        :rtype: rejected.data.Measurement
+
+        """
+        return self._measurement
 
     @property
     def name(self):
@@ -736,20 +527,6 @@ class Consumer(object):
         if not self._message:
             return None
         return self._message.properties.reply_to
-
-    @property
-    def returned(self):
-        """Indicates if the message was delivered by consumer previously and
-        returned from RabbitMQ.
-
-        .. versionadded:: 3.17
-
-        :rtype: bool
-
-        """
-        if not self._message:
-            return None
-        return self._message.redelivered
 
     @property
     def routing_key(self):
@@ -823,6 +600,306 @@ class Consumer(object):
             return None
         return self._message.properties.user_id
 
+    """Utility Methods for use by Consumer Code"""
+
+    def require_setting(self, name, feature='this feature'):
+        """Raises an exception if the given app setting is not defined.
+
+        As a generalization, this method should called from a Consumer's
+        :py:meth:`~rejected.consumer.Consumer.initialize` method. If a required
+        setting is not found, this method will cause the
+        consumer to shutdown prior to receiving any messages from RabbitMQ.
+
+        :param str name: The parameter name
+        :param str feature: A friendly name for the setting feature
+        :raises: rejected.consumer.ConfigurationException
+
+        """
+        if name not in self.settings:
+            raise ConfigurationException(
+                "You must define the '{}' setting in your "
+                "application to use {}".format(name, feature))
+
+    def finish(self):
+        """Finishes message processing for the current message. If this is
+        called in :meth:`~rejected.consumer.Consumer.prepare`, the
+        :meth:`~rejected.consumer.Consumer.process` method is not invoked
+        for the current message.
+
+        """
+        if self._finished:
+            self.logger.warning('Finished called when already finished')
+            return
+        self._finished = True
+        self.on_finish()
+
+    def publish_message(self, exchange, routing_key, properties, body,
+                        channel=None, connection=None):
+        """Publish a message to RabbitMQ on the same channel the original
+        message was received on.
+
+        .. versionchanged:: 4.0.0
+           The method returns a :py:class:`~tornado.concurrent.Future` if
+           `publisher confirmations <https://www.rabbitmq.com/confirms.html>`_
+           are enabled on for the connection. In addition, The ``channel``
+           parameter is deprecated and will be removed in a future release.
+
+        :param str exchange: The exchange to publish to
+        :param str routing_key: The routing key to publish with
+        :param dict properties: The message properties
+        :param str body: The message body
+        :param str channel: **Deprecated in 4.0.0** Specify the connection
+            parameter instead.
+        :param str connection: The connection to use. If it is not
+            specified, the channel that the message was delivered on is used.
+        :rtype: tornado.concurrent.Future or None
+
+        """
+        conn = self._publish_connection(channel or connection)
+        self.logger.debug('Publishing message to %s:%s (%s)',
+                          exchange, routing_key, conn.name)
+
+        with self._measurement.track_duration(
+                'publish.{}.{}'.format(exchange, routing_key)):
+            conn.channel.basic_publish(
+                exchange=exchange,
+                routing_key=routing_key,
+                properties=self._get_pika_properties(properties),
+                body=body,
+                mandatory=conn.publisher_confirmations)
+            return self._delivery_confirmation_future(conn.name)
+
+    def rpc_reply(self, body, properties=None, exchange=None, reply_to=None,
+                  connection=None):
+        """Reply to the message that is currently being processed.
+
+        If the exchange is not specified, the exchange of the message that is
+        currently being processed by the Consumer will be used.
+
+        If ``reply_to`` is not provided, it will attempt to use the
+        ``reply_to`` property of the message that is currently being processed
+        by the consumer. If both are not set, a :exc:`ValueError` is raised.
+
+        If any of the following message properties are not provided, they will
+        automatically be assigned:
+
+          - ``app_id``
+          - ``correlation_id``
+          - ``message_id``
+          - ``timestamp``
+
+        The ``correlation_id`` will only be automatically assigned if the
+        original message provided a ``message_id``.
+
+        If the connection that the message is being published on has publisher
+        confirmations enabled, a :py:class:`~tornado.concurrent.Future` is
+        returned.
+
+        :param bytes body: The message body
+        :param properties: The AMQP properties to use for the reply message
+        :type properties: dict or None
+        :param exchange: The exchange to publish to. Defaults to the exchange
+            of the message that is currently being processed by the Consumer.
+        :type exchange: str or None
+        :param reply_to: The routing key to send the reply to. Defaults to the
+            reply_to property of the message that is currently being processed
+            by the Consumer. If neither are set, a :exc:`ValueError` is
+            raised.
+        :type reply_to: str or None
+        :param str connection: The connection to use. If it is not
+            specified, the channel that the message was delivered on is used.
+        :rtype: tornado.concurrent.Future or None
+        :raises: ValueError
+
+        .. versionadded:: 4.0.0
+
+        """
+        if reply_to is None and self.reply_to is None:
+            raise ValueError('Missing reply_to routing key')
+        properties = properties or {}
+        if not properties.get('app_id'):
+            properties['app_id'] = self.name
+        if not properties.get('correlation_id') and self.message_id:
+            properties['correlation_id'] = self.message_id
+        if not properties.get('message_id'):
+            properties['message_id'] = str(uuid.uuid4())
+        if not properties.get('timestamp'):
+            properties['timestamp'] = int(time.time())
+        return self.publish_message(exchange or self.exchange,
+                                    reply_to or self.reply_to,
+                                    properties, body, connection)
+
+    def send_exception_to_sentry(self, exc_info):
+        """Send an exception to Sentry if enabled.
+
+        :param tuple exc_info: exception information as returned from
+            :func:`sys.exc_info`
+
+        """
+        self._process.send_exception_to_sentry(exc_info)
+
+    def set_sentry_context(self, tag, value):
+        """Set a context tag in Sentry for the given key and value.
+
+        :param str tag: The context tag name
+        :param str value: The context value
+
+        """
+        if self.sentry_client:
+            self.logger.debug(
+                'Setting sentry context for %s to %s', tag, value)
+            self.sentry_client.tags_context({tag: value})
+
+    def stats_add_duration(self, key, duration):
+        """Add a duration to the per-message measurements
+
+        .. note:: If this method is called when there is not a message being
+            processed, a message will be logged at the ``warning`` level to
+            indicate the value is being dropped. To suppress these warnings,
+            set the :attr:`rejected.consumer.Consumer.IGNORE_OOB_STATS`
+            attribute to `True`.
+
+        .. versionadded:: 3.19.0
+
+        :param str key: The key to add the timing to
+        :param int|float duration: The timing value in seconds
+
+        """
+        if not self._measurement:
+            if not self.IGNORE_OOB_STATS:
+                self.logger.warning(
+                    'stats_add_timing invoked outside execution')
+            return
+        self._measurement.add_duration(key, duration)
+
+    def stats_incr(self, key, value=1):
+        """Increment the specified key in the per-message measurements
+
+
+        .. note:: If this method is called when there is not a message being
+            processed, a message will be logged at the ``warning`` level to
+            indicate the value is being dropped. To suppress these warnings,
+            set the :attr:`rejected.consumer.Consumer.IGNORE_OOB_STATS`
+            attribute to `True`.
+
+        .. versionadded:: 3.13.0
+
+        :param str key: The key to increment
+        :param int value: The value to increment the key by
+
+        """
+        if not self._measurement:
+            if not self.IGNORE_OOB_STATS:
+                self.logger.warning('stats_incr invoked outside execution')
+            return
+        self._measurement.incr(key, value)
+
+    def stats_set_tag(self, key, value=1):
+        """Set the specified tag/value in the per-message measurements
+
+        .. note:: If this method is called when there is not a message being
+            processed, a message will be logged at the ``warning`` level to
+            indicate the value is being dropped. To suppress these warnings,
+            set the :attr:`rejected.consumer.Consumer.IGNORE_OOB_STATS`
+            attribute to `True`.
+
+        .. versionadded:: 3.13.0
+
+        :param str key: The key to increment
+        :param int value: The value to increment the key by
+
+        """
+        if not self._measurement:
+            if not self.IGNORE_OOB_STATS:
+                self.logger.warning('stats_set_tag invoked outside execution')
+            return
+        self._measurement.set_tag(key, value)
+
+    def stats_set_value(self, key, value=1):
+        """Set the specified key/value in the per-message measurements
+
+        .. note:: If this method is called when there is not a message being
+            processed, a message will be logged at the ``warning`` level to
+            indicate the value is being dropped. To suppress these warnings,
+            set the :attr:`rejected.consumer.Consumer.IGNORE_OOB_STATS`
+            attribute to `True`.
+
+        .. versionadded:: 3.13.0
+
+        :param str key: The key to increment
+        :param int value: The value to increment the key by
+
+        """
+        if not self._measurement:
+            if not self.IGNORE_OOB_STATS:
+                self.logger.warning('stats_set_value invoked outside execution')
+            return
+        self._measurement.set_value(key, value)
+
+    @contextlib.contextmanager
+    def stats_track_duration(self, key):
+        """Time around a context and add to the the per-message measurements
+
+        .. note:: If this method is called when there is not a message being
+            processed, a message will be logged at the ``warning`` level to
+            indicate the value is being dropped. To suppress these warnings,
+            set the :attr:`rejected.consumer.Consumer.IGNORE_OOB_STATS`
+            attribute to `True`.
+
+
+    .. code-block:: python
+       :caption: Example Usage
+
+       class Test(consumer.Consumer):
+
+           @gen.coroutine
+           def process(self):
+               with self.stats_track_duration('track-time'):
+                   yield self._time_consuming_function()
+
+        .. versionadded:: 3.19.0
+
+        :param str key: The key for the timing to track
+
+        """
+        start_time = time.time()
+        try:
+            yield
+        finally:
+            self.stats_add_duration(
+                key, max(start_time, time.time()) - start_time)
+
+    def unset_sentry_context(self, tag):
+        """Remove a context tag from sentry
+
+        :param str tag: The context tag to remove
+
+        """
+        if self.sentry_client:
+            self.sentry_client.tags.pop(tag, None)
+
+    @gen.coroutine
+    def yield_to_ioloop(self):
+        """Function that will allow Rejected to process IOLoop events while
+        in a tight-loop inside an asynchronous consumer.
+
+    .. code-block:: python
+       :caption: Example Usage
+
+       class Consumer(consumer.Consumer):
+
+           @gen.coroutine
+           def process(self):
+               for iteration in range(0, 1000000):
+                   yield self.yield_to_ioloop()
+
+        """
+        try:
+            yield self._yield_condition.wait(
+                self._message.channel.connection.ioloop.time() + 0.001)
+        except gen.TimeoutError:
+            pass
+
     """Internal Methods"""
 
     @gen.coroutine
@@ -839,7 +916,7 @@ class Consumer(object):
         :rtype: bool
 
         """
-        LOGGER.debug('Received: %r', message_in)
+        self.logger.debug('Received: %r', message_in)
         self._clear()
         self._message = message_in
         self._measurement = measurement
@@ -946,9 +1023,9 @@ class Consumer(object):
             raise gen.Return(data.PROCESSING_EXCEPTION)
 
         except NotImplementedError as error:
-            self.log_exception('NotImplementedError processing delivery'
-                               ' %s: %s', message_in.delivery_tag, error)
-            self._measurement.set_tag('exception', 'UnhandledException')
+            self._log_exception('NotImplementedError processing delivery'
+                                ' %s: %s', message_in.delivery_tag, error)
+            self._measurement.set_tag('exception', 'NotImplementedError')
             raise gen.Return(data.UNHANDLED_EXCEPTION)
 
         except Exception as error:
@@ -956,18 +1033,102 @@ class Consumer(object):
             if concurrent.is_future(result):
                 error = result.exception()
                 exc_info = result.exc_info()
-            self.log_exception('Exception processing delivery %s: %s',
-                               message_in.delivery_tag, error,
-                               exc_info=exc_info)
+            self._log_exception('Exception processing delivery %s: %s',
+                                message_in.delivery_tag, error,
+                                exc_info=exc_info)
             self._measurement.set_tag('exception', 'UnhandledException')
             raise gen.Return(data.UNHANDLED_EXCEPTION)
 
         if not self._finished:
             self.finish()
+
+        # Clean up any pending futures
+        for name in self._connections.keys():
+            self._connections[name].clear_confirmation_futures()
+
         self.logger.debug('Post finish')
         raise gen.Return(data.MESSAGE_ACK)
 
-    def log_exception(self, msg_format, *args, **kwargs):
+    def remove_connection(self, name):
+        """Remove the connection from the available connections for
+        publishing.
+
+        This for internal use and should not be extended or used directly.
+
+        :param str name: The connection name
+
+        """
+        del self._connections[name]
+
+    def set_connection(self, connection):
+        """Assign the connection to the Consumer so that it may be used
+        when requested.
+
+        This for internal use and should not be extended or used directly.
+
+        :param connection: The connection to assign
+        :type connection  :class:`~rejected.process.Connection`
+
+        """
+        self._connections[connection.name] = connection
+
+    @property
+    def _channel(self):
+        """Return the channel of the message that is currently being processed.
+
+        :rtype: :class:`pika.channel.Channel`
+
+        """
+        if not self._message:
+            return None
+        return self._message.channel
+
+    def _clear(self):
+        """Resets all assigned data for the current message."""
+        self._finished = False
+        self._message = None
+        self._message_body = None
+
+    def _delivery_confirmation_future(self, name):
+        """Return a future for the connection's delivery so that
+        consumers can wait on the publisher confirmation.
+
+        Two internal dicts are used for keeping track of state.
+        Consumer._delivery_tags is a dict of connection names that keeps
+        the last delivery tag expectation and is used to correlate the future
+        with the delivery tag that is expected to be confirmed from RabbitMQ.
+
+        The Consumer._confirmation_futures attribute is a dictionary of
+        connection names with each connection name in the dict having a
+        dict of expected delivery tags and their associated futures.
+
+        This for internal use and should not be extended or used directly.
+
+        :param str name: The connection name for the future
+        :rtype: concurrent.Future.
+
+        """
+        if self._connections[name].publisher_confirmations:
+            future = concurrent.Future()
+            self._connections[name].add_confirmation_future(future)
+            return future
+
+    @staticmethod
+    def _get_pika_properties(properties_in):
+        """Return a :class:`pika.spec.BasicProperties` object for a
+        :class:`rejected.data.Properties` object.
+
+        :param dict properties_in: Properties to convert
+        :rtype: :class:`pika.spec.BasicProperties`
+
+        """
+        properties = pika.BasicProperties()
+        for key in properties_in or {}:
+            if properties_in.get(key) is not None:
+                setattr(properties, key, properties_in.get(key))
+        return properties
+
+    def _log_exception(self, msg_format, *args, **kwargs):
         """Customize the logging of uncaught exceptions.
 
         :param str msg_format: format of msg to log with ``self.logger.error``
@@ -993,89 +1154,18 @@ class Consumer(object):
                                   exc_value, exc_info=exc_info)
         self._process.send_exception_to_sentry(exc_info)
 
-    def on_confirmation(self, name, delivered, delivery_tag):
-        """Called when a message is confirmed by RabbitMQ.
-
-        This for internal use and should not be extended or used directly.
-
-        .. todo:: integrate this with message publishing
-
-        :param str name: The RabbitMQ connection that confirmed the delivery
-        :param bool delivered: Was the message was successfully delivered
-        :param str delivery_tag: The delivery tag for the message
-
-        """
-        pass
-
-    def require_setting(self, name, feature='this feature'):
-        """Raises an exception if the given app setting is not defined.
-
-        This for internal use and should not be extended or used directly.
-
-        :param str name: The parameter name
-        :param str feature: A friendly name for the setting feature
-
-        """
-        if name not in self.settings:
-            raise Exception("You must define the '%s' setting in your "
-                            "application to use %s" % (name, feature))
-
-    def set_channel(self, name, channel):
-        """Assign the _channel attribute to the channel that was passed in.
-
-        This for internal use and should not be extended or used directly.
-
-        :param str name: The channel connection name
-        :param channel: The channel to assign
-        :type channel: :class:`pika.channel.Channel`
-
-        """
-        self._channels[name] = channel
-
-    @property
-    def _channel(self):
-        """Return the channel of the message that is currently being processed.
-
-        :rtype: :class:`pika.channel.Channel`
-
-        """
-        if not self._message:
-            return None
-        return self._message.channel
-
-    def _clear(self):
-        """Resets all assigned data for the current message."""
-        self._finished = False
-        self._message = None
-        self._message_body = None
-
-    @staticmethod
-    def _get_pika_properties(properties_in):
-        """Return a :class:`pika.spec.BasicProperties` object for a
-        :class:`rejected.data.Properties` object.
-
-        :param dict properties_in: Properties to convert
-        :rtype: :class:`pika.spec.BasicProperties`
-
-        """
-        properties = pika.BasicProperties()
-        for key in properties_in or {}:
-            if properties_in.get(key) is not None:
-                setattr(properties, key, properties_in.get(key))
-        return properties
-
-    def _publish_channel(self, name=None):
-        """Return the channel to publish onm optionally specifying the channel
-        name to use.
+    def _publish_connection(self, name=None):
+        """Return the connection to publish. If the name is not specified,
+        the connection associated with the current message is returned.
 
         :param str name:
-        :rtype: pika.channel.Channel
+        :rtype: rejected.process.Connection
 
         """
         if not name:
-            return self._message.channel
+            return self._connections[self._message.connection]
         try:
-            return self._channels[name]
+            return self._connections[name]
         except KeyError:
             raise ValueError('Channel {} not found'.format(name))
 
@@ -1139,18 +1229,6 @@ class Consumer(object):
             pika.BasicProperties(**properties))
 
 
-class PublishingConsumer(Consumer):
-    """Deprecated, functionality moved to :class:`rejected.consumer.Consumer`
-
-    .. deprecated:: 3.17.0
-
-    """
-    def __init__(self, *args, **kwargs):
-        warnings.warn('PublishingConsumer deprecated, all functionality moved'
-                      'to Consumer', category=DeprecationWarning)
-        super(PublishingConsumer, self).__init__(*args, **kwargs)
-
-
 class SmartConsumer(Consumer):
     """Base class to ease the implementation of strongly typed message
     consumers that validate and automatically decode and deserialize the
@@ -1195,22 +1273,28 @@ class SmartConsumer(Consumer):
     def publish_message(self, exchange, routing_key, properties, body,
                         no_serialization=False,
                         no_encoding=False,
-                        channel=None):
+                        channel=None, connection=None):
         """Publish a message to RabbitMQ on the same channel the original
         message was received on.
 
         By default, if you pass a non-string object to the body and the
-        properties have a supported content-type set, the body will be
-        auto-serialized in the specified content-type.
+        properties have a supported ``content_type`` set, the body will be
+        auto-serialized in the specified ``content_type``.
 
         If the properties do not have a timestamp set, it will be set to the
         current time.
 
-        If you specify a content-encoding in the properties and the encoding is
-        supported, the body will be auto-encoded.
+        If you specify a ``content_encoding`` in the properties and the
+        encoding is supported, the body will be auto-encoded.
 
-        Both of these behaviors can be disabled by setting no_serialization or
-        no_encoding to True.
+        Both of these behaviors can be disabled by setting
+        ``no_serialization`` or ``no_encoding`` to ``True``.
+
+        .. versionchanged:: 4.0.0
+           The method returns a :py:class:`~tornado.concurrent.Future` if
+           `publisher confirmations <https://www.rabbitmq.com/confirms.html>`_
+           are enabled on for the connection. In addition, The ``channel``
+           parameter is deprecated and will be removed in a future release.
 
         :param str exchange: The exchange to publish to
         :param str routing_key: The routing key to publish with
@@ -1218,8 +1302,11 @@ class SmartConsumer(Consumer):
         :param mixed body: The message body to publish
         :param bool no_serialization: Turn off auto-serialization of the body
         :param bool no_encoding: Turn off auto-encoding of the body
-        :param str channel: The channel/connection name to use. If it is not
+        :param str channel: **Deprecated in 4.0.0** Specify the connection
+            parameter instead.
+        :param str connection: The connection to use. If it is not
             specified, the channel that the message was delivered on is used.
+        :rtype: tornado.concurrent.Future or None
 
         """
         # Auto-serialize the content if needed
@@ -1236,11 +1323,8 @@ class SmartConsumer(Consumer):
             self.logger.debug('Auto-encoding message body')
             body = self._auto_encode(properties.get('content_encoding'), body)
 
-        # Publish the message
-        self.logger.debug('Publishing message to %s:%s', exchange, routing_key)
-        self._publish_channel(channel).basic_publish(
-            exchange=exchange, routing_key=routing_key,
-            properties=self._get_pika_properties(properties), body=body)
+        return super(SmartConsumer, self).publish_message(
+            exchange, routing_key, properties, body, channel or connection)
 
     @property
     def body(self):
@@ -1578,20 +1662,6 @@ class SmartConsumer(Consumer):
         return yaml.load(value)
 
 
-class SmartPublishingConsumer(SmartConsumer):
-    """Deprecated, functionality moved to
-    :class:`rejected.consumer.SmartConsumer`
-
-        .. deprecated:: 3.17.0
-
-    """
-
-    def __init__(self, *args, **kwargs):
-        warnings.warn('SmartPublishingConsumer deprecated, all functionality '
-                      'moved to SmartConsumer', category=DeprecationWarning)
-        super(SmartPublishingConsumer, self).__init__(*args, **kwargs)
-
-
 class RejectedException(Exception):
     """Base exception for :py:class:`~rejected.consumer.Consumer` related
     exceptions.
@@ -1624,9 +1694,22 @@ class RejectedException(Exception):
         return '{}({})'.format(self.__class__.__name__, str(self))
 
 
+class ConfigurationException(RejectedException):
+    """Raised when :py:meth:`~rejected.consumer.Consumer.require_setting` is
+    invoked and the specified setting was not configured. When raised, the
+    consumer will shutdown.
+
+    .. versionadded:: 4.0.0
+
+    """
+    pass
+
+
 class ConsumerException(RejectedException):
     """May be called when processing a message to indicate a problem that the
     Consumer may be experiencing that should cause it to stop.
+
+    .. versionchanged:: 3.19.0
 
     :param str value: An optional value used in string representation
     :param str metric: An optional value for auto-instrumentation of exceptions
@@ -1639,6 +1722,8 @@ class ConsumerException(RejectedException):
 class MessageException(RejectedException):
     """Invoke when a message should be rejected and not re-queued, but not due
     to a processing error that should cause the consumer to stop.
+
+    .. versionchanged:: 3.19.0
 
     :param str value: An optional value used in string representation
     :param str metric: An optional value for auto-instrumentation of exceptions
@@ -1653,6 +1738,8 @@ class ProcessingException(RejectedException):
     to a processing error that should cause the consumer to stop. This should
     be used for when you want to reject a message which will be republished to
     a retry queue, without anything being stated about the exception.
+
+    .. versionchanged:: 3.19.0
 
     :param str value: An optional value used in string representation
     :param str metric: An optional value for auto-instrumentation of exceptions

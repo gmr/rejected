@@ -109,8 +109,7 @@ class TestMessage(unittest.TestCase):
 
     def setUp(self):
         self.message = data.Message(
-            'mock', mocks.CHANNEL, mocks.METHOD, mocks.PROPERTIES, mocks.BODY,
-            False)
+            'mock', mocks.CHANNEL, mocks.METHOD, mocks.PROPERTIES, mocks.BODY)
 
     def test_body(self):
         self.assertEqual(self.message.body, mocks.BODY)

@@ -76,9 +76,6 @@ class Message(Data):
     | :attr:`redelivered`  | A flag that indicates the message was     |
     |                      | previously delivered by RabbitMQ.         |
     +----------------------+-------------------------------------------+
-    | :attr:`returned`     | A flag that indicates the message was     |
-    |                      | returned by RabbitMQ.                     |
-    +----------------------+-------------------------------------------+
     | :attr:`routing_key`  | The routing key that was used to deliver  |
     |                      | the message.                              |
     +----------------------+-------------------------------------------+
@@ -86,10 +83,9 @@ class Message(Data):
     """
     __slots__ = ['connection', 'channel', 'method', 'properties', 'body',
                  'consumer_tag', 'delivery_tag', 'exchange', 'redelivered',
-                 'routing_key', 'returned']
+                 'routing_key']
 
-    def __init__(self, connection, channel, method, properties, body,
-                 returned=False):
+    def __init__(self, connection, channel, method, properties, body):
         """Initialize a message setting the attributes from the given channel,
         method, header and body.
 
@@ -99,7 +95,6 @@ class Message(Data):
         :param pika.frames.Method method: pika Method Frame object
         :param pika.spec.BasicProperties properties: message properties
         :param str body: Opaque message body
-        :param bool returned: Indicates the message was returned
 
         """
         self.connection = connection
@@ -107,7 +102,6 @@ class Message(Data):
         self.method = method
         self.properties = Properties(properties)
         self.body = copy.copy(body)
-        self.returned = returned
 
         # Map method properties
         self.consumer_tag = method.consumer_tag

@@ -16,7 +16,7 @@ data from the consumer processes and report on it.
 
 Rejected supports Python 2.7 and 3.4+.
 
-|Version| |Status| |Climate| |License|
+|Version| |License|
 
 Features
 --------
@@ -89,11 +89,5 @@ Indices and tables
 .. |Version| image:: https://img.shields.io/pypi/v/rejected.svg?
    :target: https://pypi.python.org/pypi/rejected
 
-.. |Status| image:: https://img.shields.io/travis/gmr/rejected.svg?
-   :target: https://travis-ci.org/gmr/rejected
-
 .. |License| image:: https://img.shields.io/pypi/l/rejected.svg?
    :target: https://rejected.readthedocs.org
-
-.. |Climate| image:: https://img.shields.io/codeclimate/github/gmr/rejected.svg?
-   :target: https://codeclimate.com/github/gmr/rejected

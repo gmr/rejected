@@ -3,13 +3,12 @@ language: python
 python:
   - 2.7
   - pypy
-  - 3.3
   - 3.4
   - 3.5
+  - 3.6
 install:
-  - pip install -r dev-requirements.txt
+  - pip install -r requires/testing.txt
   - python setup.py develop
-  - pip install codecov
 script: nosetests
 after_success:
   - codecov
@@ -20,7 +19,7 @@ deploy:
   provider: pypi
   user: crad
   on:
-    python: 2.7
+    python: 3.5
     tags: true
     all_branches: true
   password:

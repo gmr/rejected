@@ -1,6 +1,28 @@
 Changelog
 =========
 
+4.0.0
+-----
+
+Breaking Changes
+^^^^^^^^^^^^^^^^
+- **REMOVED** `rejected.consumer.Consumer.reply` as it was wonky and problematic
+- **REMOVED** `rejected.consumer.Consumer.statsd_*` functions that have been deprecated since `3.13.0`
+- **REMOVED** `rejected.consumer.PublishingConsumer` as the functionality was merged into :class:`rejected.consumer.Consumer` since `3.17.0`.
+- **REMOVED** `rejected.consumer.SmartPublishingConsumer` as the functionality was merged into :class:`rejected.consumer.SmartConsumer` since `3.17.0`.
+- **CHANGED** When a message is returned from RabbitMQ, it will no longer invoke :meth:`rejected.consumer.Consumer.process`.
+
+Other Changes
+^^^^^^^^^^^^^
+- Documentation cleanup
+- Added :class:`rejected.consumer.Consumer.rpc_reply` as a replacement of `rejected.consumer.Consumer.reply`
+- Refactored publishing with publisher confirmations enabled to return a :class:`~tornado.concurrent.Future` that can be yielded on to wait for confirmations to be returned.
+- Updated :class:`rejected.data.Properties` to allow for keyword arguments
+- Updated and rewritten tests
+- Added :attr:`rejected.consumer.Consumer.IGNORE_OOB_STATS_CALLS` to not log when `rejected.consumer.Consumer.stats_*` calls are made when no message is currently being processed.
+- Added :class:`rejected.log.CorrelationID` and :class:`rejected.log.NoCorrelationID` as a replacement of :class:`rejected.log.CorrelationFilter`
+- Remove extra call to :py:meth:`rejected.consumer.Consumer.initialize` in :py:meth:`rejected.testing.AsyncTestCase._create_consumer`
+
 3.19.5
 ------
 

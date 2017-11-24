@@ -1,5 +1,5 @@
-Rejected Data Objects
-=====================
+Data Classes
+============
 
 .. automodule:: rejected.data
    :members:

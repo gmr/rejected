@@ -26,42 +26,38 @@ Features
 - Metrics logging and submission to statsd and InfluxDB
 - Built-in profiling of consumer code
 - Ability to write asynchronous code in consumers allowing for parallel communication with external resources
-
-Installation
-------------
-rejected is available from the `Python Package Index <https://preview-pypi.python.org/project/rejected/>`_
-and can be installed by running :command:`pip install rejected`.
-
-For additional dependencies for optional features:
-
-  - To install HTML support, run :command:`pip install rejected[html]`
-  - To install InfluxDB support, run :command:`pip install rejected[influxdb]`
-  - To install MessagePack support, run :command:`pip install rejected[msgpack]`
-  - To install Sentry support, run :command:`pip install rejected[sentry]`
-  - For testing, including all dependencies, run :command:`pip install rejected[testing]`
-
+- Testing framework to ease testing of consumer applications
 
 Getting Started
 ---------------
 
 .. toctree::
-   :glob:
-   :maxdepth: 2
+   :maxdepth: 1
 
-   consumer_howto
+   installation
+   consumers
+   testing
+
+Configuration and Usage
+-----------------------
+
+.. toctree::
+   :maxdepth: 1
+
    configuration
    example_config
    cli
 
-API Documentation
------------------
+Class Documentation
+-------------------
 
 .. toctree::
-   :glob:
    :maxdepth: 2
 
-   consumer
+   api_consumers
+   api_data
    api_testing
+   api_internal
 
 Issues
 ------
@@ -71,9 +67,16 @@ Source
 ------
 rejected source is available on Github at  `https://github.com/gmr/rejected <https://github.com/gmr/rejected>`_
 
+License
+-------
+rejected is released under the `BSD 3-clause License <https://github.com/gmr/rejected/blob/master/LICENSE>`_
+
 Version History
 ---------------
-See :doc:`history`
+.. toctree::
+   :maxdepth: 1
+
+   history
 
 Indices and tables
 ------------------

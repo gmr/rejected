@@ -24,27 +24,24 @@ Application:
 
 if __name__ == '__main__':
     connection = BlockingConnection(ConnectionParameters())
-
-    # Open the channel
     channel = connection.channel()
+    channel.exchange_declare(
+        exchange='examples', exchange_type='topic', durable=True)
+    print('Declared the examples exchange')
 
-    channel.exchange_declare(exchange='example', type='topic', durable=True)
-
-    # Declare the queue
-    channel.queue_declare(queue='generated_messages', durable=True,
+    channel.queue_declare(queue='sync_example', durable=True,
                           exclusive=False, auto_delete=False)
+    channel.queue_bind(exchange='examples', queue='sync_example',
+                       routing_key='example.sync')
+    print('Declared and bound sync_example')
 
-    channel.queue_bind(exchange='example', queue='generated_messages',
-                       routing_key='rejected_example')
-
-    channel.queue_declare(queue='consumer_replies', durable=True,
+    channel.queue_declare(queue='async_example', durable=True,
                           exclusive=False, auto_delete=False)
+    channel.queue_bind(exchange='examples', queue='async_example',
+                       routing_key='example.async')
+    print('Declared and bound async_example')
 
-    channel.queue_bind(exchange='example', queue='consumer_replies',
-                       routing_key='rejected_reply')
-
-    # Initialize our timers and loop until external influence stops us
-    for iteration in xrange(0, MESSAGE_COUNT):
+    for iteration in range(0, MESSAGE_COUNT):
         msg_type = random.randint(1, 4)
         if msg_type == 1:
             body = HTML_VALUE % random.randint(1, 32768)
@@ -61,20 +58,30 @@ if __name__ == '__main__':
         else:
             body = 'Plain text value %i' % random.randint(1, 32768)
             content_type = 'text/text'
-
-        properties = BasicProperties(timestamp=int(time.time()),
-                                     app_id=__file__,
+        properties = BasicProperties(app_id=__file__,
                                      user_id='guest',
                                      content_type=content_type,
                                      message_id=str(uuid.uuid4()),
-                                     type='Example message',
-                                     reply_to='rejected_reply',
+                                     timestamp=int(time.time()),
+                                     type='example',
                                      delivery_mode=1)
-
-        # Send the message
-        channel.basic_publish(exchange='example',
-                              routing_key="rejected_example",
+        channel.basic_publish(exchange='examples',
+                              routing_key='example.sync',
                               body=body,
                               properties=properties)
+    print('Published {} messages for the sync example'.format(MESSAGE_COUNT))
+
+    channel.basic_publish(exchange='examples',
+                          routing_key='example.async',
+                          body='async seed message',
+                          properties=BasicProperties(
+                              app_id=__file__,
+                              content_type='basic/plain',
+                              delivery_mode=1,
+                              message_id=str(uuid.uuid4()),
+                              timestamp=int(time.time()),
+                              type='example',
+                              user_id='guest'))
+    print('Published one seed message for the async example')
 
     connection.close()

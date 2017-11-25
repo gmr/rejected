@@ -5,18 +5,10 @@
 
 rejected
 ========
-Rejected is a AMQP consumer daemon and message processing framework. It allows
-for rapid development of message processing consumers by handling all of the
-core functionality of communicating with RabbitMQ and management of consumer
+Rejected is a AMQP consumer daemon and message processing framework for Python 2 and 3.
+It allows for rapid development of consumer applications by handling all of the
+core functionality of communicating with RabbitMQ and management of application
 processes.
-
-Rejected runs as a master process with multiple consumer configurations that are
-each run it an isolated process. It has the ability to collect statistical
-data from the consumer processes and report on it.
-
-Rejected supports Python 2.7 and 3.4+.
-
-|Version| |License|
 
 Features
 --------
@@ -84,10 +76,3 @@ Indices and tables
 * :ref:`genindex`
 * :ref:`modindex`
 * :ref:`search`
-
-
-.. |Version| image:: https://img.shields.io/pypi/v/rejected.svg?
-   :target: https://pypi.python.org/pypi/rejected
-
-.. |License| image:: https://img.shields.io/pypi/l/rejected.svg?
-   :target: https://rejected.readthedocs.org

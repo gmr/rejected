@@ -22,6 +22,8 @@ except ImportError:
 
 from rejected import connection, consumer, data, process
 
+LOGGER = logging.getLogger(__name__)
+
 gen_test = testing.gen_test
 """Add gen_test to rejected.testing's namespace"""
 
@@ -92,6 +94,8 @@ class AsyncTestCase(testing.AsyncTestCase):
         self.channel = self.process.connections['mock'].channel
         self.process.connections['mock'].publisher_confirmations = \
             self.PUBLISHER_CONFIRMATIONS
+        self.process.connections['mock'].set_state(
+            self.process.connections['mock'].STATE_ACTIVE)
         self.publish_callable = None
         self.publish_calls = []
         self.channel.basic_publish.side_effect = self._on_publish
@@ -316,34 +320,46 @@ class AsyncTestCase(testing.AsyncTestCase):
 
     def _create_process(self):
         obj = mock.Mock(spec=process.Process)
-        callbacks = process.Callbacks(obj.on_connection_ready,
-                                      obj.on_connection_failure,
-                                      obj.on_connection_closed,
-                                      obj.on_connection_blocked,
-                                      obj.on_connection_unblocked,
-                                      obj.on_confirmation,
-                                      obj.on_delivery,
-                                      obj.on_returned)
+        callbacks = connection.Callbacks(obj.on_connection_ready,
+                                         obj.on_connection_failure,
+                                         obj.on_connection_closed,
+                                         obj.on_connection_blocked,
+                                         obj.on_connection_unblocked,
+                                         obj.on_confirmation,
+                                         obj.on_delivery)
         obj.connections = {'mock': self._create_connection('mock', callbacks)}
         obj.sentry_client = mock.Mock(spec=raven.Client) if raven else None
         return obj
 
     def _on_publish(self, exchange, routing_key, properties, body, mandatory):
-        method = object()
+        LOGGER.debug('on_publish to %s using %s (pc: %s)',
+                     exchange, routing_key, self.PUBLISHER_CONFIRMATIONS)
         msg = PublishedMessage(exchange, routing_key, properties, body)
-        if self.PUBLISHER_CONFIRMATIONS:
-            method = spec.Basic.Ack
-            msg.delivered = True
+        self.publish_calls.append(msg)
+        error = None
+
         if self.publish_callable:
             try:
                 self.publish_callable(
                     exchange, routing_key, properties, body, mandatory)
-            except UndeliveredMessage:
-                if self.PUBLISHER_CONFIRMATIONS:
-                    method = spec.Basic.Nack
-                    msg.delivered = False
-        self.publish_calls.append(msg)
+            except (UndeliveredMessage, UnroutableMessage) as err:
+                error = err
+                LOGGER.debug('Message side effect is %r', error)
+
         if self.PUBLISHER_CONFIRMATIONS:
+            method = spec.Basic.Ack
+            msg.delivered = True
+            if isinstance(error, UndeliveredMessage):
+                method = spec.Basic.Nack
+                msg.delivered = False
+            elif isinstance(error, UnroutableMessage):
+                msg.delivered = False
+                self.io_loop.add_callback(
+                    self.process.connections['mock'].on_return, 1,
+                    spec.Basic.Return(
+                        312, 'NO ROUTE', exchange, routing_key),
+                    properties,
+                    body)
             self.io_loop.add_callback(
                 self.process.connections['mock'].on_confirmation,
                 frame.Method(1, method(len(self.publish_calls), False)))

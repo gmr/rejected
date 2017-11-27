@@ -1,5 +1,6 @@
 # coding=utf-8
 """Tests for rejected.consumer"""
+import logging
 import unittest
 import uuid
 
@@ -9,6 +10,8 @@ import mock
 from rejected import consumer, connection, process, testing
 
 from . import mocks
+
+LOGGER = logging.getLogger(__name__)
 
 
 class ConsumerInitializationTests(unittest.TestCase):
@@ -225,6 +228,7 @@ class TestConfirmingPublisher(consumer.Consumer):
     @gen.coroutine
     def process(self):
         for iteration in range(0, 3):
+            self.logger.info('Publishing message %i', iteration)
             confirmation = yield self.publish_message(
                 self.settings['exchange'],
                 self.settings['routing_key'],
@@ -261,7 +265,7 @@ class ConfirmingPublishingTests(testing.AsyncTestCase):
         self.assertTrue(all(self.consumer.confirmations))
 
     @testing.gen_test
-    def test_confirmation_error_case(self):
+    def test_confirmation_undelivered_case(self):
         def raise_undelivered(*args, **kwargs):
             raise testing.UndeliveredMessage()
 
@@ -271,10 +275,21 @@ class ConfirmingPublishingTests(testing.AsyncTestCase):
         self.assertFalse(all(self.consumer.confirmations))
 
     @testing.gen_test
+    def test_confirmation_unroutable_case(self):
+        def raise_unroutable(*args, **kwargs):
+            raise testing.UnroutableMessage()
+
+        with self.publishing_side_effect(raise_unroutable):
+            yield self.process_message(self.consumer.settings['body'],
+                                       'text/plain')
+        self.assertFalse(all(self.consumer.confirmations))
+
+    @testing.gen_test
     def test_confirmation_branch_case(self):
         def raise_undelivered(
                 _exchange, _routing_key, properties, _body, _mandatory):
             if properties.type == 'raise':
+                LOGGER.debug('Raising testing.UndeliveredMessage()')
                 raise testing.UndeliveredMessage()
 
         with self.publishing_side_effect(raise_undelivered):

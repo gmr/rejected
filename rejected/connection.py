@@ -4,15 +4,27 @@ Connection
 Class that is used to manage connection and communication state.
 
 """
+import collections
 import logging
 import os
 
 import pika
 from pika import spec
 
-from rejected import state
+from rejected import errors, log, state, utils
 
 LOGGER = logging.getLogger(__name__)
+
+Published = collections.namedtuple(
+    'Published', ['delivery_tag', 'message_id',
+                  'exchange', 'routing_key', 'future'])
+"""Used to keep track of published messages for delivery confirmations"""
+
+
+Callbacks = collections.namedtuple(
+    'callbacks', ['on_ready', 'on_open_error',
+                  'on_closed', 'on_blocked', 'on_unblocked',
+                  'on_confirmation', 'on_delivery'])
 
 
 class Connection(state.State):
@@ -24,6 +36,7 @@ class Connection(state.State):
     """
     HB_INTERVAL = 300
     STATE_CLOSED = 0x08
+    STATE_CONNECTED = 0x09
 
     def __init__(self, name, config, consumer_name, should_consume,
                  publisher_confirmations, io_loop, callbacks):
@@ -31,19 +44,23 @@ class Connection(state.State):
         self.blocked = False
         self.callbacks = callbacks
         self.channel = None
-        self.confirmation_futures = {}
         self.config = config
+        self.correlation_id = None
         self.delivery_tag = 0
         self.should_consume = should_consume
         self.consumer_tag = '{}-{}'.format(consumer_name, os.getpid())
         self.io_loop = io_loop
         self.last_confirmation = 0
+        self.logger = log.CorrelationIDAdapter(LOGGER, {'parent': self})
         self.name = name
+        self.published_messages = []
         self.publisher_confirmations = publisher_confirmations
-        self.handle = self.connect()
+        self.handle = None
+        self.connect()
 
-        # Override STOPPED with CLOSED
+        # Set specific state values
         self.STATES[0x08] = 'CLOSED'
+        self.STATES[0x09] = 'CONNECTED'
 
     @property
     def is_closed(self):
@@ -54,23 +71,39 @@ class Connection(state.State):
         """
         return self.is_stopped
 
-    def add_confirmation_future(self, future):
+    @property
+    def is_connected(self):
+        """Returns ``True`` if the connection is open
+
+        :rtype: bool
+
+        """
+        return self.state in [self.STATE_ACTIVE, self.STATE_CONNECTED]
+
+    def add_confirmation_future(self, exchange, routing_key, properties,
+                                future):
         """Invoked by :class:`~rejected.consumer.Consumer` when publisher
         confirmations are enabled, containing a stack of futures to finish,
         by delivery tag, when RabbitMQ confirms the delivery.
 
+        :param str exchange: The exchange the message was published to
+        :param str routing_key: The routing key that was used
+        :param properties: AMQP message properties of published message
+        :type properties: pika.spec.Basic.Properties
         :param tornado.concurrent.Future future: The future to resolve
 
         """
         self.delivery_tag += 1
-        self.confirmation_futures[self.delivery_tag] = future
+        self.published_messages.append(
+            Published(self.delivery_tag, properties.message_id, exchange,
+                      routing_key, future))
 
     def clear_confirmation_futures(self):
         """Invoked by :class:`~rejected.consumer.Consumer` when process has
         finished and publisher confirmations are enabled.
 
         """
-        self.confirmation_futures = {}
+        self.published_messages = []
 
     def connect(self):
         """Create the low-level AMQP connection to RabbitMQ.
@@ -79,13 +112,21 @@ class Connection(state.State):
 
         """
         self.set_state(self.STATE_CONNECTING)
-        return pika.TornadoConnection(
+        self.handle = pika.TornadoConnection(
             self._connection_parameters,
             on_open_callback=self.on_open,
             on_open_error_callback=self.on_open_error,
-            on_close_callback=self.on_closed,
             stop_ioloop_on_close=False,
             custom_ioloop=self.io_loop)
+
+    def reset(self):
+        self.channel = None
+        self.handle = None
+        self.correlation_id = None
+        self.published_messages = []
+        self.delivery_tag = 0
+        self.last_confirmation = 0
+        self.set_state(self.STATE_CLOSED)
 
     def shutdown(self):
         """Start the connection shutdown process, cancelling any active
@@ -93,15 +134,14 @@ class Connection(state.State):
 
         """
         if self.is_shutting_down:
-            LOGGER.debug('Connection %s is already shutting down', self.name)
+            self.logger.debug('Already shutting down')
             return
 
         self.set_state(self.STATE_SHUTTING_DOWN)
-        LOGGER.debug('Connection %s is shutting down', self.name)
+        self.logger.debug('Shutting down connection')
         if not self.is_active:
             return self.channel.close()
-        LOGGER.debug('Connection %s is sending a Basic.Cancel to RabbitMQ',
-                     self.name)
+        self.logger.debug('Sending a Basic.Cancel to RabbitMQ')
         self.channel.basic_cancel(self.on_consumer_cancelled,
                                   self.consumer_tag)
 
@@ -111,49 +151,50 @@ class Connection(state.State):
         :type _handle: pika.adapters.tornado_connection.TornadoConnection
 
         """
-        LOGGER.debug('Connection %s is open', self.name)
+        self.logger.debug('Connection opened')
         self.handle.channel(self.on_channel_open)
         self.handle.add_on_connection_blocked_callback(self.on_blocked)
         self.handle.add_on_connection_unblocked_callback(self.on_unblocked)
+        self.handle.add_on_close_callback(self.on_closed)
 
     def on_open_error(self, *args, **kwargs):
-        LOGGER.error('Connection %s failure %r %r', self.name, args, kwargs)
+        self.logger.error('Connection failure %r %r', args, kwargs)
         self.set_state(self.STATE_CLOSED)
         self.callbacks.on_open_error(self.name)
 
-    def on_closed(self, _connection, status_code, status_text):
+    def on_closed(self, _connection, reply_code, reply_text):
         self.set_state(self.STATE_CLOSED)
-        LOGGER.debug('Connection %s closed (%s) %s',
-                     self.name, status_code, status_text)
+        self.logger.debug('Connection closed (%s) %s', reply_code, reply_text)
+        self.reset()
         self.callbacks.on_closed(self.name)
 
     def on_blocked(self, frame):
-        LOGGER.warning('Connection %s is blocked: %r', frame)
+        self.logger.warning('Connection blocked: %r', frame)
         self.blocked = True
         self.callbacks.on_blocked(self.name)
 
     def on_unblocked(self, frame):
-        LOGGER.warning('Connection %s is unblocked: %r', frame)
+        self.logger.warning('Connection unblocked: %r', frame)
         self.blocked = False
         self.callbacks.on_unblocked(self.name)
 
     def on_channel_open(self, channel):
         """This method is invoked by pika when the channel has been opened. It
-        will change the state to IDLE, add the callbacks and setup the channel
-        to start consuming.
+        will change the state to CONNECTED, add the callbacks and setup the
+        channel to start consuming.
 
         :param pika.channel.Channel channel: The channel object
 
         """
-        LOGGER.debug('Connection %s channel is now open', self.name)
-        self.set_state(self.STATE_IDLE)
+        self.logger.debug('Channel opened')
+        self.set_state(self.STATE_CONNECTED)
         self.channel = channel
         self.channel.add_on_close_callback(self.on_channel_closed)
         self.channel.add_on_cancel_callback(self.on_consumer_cancelled)
-        self.channel.add_on_return_callback(self.on_return)
         if self.publisher_confirmations:
             self.delivery_tag = 0
             self.channel.confirm_delivery(self.on_confirmation)
+            self.channel.add_on_return_callback(self.on_return)
         self.callbacks.on_ready(self.name)
 
     def on_channel_closed(self, _channel, reply_code, reply_text):
@@ -168,15 +209,25 @@ class Connection(state.State):
         :param str reply_text: The AMQP reply text
 
         """
-        LOGGER.debug('Connection %s channel was closed: (%s) %s',
-                     self.name, reply_code, reply_text)
-        del self.channel
-        if self.is_running:
-            self.set_state(self.STATE_CONNECTING)
-            self.handle.channel(self.on_channel_open)
-        elif self.is_shutting_down:
-            LOGGER.debug('Connection %s closing', self.name)
+        self.logger.warning('Channel was closed: (%s) %s - %s',
+                            reply_code, reply_text, self.state_description)
+        if not (400 <= reply_code <= 499):
+            self.set_state(self.STATE_CLOSED)
+            return
+
+        if self.is_shutting_down:
+            self.logger.debug('Closing connection')
             self.handle.close()
+            return
+
+        self.set_state(self.STATE_CONNECTING)
+        self.handle.channel(self.on_channel_open)
+
+        pending = self.pending_confirmations()
+        if not pending:
+            raise errors.RabbitMQException(self.name, reply_code, reply_text)
+        pending[0][1].future.set_exception(
+                errors.RabbitMQException(self.name, reply_code, reply_text))
 
     def consume(self, queue_name, no_ack, prefetch_count):
         """Consume messages from RabbitMQ, changing the state, QoS and issuing
@@ -189,10 +240,9 @@ class Connection(state.State):
         """
         self.set_state(self.STATE_ACTIVE)
         self.channel.basic_qos(self.on_qos_set, 0, prefetch_count, False)
-        self.channel.basic_consume(consumer_callback=self.on_delivery,
-                                   queue=queue_name,
-                                   no_ack=no_ack,
-                                   consumer_tag=self.consumer_tag)
+        self.channel.basic_consume(
+            consumer_callback=self.on_delivery, queue=queue_name,
+            no_ack=no_ack, consumer_tag=self.consumer_tag)
 
     def on_qos_set(self, frame):
         """Invoked by pika when the QoS is set
@@ -200,7 +250,7 @@ class Connection(state.State):
         :param pika.frame.Frame frame: The QoS Frame
 
         """
-        LOGGER.debug("Connection %s QoS was set: %r", self.name, frame)
+        self.logger.debug('QoS was set: %r', frame)
 
     def on_consumer_cancelled(self, _frame):
         """Invoked by pika when a ``Basic.Cancel`` or ``Basic.CancelOk``
@@ -210,11 +260,11 @@ class Connection(state.State):
         :type _frame: pika.frame.Frame
 
         """
-        LOGGER.debug('Connection %s consumer has been cancelled', self.name)
+        self.logger.debug('Consumer has been cancelled')
         if self.is_shutting_down:
             self.channel.close()
         else:
-            self.set_state(self.STATE_IDLE)
+            self.set_state(self.STATE_CONNECTED)
 
     def on_confirmation(self, frame):
         """Invoked by pika when RabbitMQ responds to a Basic.Publish RPC
@@ -227,8 +277,8 @@ class Connection(state.State):
 
         """
         delivered = frame.method.NAME.split('.')[1].lower() == 'ack'
-        LOGGER.debug('Connection %s received delivery confirmation '
-                     '(Delivered: %s)', self.name, delivered)
+        self.logger.debug('Received publisher confirmation (Delivered: %s)',
+                          delivered)
         if frame.method.multiple:
             for index in range(self.last_confirmation + 1,
                                frame.method.delivery_tag):
@@ -239,16 +289,20 @@ class Connection(state.State):
     def confirm_delivery(self, delivery_tag, delivered):
         """Invoked by RabbitMQ when it is confirming delivery via a Basic.Ack
 
+        :param
         :param int delivery_tag: The message # being confirmed
         :param bool delivered: Was the message delivered
 
         """
-        LOGGER.debug('Confirming delivery of %i: %s', delivery_tag, delivered)
-        try:
-            self.confirmation_futures[delivery_tag].set_result(delivered)
-        except KeyError:
-            LOGGER.warning('Attempted to confirm delivery without future: %r',
-                           delivery_tag)
+        for offset, msg in self.pending_confirmations():
+            if delivery_tag == msg.delivery_tag:
+                self.published_messages[offset].future.set_result(delivered)
+                return
+        for msg in self.published_messages:
+            if msg.delivery_tag == delivery_tag and msg.future.done():
+                return
+        self.logger.warning('Attempted to confirm publish without future: %r',
+                            delivery_tag)
 
     def on_delivery(self, channel, method, properties, body):
         """Invoked by pika when RabbitMQ delivers a message from a queue.
@@ -277,7 +331,43 @@ class Connection(state.State):
         :param bytes body: The message body
 
         """
-        self.callbacks.on_return(self.name, channel, method, properties, body)
+        pending = self.pending_confirmations()
+        if not pending:  # Exit early if there are no pending messages
+            self.logger.warning('RabbitMQ returned message %s and no pending '
+                                'messages are unconfirmed',
+                                utils.message_info(method.exchange,
+                                                   method.routing_key,
+                                                   properties))
+            return
+
+        self.logger.warning('RabbitMQ returned message %s: (%s) %s',
+                            utils.message_info(method.exchange,
+                                               method.routing_key, properties),
+                            method.reply_code, method.reply_text)
+
+        # Try and match the exact message or first message published that
+        # matches the exchange and routing key
+        for offset, msg in pending:
+            if (msg.message_id == properties.message_id or
+                    (msg.exchange == method.exchange and
+                     msg.routing_key == method.routing_key)):
+                self.published_messages[offset].future.set_result(False)
+                return
+
+        # Handle the case where we only can go on message ordering
+        self.published_messages[0].future.set_result(False)
+
+    def pending_confirmations(self):
+        """Return all published messages that have yet to be acked, nacked, or
+        returned.
+
+        :return: [(int, Published)]
+
+        """
+        return sorted([(idx, msg)
+                       for idx, msg in enumerate(self.published_messages)
+                       if not msg.future.done()],
+                      key=lambda x: x[1].delivery_tag)
 
     @property
     def _connection_parameters(self):

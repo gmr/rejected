@@ -36,10 +36,7 @@ from rejected import __version__, connection, data, state, statsd, utils
 
 LOGGER = logging.getLogger(__name__)
 
-Callbacks = collections.namedtuple(
-    'callbacks', ['on_ready', 'on_open_error', 'on_closed', 'on_blocked',
-                  'on_unblocked', 'on_confirmation', 'on_delivery',
-                  'on_return'])
+
 Delivery = collections.namedtuple('Delivery', ['connection', 'message'])
 
 
@@ -56,6 +53,7 @@ class Process(multiprocessing.Process, state.State):
     # Counter constants
     ACKED = 'acked'
     CLOSED_ON_COMPLETE = 'closed_on_complete'
+    CLOSED_ON_START = 'closed_on_start'
     DROPPED = 'dropped'
     ERROR = 'failed'
     FAILURES = 'failures_until_stop'
@@ -69,6 +67,7 @@ class Process(multiprocessing.Process, state.State):
     CONSUMER_EXCEPTION = 'consumer_exception'
     MESSAGE_EXCEPTION = 'message_exception'
     PROCESSING_EXCEPTION = 'processing_exception'
+    RABBITMQ_EXCEPTION = 'rabbitmq_exception'
     UNHANDLED_EXCEPTION = 'unhandled_exception'
 
     QOS_PREFETCH_COUNT = 1
@@ -86,14 +85,14 @@ class Process(multiprocessing.Process, state.State):
             kwargs = {}
         super(Process, self).__init__(group, target, name, args, kwargs)
         self.active_message = None
-        self.callbacks = Callbacks(self.on_connection_ready,
-                                   self.on_connection_failure,
-                                   self.on_connection_closed,
-                                   self.on_connection_blocked,
-                                   self.on_connection_unblocked,
-                                   self.on_confirmation,
-                                   self.on_delivery,
-                                   self.on_returned)
+        self.callbacks = connection.Callbacks(
+            self.on_connection_ready,
+            self.on_connection_failure,
+            self.on_connection_closed,
+            self.on_connection_blocked,
+            self.on_connection_unblocked,
+            self.on_confirmation,
+            self.on_delivery)
         self.connections = {}
         self.consumer = None
         self.consumer_lock = None
@@ -125,11 +124,10 @@ class Process(multiprocessing.Process, state.State):
         :type message: rejected.data.Message
 
         """
-        if not self.connections[message.connection].is_running:
-            LOGGER.warning('Can not ack message, disconnected from RabbitMQ')
+        if message.channel.is_closed:
+            LOGGER.warning('Can not ack message, channel is closed')
             self.counters[self.CLOSED_ON_COMPLETE] += 1
             return
-        LOGGER.debug('Acking %s', message.delivery_tag)
         message.channel.basic_ack(delivery_tag=message.delivery_tag)
         self.counters[self.ACKED] += 1
         self.measurement.set_tag(self.ACKED, True)
@@ -223,6 +221,19 @@ class Process(multiprocessing.Process, state.State):
         # Only allow for a single message to be processed at a time
         with (yield self.consumer_lock.acquire()):
             if self.is_idle:
+                if message.channel.is_closed:
+                    LOGGER.warning('Channel %s is closed on '
+                                   'connection "%s", discarding '
+                                   'local copy of message %s',
+                                   message.channel.channel_number,
+                                   message.connection,
+                                   utils.message_info(message.exchange,
+                                                      message.routing_key,
+                                                      message.properties))
+                    self.counters[self.CLOSED_ON_START] += 1
+                    self.maybe_get_next_message()
+                    return
+
                 self.set_state(self.STATE_PROCESSING)
                 self.delivery_time = start_time = time.time()
                 self.active_message = message
@@ -257,9 +268,7 @@ class Process(multiprocessing.Process, state.State):
                 LOGGER.warning('Exiting invoke_consumer without processing, '
                                'this should not happen. State: %s',
                                self.state_description)
-        if self.pending:
-            self.ioloop.add_callback(
-                self.invoke_consumer, self.pending.popleft())
+            self.maybe_get_next_message()
 
     @property
     def is_processing(self):
@@ -269,6 +278,17 @@ class Process(multiprocessing.Process, state.State):
 
         """
         return self.state in [self.STATE_PROCESSING, self.STATE_STOP_REQUESTED]
+
+    def maybe_get_next_message(self):
+        """Pop the next message on the stack, adding a callback on the IOLoop
+        to invoke the consumer with the message. This is done so we let the
+        IOLoop perform any pending callbacks before trying to process the
+        next message.
+
+        """
+        if self.pending:
+            self.ioloop.add_callback(
+                self.invoke_consumer, self.pending.popleft())
 
     def maybe_submit_measurement(self):
         """Check for configured instrumentation backends and if found, submit
@@ -283,6 +303,7 @@ class Process(multiprocessing.Process, state.State):
     def on_connection_closed(self, name):
         if self.is_running:
             LOGGER.warning('Connection %s was closed, reconnecting', name)
+            self.connections[name].reset()
             return self.connections[name].connect()
 
         ready = all([c.is_closed for c in self.connections.values()])
@@ -300,7 +321,7 @@ class Process(multiprocessing.Process, state.State):
     def on_connection_ready(self, name):
         LOGGER.debug('Connection %s indicated it is ready', name)
         self.consumer.set_connection(self.connections[name])
-        if all([c.is_idle for c in self.connections.values()]):
+        if all([c.is_connected for c in self.connections.values()]):
             for key in self.connections.keys():
                 if self.connections[key].should_consume:
                     self.connections[key].consume(
@@ -341,21 +362,6 @@ class Process(multiprocessing.Process, state.State):
             return self.pending.append(message)
         self.invoke_consumer(message)
 
-    def on_returned(self, name, channel, method, properties, body):
-        """Send a message to the consumer that was returned by RabbitMQ
-
-        :param str name: The connection name
-        :param channel: The channel the message was returned on
-        :type channel: pika.channel.Channel channel:
-        :param pika.frames.MethodFrame method: The method frame
-        :param pika.spec.BasicProperties properties: The message properties
-        :param str body: The message body
-
-        """
-        message = data.Message(name, channel, method, properties, body)
-
-        # @TODO This should do something here
-
     def on_processed(self, message, result, start_time):
         """Invoked after a message is processed by the consumer and
         implements the logic for how to deal with a message based upon
@@ -390,6 +396,11 @@ class Process(multiprocessing.Process, state.State):
             self.reject(message, True)
             self.on_processing_error()
             self.counters[self.CONSUMER_EXCEPTION] += 1
+
+        elif result == data.RABBITMQ_EXCEPTION:
+            LOGGER.debug('Processing interrupted due to RabbitMQException')
+            self.on_processing_error()
+            self.counters[self.RABBITMQ_EXCEPTION] += 1
 
         elif result == data.UNHANDLED_EXCEPTION:
             LOGGER.debug('Re-queueing message due to UnhandledException')
@@ -486,7 +497,7 @@ class Process(multiprocessing.Process, state.State):
         if self.no_ack:
             raise RuntimeError('Can not rejected messages when ack is False')
 
-        if not self.connections[message.connection].is_running:
+        if message.channel.is_closed:
             LOGGER.warning('Can not nack message, disconnected from RabbitMQ')
             self.counters[self.CLOSED_ON_COMPLETE] += 1
             return

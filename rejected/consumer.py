@@ -47,7 +47,7 @@ from pika import exceptions
 from tornado import concurrent, gen, locks
 import yaml
 
-from rejected import data, log
+from rejected import data, errors, log
 
 # Optional imports
 try:
@@ -210,7 +210,7 @@ class Consumer(object):
         # Create a logger that attaches correlation ID to the record
         logger = logging.getLogger(
             kwargs.get('settings').get('_import_module', __name__))
-        self.logger = log.CorrelationIDAdapter(logger, {'consumer': self})
+        self.logger = log.CorrelationIDAdapter(logger, {'parent': self})
 
         # Set a Sentry context for the consumer
         self.set_sentry_context('consumer', self.name)
@@ -636,13 +636,16 @@ class Consumer(object):
     def publish_message(self, exchange, routing_key, properties, body,
                         channel=None, connection=None):
         """Publish a message to RabbitMQ on the same channel the original
-        message was received on.
+        message was received on. If
+        `publisher confirmations <https://www.rabbitmq.com/confirms.html>`_
+        are enabled, the method will return a
+        :class:`~tornado.concurrent.Future` that will resolve a :type:`bool`
+        that indicates if the publishing was successful.
 
         .. versionchanged:: 4.0.0
-           The method returns a :py:class:`~tornado.concurrent.Future` if
-           `publisher confirmations <https://www.rabbitmq.com/confirms.html>`_
-           are enabled on for the connection. In addition, The ``channel``
-           parameter is deprecated and will be removed in a future release.
+           - Return a :class:`~tornado.concurrent.Future` if publisher
+                confirmations are enabled
+           - Deprecated ``channel``
 
         :param str exchange: The exchange to publish to
         :param str routing_key: The routing key to publish with
@@ -658,16 +661,17 @@ class Consumer(object):
         conn = self._publish_connection(channel or connection)
         self.logger.debug('Publishing message to %s:%s (%s)',
                           exchange, routing_key, conn.name)
-
+        basic_properties = self._get_pika_properties(properties)
         with self._measurement.track_duration(
                 'publish.{}.{}'.format(exchange, routing_key)):
             conn.channel.basic_publish(
                 exchange=exchange,
                 routing_key=routing_key,
-                properties=self._get_pika_properties(properties),
+                properties=basic_properties,
                 body=body,
                 mandatory=conn.publisher_confirmations)
-            return self._delivery_confirmation_future(conn.name)
+            return self._publisher_confirmation_future(
+                conn.name, exchange, routing_key, basic_properties)
 
     def rpc_reply(self, body, properties=None, exchange=None, reply_to=None,
                   connection=None):
@@ -934,6 +938,10 @@ class Consumer(object):
             message_in.properties.message_id or \
             str(uuid.uuid4())
 
+        # Set the Correlation ID for the connection for logging
+        self._connections[message_in.connection].correlation_id = \
+            self._correlation_id
+
         if self.message_type:
             self.set_sentry_context('type', self.message_type)
 
@@ -983,17 +991,11 @@ class Consumer(object):
             self._process.stop()
             raise gen.Return(data.MESSAGE_REQUEUE)
 
-        except exceptions.ChannelClosed as error:
-            self.logger.critical('Channel closed while processing %s: %s',
+        except errors.RabbitMQException as error:
+            self.logger.critical('RabbitMQException while processing %s: %s',
                                  message_in.delivery_tag, error)
             self._measurement.set_tag('exception', error.__class__.__name__)
-            raise gen.Return(None)
-
-        except exceptions.ConnectionClosed as error:
-            self.logger.critical('Connection closed while processing %s: %s',
-                                 message_in.delivery_tag, error)
-            self._measurement.set_tag('exception', error.__class__.__name__)
-            raise gen.Return(None)
+            raise gen.Return(data.RABBITMQ_EXCEPTION)
 
         except ConsumerException as error:
             self.logger.error('ConsumerException processing delivery %s: %s',
@@ -1089,30 +1091,6 @@ class Consumer(object):
         self._message = None
         self._message_body = None
 
-    def _delivery_confirmation_future(self, name):
-        """Return a future for the connection's delivery so that
-        consumers can wait on the publisher confirmation.
-
-        Two internal dicts are used for keeping track of state.
-        Consumer._delivery_tags is a dict of connection names that keeps
-        the last delivery tag expectation and is used to correlate the future
-        with the delivery tag that is expected to be confirmed from RabbitMQ.
-
-        The Consumer._confirmation_futures attribute is a dictionary of
-        connection names with each connection name in the dict having a
-        dict of expected delivery tags and their associated futures.
-
-        This for internal use and should not be extended or used directly.
-
-        :param str name: The connection name for the future
-        :rtype: concurrent.Future.
-
-        """
-        if self._connections[name].publisher_confirmations:
-            future = concurrent.Future()
-            self._connections[name].add_confirmation_future(future)
-            return future
-
     @staticmethod
     def _get_pika_properties(properties_in):
         """Return a :class:`pika.spec.BasicProperties` object for a
@@ -1154,6 +1132,32 @@ class Consumer(object):
                                   exc_value, exc_info=exc_info)
         self._process.send_exception_to_sentry(exc_info)
 
+    def _publisher_confirmation_future(self, name, exchange, routing_key,
+                                       properties):
+        """Return a future a publisher confirmation result that enables
+        consumers to block on the confirmation of a published message.
+
+        Two internal dicts are used for keeping track of state.
+        Consumer._delivery_tags is a dict of connection names that keeps
+        the last delivery tag expectation and is used to correlate the future
+        with the delivery tag that is expected to be confirmed from RabbitMQ.
+
+        This for internal use and should not be extended or used directly.
+
+        :param str name: The connection name for the future
+        :param str exchange: The exchange the message was published to
+        :param str routing_key: The routing key that was used
+        :param properties: The AMQP message properties for the delivery
+        :type properties: pika.spec.Basic.Properties
+        :rtype: concurrent.Future.
+
+        """
+        if self._connections[name].publisher_confirmations:
+            future = concurrent.Future()
+            self._connections[name].add_confirmation_future(
+                exchange, routing_key, properties, future)
+            return future
+
     def _publish_connection(self, name=None):
         """Return the connection to publish. If the name is not specified,
         the connection associated with the current message is returned.
@@ -1162,12 +1166,13 @@ class Consumer(object):
         :rtype: rejected.process.Connection
 
         """
-        if not name:
-            return self._connections[self._message.connection]
         try:
-            return self._connections[name]
+            conn = self._connections[name or self._message.connection]
         except KeyError:
             raise ValueError('Channel {} not found'.format(name))
+        if not conn.is_connected or conn.channel.is_closed:
+            raise errors.RabbitMQException(conn.name, 599, 'NOT_CONNECTED')
+        return conn
 
     def _republish_dropped_message(self, reason):
         """Republish the original message that was received it is being dropped
@@ -1662,39 +1667,7 @@ class SmartConsumer(Consumer):
         return yaml.load(value)
 
 
-class RejectedException(Exception):
-    """Base exception for :py:class:`~rejected.consumer.Consumer` related
-    exceptions.
-
-    If provided, the metric will be used to automatically record exception
-    metric counts using the path
-    `[prefix].[consumer-name].exceptions.[exception-type].[metric]`.
-
-    Positional and keyword arguments are used to format the value that is
-    passed in when providing the string value of the exception.
-
-    :param str value: An optional value used in string representation
-    :param str metric: An optional value for auto-instrumentation of exceptions
-
-    .. versionadded:: 3.19.0
-
-    """
-    METRIC_NAME = 'rejected-exception'
-
-    def __init__(self, value=None, metric=None, *args, **kwargs):
-        self.args = args
-        self.kwargs = kwargs
-        self.metric = metric
-        self.value = value or ''
-
-    def __str__(self):
-        return self.value.format(*self.args, **self.kwargs)
-
-    def __repr__(self):
-        return '{}({})'.format(self.__class__.__name__, str(self))
-
-
-class ConfigurationException(RejectedException):
+class ConfigurationException(errors.RejectedException):
     """Raised when :py:meth:`~rejected.consumer.Consumer.require_setting` is
     invoked and the specified setting was not configured. When raised, the
     consumer will shutdown.
@@ -1705,7 +1678,7 @@ class ConfigurationException(RejectedException):
     pass
 
 
-class ConsumerException(RejectedException):
+class ConsumerException(errors.RejectedException):
     """May be called when processing a message to indicate a problem that the
     Consumer may be experiencing that should cause it to stop.
 
@@ -1719,7 +1692,7 @@ class ConsumerException(RejectedException):
         super(ConsumerException, self).__init__(value, metric, *args, **kwargs)
 
 
-class MessageException(RejectedException):
+class MessageException(errors.RejectedException):
     """Invoke when a message should be rejected and not re-queued, but not due
     to a processing error that should cause the consumer to stop.
 
@@ -1733,7 +1706,7 @@ class MessageException(RejectedException):
         super(MessageException, self).__init__(value, metric, *args, **kwargs)
 
 
-class ProcessingException(RejectedException):
+class ProcessingException(errors.RejectedException):
     """Invoke when a message should be rejected and not re-queued, but not due
     to a processing error that should cause the consumer to stop. This should
     be used for when you want to reject a message which will be republished to
@@ -1748,3 +1721,4 @@ class ProcessingException(RejectedException):
     def __init__(self, value=None, metric=None, *args, **kwargs):
         super(ProcessingException, self).__init__(
             value, metric, *args, **kwargs)
+

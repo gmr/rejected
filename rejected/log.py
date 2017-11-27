@@ -91,7 +91,7 @@ class CorrelationIDAdapter(logging.LoggerAdapter):
 
     """
     def __init__(self, logger, extra):
-        """Create a new instance of the CorrelationAdapter class.
+        """Create a new instance of the CorrelationIDAdapter class.
 
         :param logging.Logger logger: The logger to adapt
         :param dict extra: Configuration values to pass in
@@ -99,7 +99,7 @@ class CorrelationIDAdapter(logging.LoggerAdapter):
         """
         super(CorrelationIDAdapter, self).__init__(logger, extra)
         self.logger = logger
-        self.consumer = extra['consumer']
+        self.parent = extra['parent']
 
     def process(self, msg, kwargs):
         """Process the logging message and keyword arguments passed in to
@@ -111,8 +111,8 @@ class CorrelationIDAdapter(logging.LoggerAdapter):
 
         """
         kwargs['extra'] = {
-            'correlation_id': self.consumer.correlation_id,
-            'consumer': self.consumer.name
+            'correlation_id': self.parent.correlation_id,
+            'parent': self.parent.name
         }
         return msg, kwargs
 
@@ -131,6 +131,6 @@ class CorrelationAdapter(CorrelationIDAdapter):
         :param dict extra: Configuration values to pass in
 
         """
+        warnings.warn(
+            'Deprecated; use CorrelationIDAdapter', DeprecationWarning)
         super(CorrelationAdapter, self).__init__(logger, extra)
-        warnings.warn('Deprecated; use CorrelationIDAdapter instead',
-                      DeprecationWarning)

@@ -55,7 +55,7 @@ class CorrelationIDAdapterTestCase(testing.AsyncTestCase):
         self.assertEqual(msg, 'Test')
         self.assertDictEqual(
             kwargs['extra'],
-            {'consumer': self.consumer.name,
+            {'parent': self.consumer.name,
              'correlation_id': self.consumer.correlation_id})
 
 
@@ -66,9 +66,9 @@ class CorrelationAdapterTestCase(unittest.TestCase):
 
     def test_that_warnings_warn_is_invoked(self):
         with mock.patch('warnings.warn') as warn:
-            _adapter = log.CorrelationAdapter(
+            log.CorrelationAdapter(
                 logging.getLogger(__name__),
-                {'consumer': mock.Mock(spec=consumer.Consumer)})
+                {'parent': mock.Mock(spec=consumer.Consumer)})
             warn.assert_called_once()
 
 

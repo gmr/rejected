@@ -38,6 +38,29 @@ def import_consumer(value):
             get_package_version(module_obj, value))
 
 
+def message_info(exchange, routing_key, properties):
+    """Return info about a message using the same conditional constructs
+
+    :param str exchange: The exchange the message was published to
+    :param str routing_key: The routing key used
+    :param properties: The AMQP message properties
+    :type properties: pika.spec.Basic.Properties
+    :rtype: str
+
+    """
+    output = []
+    if properties.message_id:
+        output.append(properties.message_id)
+    if properties.correlation_id:
+        output.append('[correlation_id="{}"]'.format(
+            properties.correlation_id))
+    if exchange:
+        output.append('published to "{}"'.format(exchange))
+    if routing_key:
+        output.append('using "{}"'.format(routing_key))
+    return ' '.join(output)
+
+
 def percentile(values, k):
     """Find the percentile of a list of values.
 

@@ -303,7 +303,6 @@ class Process(multiprocessing.Process, state.State):
     def on_connection_closed(self, name):
         if self.is_running:
             LOGGER.warning('Connection %s was closed, reconnecting', name)
-            self.connections[name].reset()
             return self.connections[name].connect()
 
         ready = all([c.is_closed for c in self.connections.values()])

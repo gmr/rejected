@@ -48,7 +48,7 @@ class Connection(state.State):
         self.correlation_id = None
         self.delivery_tag = 0
         self.should_consume = should_consume
-        self.consumer_tag = '{}-{}'.format(consumer_name, os.getpid())
+        self.consumer_tag = '{}-{}-{}'.format(name, consumer_name, os.getpid())
         self.io_loop = io_loop
         self.last_confirmation = 0
         self.logger = log.CorrelationIDAdapter(LOGGER, {'parent': self})
@@ -152,10 +152,10 @@ class Connection(state.State):
 
         """
         self.logger.debug('Connection opened')
-        self.handle.channel(self.on_channel_open)
         self.handle.add_on_connection_blocked_callback(self.on_blocked)
         self.handle.add_on_connection_unblocked_callback(self.on_unblocked)
         self.handle.add_on_close_callback(self.on_closed)
+        self.handle.channel(self.on_channel_open)
 
     def on_open_error(self, *args, **kwargs):
         self.logger.error('Connection failure %r %r', args, kwargs)
@@ -238,6 +238,9 @@ class Connection(state.State):
         :param int prefetch_count: The number of messages to prefetch
 
         """
+        if self.state == self.STATE_ACTIVE:
+            self.logger.debug('%s already consuming', self.name)
+            return
         self.set_state(self.STATE_ACTIVE)
         self.channel.basic_qos(self.on_qos_set, 0, prefetch_count, False)
         self.channel.basic_consume(

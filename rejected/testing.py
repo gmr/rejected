@@ -92,10 +92,7 @@ class AsyncTestCase(testing.AsyncTestCase):
         self.process = self._create_process()
         self.consumer = self._create_consumer()
         self.channel = self.process.connections['mock'].channel
-        self.process.connections['mock'].publisher_confirmations = \
-            self.PUBLISHER_CONFIRMATIONS
-        self.process.connections['mock'].set_state(
-            self.process.connections['mock'].STATE_ACTIVE)
+        print(self.channel.is_closed)
         self.publish_callable = None
         self.publish_calls = []
         self.channel.basic_publish.side_effect = self._on_publish
@@ -302,7 +299,12 @@ class AsyncTestCase(testing.AsyncTestCase):
             obj = connection.Connection(name, {}, 'test-consumer', True,
                                         self.PUBLISHER_CONFIRMATIONS,
                                         self.io_loop, callbacks)
+            obj.set_state(obj.STATE_ACTIVE)
             obj.channel = mock.Mock(spec=channel.Channel)
+            obj.channel._state = obj.channel.OPEN
+            obj.channel.is_closed = False
+            obj.channel.is_closing = False
+            obj.channel.is_open = True
             return obj
 
     def _create_consumer(self):

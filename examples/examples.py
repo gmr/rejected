@@ -1,8 +1,9 @@
 """Example Rejected Consumer"""
 import random
 import time
+import uuid
 
-from rejected import consumer
+from rejected import consumer, utils
 from tornado import gen, httpclient
 
 __version__ = '1.0.0'
@@ -31,14 +32,21 @@ class AsyncExampleConsumer(consumer.Consumer):
 
     @gen.coroutine
     def process(self):
+        self.logger.info(
+            'Processing message %s',
+            utils.message_info(
+                self.exchange, self.routing_key, self._message.properties))
+
         with self.stats_track_duration('async_fetch'):
             results = yield [self.http_client.fetch('http://www.google.com'),
                              self.http_client.fetch('http://www.bing.com')]
-        self.logger.info('Length: %r', [len(r.body) for r in results])
-        yield self.publish_message(self.exchange, self.routing_key,
-                                   {'type': 'example',
-                                    'timestamp': int(time.time())},
-                                   'async_fetch request')
-        self.logger.info('Pre sleep')
+        self.logger.info('HTTP Status Codes: %r', [r.code for r in results])
+        result = yield self.publish_message(
+            self.exchange, self.routing_key,
+            {'correlation_id': self.message_id,
+             'message_id': str(uuid.uuid4()),
+             'type': 'example',
+             'timestamp': int(time.time())},
+            'async_fetch request')
+        self.logger.info('Confirmation result: %r', result)
         yield gen.sleep(1)
-        self.logger.info('Post sleep')

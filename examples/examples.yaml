@@ -31,7 +31,7 @@ Application:
       qty: 1
       queue: sync_example
       ack: True
-      max_errors: 100
+      max_errors: 5
       error_exchange: errors
       influxdb_measurement: sync_consumer
       qos_prefetch: 1
@@ -43,17 +43,16 @@ Application:
       consumer: examples.AsyncExampleConsumer
       connections:
         - name: rabbitmq
-          confirm: True
+          publisher_confirmation: True
         - name: rabbitmq2
           consume: False
-          confirm: False
       # sentry_dsn: sentry_dsn: https://[YOUR-SENTRY-DSN]
       qty: 1
       queue: async_example
       ack: True
       influxdb_measurement: async_consumer
       qos_prefetch: 100
-      max_errors: 100
+      max_errors: 5
 
   stats:
     log: True
@@ -71,10 +70,10 @@ Logging:
   version: 1
   formatters:
     verbose:
-      format: "%(levelname) -10s %(asctime)s %(process)-6d %(processName) -25s %(name) -20s %(funcName) -25s: %(message)s"
+      format: "%(levelname) -10s %(asctime)s %(process)-6d %(processName) -10s %(name) -25s %(funcName) -20s: %(message)s"
       datefmt: "%Y-%m-%d %H:%M:%S"
     verbose_correlation:
-      format: "%(levelname) -10s %(asctime)s %(process)-6d %(processName) -25s %(name) -20s %(funcName) -25s: %(message)s {CID %(correlation_id)s}"
+      format: "%(levelname) -10s %(asctime)s %(process)-6d %(processName) -10s %(name) -25s %(funcName) -20s: %(message)s {CID %(correlation_id)s}"
       datefmt: "%Y-%m-%d %H:%M:%S"
     syslog:
       format: '[rejected@0 logger="%(name)s" function="%(funcName)s" module="%(module)s" process="%(processName)s" pid="%(process)d"] %(message)s'
@@ -121,16 +120,16 @@ Logging:
       level: ERROR
       propagate: true
       handlers: [console, console_correlation, syslog, syslog_correlation]
-    rejected:
+    rejected.connection:
       level: INFO
       propagate: false
       handlers: [console, console_correlation, syslog, syslog_correlation]
     rejected.consumer:
-      level: WARNING
+      level: INFO
       propagate: true
       handlers: [console, console_correlation, syslog, syslog_correlation]
     rejected.process:
-      level: WARNING
+      level: INFO
       propagate: true
       handlers: [console, console_correlation, syslog, syslog_correlation]
     tornado:

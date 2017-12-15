@@ -43,7 +43,8 @@ Follow these steps to run the examples:
     Declared the examples exchange
     Declared and bound sync_example
     Declared and bound async_example
-    Published 100 messages for the sync example
+    Declared and bound blocking_example
+    Published 100 messages for the sync and blocking examples
     Published one seed message for the async example
    ```
 4. Run the sync example consumer in the examples directory:

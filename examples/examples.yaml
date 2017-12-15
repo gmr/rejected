@@ -12,7 +12,7 @@ Application:
       pass: guest
       ssl: False
       vhost: /
-      heartbeat_interval: 0
+      heartbeat_interval: 10
 
     rabbitmq2:
       host: localhost
@@ -51,6 +51,18 @@ Application:
       queue: async_example
       ack: True
       influxdb_measurement: async_consumer
+      qos_prefetch: 100
+      max_errors: 5
+
+    blocking:
+      consumer: examples.BlockingConsumer
+      connections:
+        - name: rabbitmq
+      # sentry_dsn: sentry_dsn: https://[YOUR-SENTRY-DSN]
+      qty: 1
+      queue: blocking_example
+      ack: True
+      influxdb_measurement: blocking_consumer
       qos_prefetch: 100
       max_errors: 5
 
@@ -117,7 +129,7 @@ Logging:
       propagate: true
       handlers: [console, console_correlation, syslog, syslog_correlation]
     pika:
-      level: ERROR
+      level: WARNING
       propagate: true
       handlers: [console, console_correlation, syslog, syslog_correlation]
     rejected.connection:
@@ -125,6 +137,10 @@ Logging:
       propagate: false
       handlers: [console, console_correlation, syslog, syslog_correlation]
     rejected.consumer:
+      level: INFO
+      propagate: true
+      handlers: [console, console_correlation, syslog, syslog_correlation]
+    rejected.mcp:
       level: INFO
       propagate: true
       handlers: [console, console_correlation, syslog, syslog_correlation]

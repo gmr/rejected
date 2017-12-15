@@ -41,6 +41,12 @@ if __name__ == '__main__':
                        routing_key='example.async')
     print('Declared and bound async_example')
 
+    channel.queue_declare(queue='blocking_example', durable=True,
+                          exclusive=False, auto_delete=False)
+    channel.queue_bind(exchange='examples', queue='blocking_example',
+                       routing_key='example.blocking')
+    print('Declared and bound blocking_example')
+
     for iteration in range(0, MESSAGE_COUNT):
         msg_type = random.randint(1, 4)
         if msg_type == 1:
@@ -69,7 +75,13 @@ if __name__ == '__main__':
                               routing_key='example.sync',
                               body=body,
                               properties=properties)
-    print('Published {} messages for the sync example'.format(MESSAGE_COUNT))
+        channel.basic_publish(exchange='examples',
+                              routing_key='example.blocking',
+                              body=body,
+                              properties=properties)
+
+    print('Published {} messages for the sync and blocking '
+          'examples'.format(MESSAGE_COUNT))
 
     channel.basic_publish(exchange='examples',
                           routing_key='example.async',

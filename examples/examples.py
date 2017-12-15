@@ -1,5 +1,6 @@
 """Example Rejected Consumer"""
 import random
+import threading
 import time
 import uuid
 
@@ -50,3 +51,20 @@ class AsyncExampleConsumer(consumer.Consumer):
             'async_fetch request')
         self.logger.info('Confirmation result: %r', result)
         yield gen.sleep(1)
+
+
+class BlockingConsumer(consumer.Consumer):
+
+    @gen.coroutine
+    def process(self):
+        thread = threading.Thread(target=self.blocking_thing)
+        thread.start()
+        while thread.is_alive():
+            yield gen.sleep(1)
+            self.logger.debug('Still waiting on thread')
+        self.logger.info('Done')
+
+    def blocking_thing(self):
+        self.logger.info('Starting the blocking sleep')
+        time.sleep(30)
+        self.logger.info('Done blocking sleep')

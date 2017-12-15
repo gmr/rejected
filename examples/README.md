@@ -95,3 +95,28 @@ Follow these steps to run the examples:
    INFO       2017-11-24 18:02:26 7283   examples                  rejected.controller  stop                     : MCP exited cleanly
    INFO       2017-11-24 18:02:26 7283   examples                  rejected.controller  stop                     : Shutdown complete   
    ```
+4. Run the blocking example consumer in the examples directory:
+   ```bash
+   rejected -c examples.yaml -f -p . -o blocking
+   ```
+   You should see output similar to the following:
+   ```
+   INFO       2017-12-15 11:27:32 6016   blocking-1 rejected.process          setup               : Initializing for blocking-1
+   INFO       2017-12-15 11:27:32 6016   blocking-1 rejected.process          get_consumer        : Creating consumer examples.BlockingConsumer v1.0.0
+   INFO       2017-12-15 11:27:32 6016   blocking-1 examples                  blocking_thing      : Starting the blocking sleep {CID 4f6cc691-d239-456b-9efc-c456e3c41234}
+   INFO       2017-12-15 11:28:02 6016   blocking-1 examples                  blocking_thing      : Done blocking sleep {CID 4f6cc691-d239-456b-9efc-c456e3c41234}
+   INFO       2017-12-15 11:28:02 6016   blocking-1 examples                  process             : Done {CID 4f6cc691-d239-456b-9efc-c456e3c41234}
+   INFO       2017-12-15 11:28:02 6016   blocking-1 examples                  blocking_thing      : Starting the blocking sleep {CID 57102e51-ca31-4986-8583-7d5ebd1d95d6}
+   INFO       2017-12-15 11:28:32 6016   blocking-1 examples                  blocking_thing      : Done blocking sleep {CID 57102e51-ca31-4986-8583-7d5ebd1d95d6}
+   INFO       2017-12-15 11:28:32 6016   blocking-1 examples                  process             : Done {CID 57102e51-ca31-4986-8583-7d5ebd1d95d6}
+   ```
+   When it's stopped, shutdown rejected with ``CTRL-C``:
+   ```
+   INFO       2017-12-15 11:28:33 6016   examples                  rejected.controller  run                      : Caught CTRL-C, shutting down
+   INFO       2017-12-15 11:28:33 6016   examples                  rejected.controller  stop                     : Shutting down controller
+   INFO       2017-12-15 11:28:33 6016   examples                  rejected.mcp         stop_processes           : Stopping consumer processes
+   INFO       2017-12-15 11:28:33 6016   examples                  rejected.mcp         stop_processes           : Sending SIGABRT to active children
+   INFO       2017-12-15 11:28:33 6016   examples                  rejected.mcp         stop_processes           : Waiting on 1 active processes to shut down (0/10)
+   INFO       2017-12-15 11:28:34 6016   examples                  rejected.controller  stop                     : MCP exited cleanly
+   INFO       2017-12-15 11:28:34 6016   examples                  rejected.controller  stop                     : Shutdown complete
+   ```

@@ -43,7 +43,6 @@ import uuid
 import zlib
 
 import pika
-from pika import exceptions
 from tornado import concurrent, gen, locks
 import yaml
 
@@ -836,7 +835,8 @@ class Consumer(object):
         """
         if not self._measurement:
             if not self.IGNORE_OOB_STATS:
-                self.logger.warning('stats_set_value invoked outside execution')
+                self.logger.warning(
+                    'stats_set_value invoked outside execution')
             return
         self._measurement.set_value(key, value)
 
@@ -1675,7 +1675,6 @@ class ConfigurationException(errors.RejectedException):
     .. versionadded:: 4.0.0
 
     """
-    pass
 
 
 class ConsumerException(errors.RejectedException):
@@ -1688,8 +1687,6 @@ class ConsumerException(errors.RejectedException):
     :param str metric: An optional value for auto-instrumentation of exceptions
 
     """
-    def __init__(self, value=None, metric=None, *args, **kwargs):
-        super(ConsumerException, self).__init__(value, metric, *args, **kwargs)
 
 
 class MessageException(errors.RejectedException):
@@ -1702,8 +1699,6 @@ class MessageException(errors.RejectedException):
     :param str metric: An optional value for auto-instrumentation of exceptions
 
     """
-    def __init__(self, value=None, metric=None, *args, **kwargs):
-        super(MessageException, self).__init__(value, metric, *args, **kwargs)
 
 
 class ProcessingException(errors.RejectedException):
@@ -1718,7 +1713,3 @@ class ProcessingException(errors.RejectedException):
     :param str metric: An optional value for auto-instrumentation of exceptions
 
     """
-    def __init__(self, value=None, metric=None, *args, **kwargs):
-        super(ProcessingException, self).__init__(
-            value, metric, *args, **kwargs)
-

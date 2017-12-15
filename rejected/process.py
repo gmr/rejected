@@ -23,7 +23,6 @@ except ImportError:
     influxdb = None
 
 from tornado import gen, ioloop, locks
-import pika
 
 try:
     import raven

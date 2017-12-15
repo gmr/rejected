@@ -14,10 +14,9 @@ __since__ = '2009-09-10'
 __version__ = '4.0.0'
 
 __all__ = [
+    '__version__',
     'Consumer',
-    'PublishingConsumer',
     'SmartConsumer',
-    'SmartPublishingConsumer',
     'ConsumerException',
     'MessageException',
     'ProcessingException',

@@ -418,6 +418,7 @@ class UndeliveredMessage(Exception):
 
     """
 
+
 class UnroutableMessage(Exception):
     """Raise as a side effect of :attr:`rejected.testing.AsyncTestCase` with
     :meth:`~rejected.testing.AsyncTestCase.publishing_side_effect` to test

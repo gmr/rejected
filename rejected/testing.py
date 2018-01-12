@@ -20,7 +20,7 @@ try:
 except ImportError:
     raven = None
 
-from rejected import connection, consumer, data, process
+from rejected import connection, consumer, data, errors, process
 
 LOGGER = logging.getLogger(__name__)
 
@@ -249,6 +249,12 @@ class AsyncTestCase(testing.AsyncTestCase):
             raise consumer.MessageException()
         elif result == data.PROCESSING_EXCEPTION:
             raise consumer.ProcessingException()
+        elif result == data.CONFIGURATION_EXCEPTION:
+            raise consumer.ConfigurationException()
+        elif result == data.RABBITMQ_EXCEPTION:
+            raise errors.RabbitMQException(
+                self.process.connections['mock'],
+                999, 'test-exception')
         elif result == data.UNHANDLED_EXCEPTION:
             raise AssertionError('UNHANDLED_EXCEPTION')
         raise gen.Return(measurement)
@@ -302,6 +308,7 @@ class AsyncTestCase(testing.AsyncTestCase):
             obj.set_state(obj.STATE_ACTIVE)
             obj.channel = mock.Mock(spec=channel.Channel)
             obj.channel._state = obj.channel.OPEN
+            obj.channel.connection = obj
             obj.channel.is_closed = False
             obj.channel.is_closing = False
             obj.channel.is_open = True
@@ -333,7 +340,8 @@ class AsyncTestCase(testing.AsyncTestCase):
         obj.sentry_client = mock.Mock(spec=raven.Client) if raven else None
         return obj
 
-    def _on_publish(self, exchange, routing_key, properties, body, mandatory):
+    def _on_publish(self, exchange, routing_key, properties, body,
+                    mandatory=True):
         LOGGER.debug('on_publish to %s using %s (pc: %s)',
                      exchange, routing_key, self.PUBLISHER_CONFIRMATIONS)
         msg = PublishedMessage(exchange, routing_key, properties, body)

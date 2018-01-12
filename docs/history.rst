@@ -24,10 +24,17 @@ Other Changes
 - ADDED ability to ``rejected.data.Properties`` to allow for keyword arguments
 - ADDED ``rejected.consumer.Consumer.IGNORE_OOB_STATS_CALLS`` to not log when ``rejected.consumer.Consumer.stats_*`` calls are made when no message is currently being processed
 - ADDED ``rejected.log.CorrelationID`` and ``rejected.log.NoCorrelationID`` as a replacement of ``rejected.log.CorrelationFilter``
+- ADDED When a ``rejected.consumer.ConfigurationException`` is raised in ``prepare`` or ``process`` it's not longer treated as an unhandled exception and will cause the consumer to shutdown
+- ADDED When a ``rejected.consumer.ConfigurationException`` is raised when initializing a consumer, it will now explicitly shutdown the consumer process
+- REMOVED code duplication when dealing with ``rejected.consumer.Consumer`` property methods
+- ADDED additional exception handling support in ``rejected.testing.AsyncTestCase``
+- REMOVED catching of KeyboardInterrupt in ``rejected.consumer.Consumer.execute`` favoring catching higher up in the processing flow
 
 Bug Fixes
 ^^^^^^^^^
 - REMOVED extra call to ``rejected.consumer.Consumer.initialize`` in ``rejected.testing.AsyncTestCase._create_consumer`` `#21 <https://github.com/gmr/rejected/pull/21>`_ - `dave-shawley <https://github.com/dave-shawley>`_
+- CHANGED ``rejected.consumer.Consumer`` to invoke ``on_finish`` even when an exception is raised during processing (#24)
+- CHANGED ``rejected.consumer.Consumer.io_loop`` to correctly return the proper loop
 
 3.19.5
 ------

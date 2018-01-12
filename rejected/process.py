@@ -14,6 +14,7 @@ try:
 except ImportError:
     import profile
 import signal
+import sys
 import time
 import warnings
 
@@ -64,6 +65,7 @@ class Process(multiprocessing.Process, state.State):
     TIME_WAITED = 'idle_time'
 
     CONSUMER_EXCEPTION = 'consumer_exception'
+    CONFIGURATION_EXCEPTION = 'configuration_exception'
     MESSAGE_EXCEPTION = 'message_exception'
     PROCESSING_EXCEPTION = 'processing_exception'
     RABBITMQ_EXCEPTION = 'rabbitmq_exception'
@@ -209,6 +211,9 @@ class Process(multiprocessing.Process, state.State):
         except Exception as error:
             LOGGER.exception('Error creating the consumer "%s": %s',
                              cfg['consumer'], error)
+            self.send_exception_to_sentry(sys.exc_info())
+            self.on_startup_error('Failed to create consumer {}: {}'.format(
+                self.consumer_name, error))
 
     @gen.engine
     def invoke_consumer(self, message):
@@ -389,6 +394,14 @@ class Process(multiprocessing.Process, state.State):
             self.reject(message, False)
             self.counters[self.PROCESSING_EXCEPTION] += 1
 
+        elif result == data.CONFIGURATION_EXCEPTION:
+            LOGGER.debug('Rejecting message due to ConfigurationException '
+                         'and shutting down')
+            self.reject(message, False)
+            self.counters[self.CONFIGURATION_EXCEPTION] += 1
+            self.stop_consumer()
+            self.shutdown_connections()
+
         elif result == data.CONSUMER_EXCEPTION:
             LOGGER.debug('Re-queueing message due to ConsumerException')
             self.reject(message, True)
@@ -535,7 +548,6 @@ class Process(multiprocessing.Process, state.State):
         self.active_message = None
         self.measurement = None
         if self.is_waiting_to_shutdown:
-            self.set_state(self.STATE_SHUTTING_DOWN)
             self.shutdown_connections()
         elif self.is_processing:
             self.set_state(self.STATE_IDLE)

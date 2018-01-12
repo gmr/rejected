@@ -1,13 +1,17 @@
 # coding=utf-8
 """Tests for rejected.consumer"""
 import logging
+import os
+import random
+import signal
+import time
 import unittest
 import uuid
 
 from tornado import gen
 import mock
 
-from rejected import consumer, connection, process, testing
+from rejected import consumer, connection, errors, testing
 
 from . import mocks
 
@@ -73,6 +77,7 @@ class TestConsumer(consumer.Consumer):
     def initialize(self):
         self.called_initialize = True
 
+    @gen.coroutine
     def prepare(self):
         self.called_prepare = True
         return super(TestConsumer, self).prepare()
@@ -109,6 +114,146 @@ class ConsumerLifecycleTests(testing.AsyncTestCase):
         with mock.patch.object(self.consumer.logger, 'warning') as warning:
             self.consumer.finish()
             warning.assert_called_once()
+
+
+class TestFinishedConsumer(consumer.Consumer):
+
+    def __init__(self, *args, **kwargs):
+        self.called_prepare = False
+        self.called_process = False
+        self.called_on_finish = False
+        super(TestFinishedConsumer, self).__init__(*args, **kwargs)
+
+    @gen.coroutine
+    def prepare(self):
+        self.called_prepare = True
+        self.finish()
+        return super(TestFinishedConsumer, self).prepare()
+
+    def process(self):
+        self.called_process = True
+
+    def on_finish(self):
+        self.called_on_finish = True
+
+
+class FinishedInPrepareTestCase(testing.AsyncTestCase):
+
+    def get_consumer(self):
+        return TestFinishedConsumer
+
+    @testing.gen_test
+    def test_contract_met(self):
+        yield self.process_message(str(uuid.uuid4()))
+        self.assertTrue(self.consumer.called_prepare)
+        self.assertFalse(self.consumer.called_process)
+        self.assertTrue(self.consumer.called_on_finish)
+
+
+class TestOnFinishConsumer(consumer.Consumer):
+
+    def __init__(self, *args, **kwargs):
+        self.called_on_finish = False
+        self.raise_in_prepare = None
+        self.raise_in_process = None
+        super(TestOnFinishConsumer, self).__init__(*args, **kwargs)
+
+    def prepare(self):
+        if self.raise_in_prepare:
+            raise self.raise_in_prepare
+        return super(TestOnFinishConsumer, self).prepare()
+
+    def process(self):
+        if self.raise_in_process:
+            raise self.raise_in_process
+        pass
+
+    def on_finish(self):
+        self.called_on_finish = True
+
+
+class OnFinishAfterExceptionTests(testing.AsyncTestCase):
+
+    def get_consumer(self):
+        return TestOnFinishConsumer
+
+    @testing.gen_test
+    def test_on_finished_called_case_01(self):
+        self.consumer.raise_in_prepare = consumer.ConsumerException
+        with self.assertRaises(consumer.ConsumerException):
+            yield self.process_message(str(uuid.uuid4()))
+        self.assertTrue(self.consumer.called_on_finish)
+
+    @testing.gen_test
+    def test_on_finished_called_case_02(self):
+        self.consumer.raise_in_prepare = consumer.ConfigurationException
+        with self.assertRaises(consumer.ConfigurationException):
+            yield self.process_message(str(uuid.uuid4()))
+        self.assertTrue(self.consumer.called_on_finish)
+
+    @testing.gen_test
+    def test_on_finished_called_case_03(self):
+        self.consumer.raise_in_prepare = consumer.MessageException
+        with self.assertRaises(consumer.MessageException):
+            yield self.process_message(str(uuid.uuid4()))
+        self.assertTrue(self.consumer.called_on_finish)
+
+    @testing.gen_test
+    def test_on_finished_called_case_04(self):
+        self.consumer.raise_in_prepare = consumer.ProcessingException
+        with self.assertRaises(consumer.ProcessingException):
+            yield self.process_message(str(uuid.uuid4()))
+        self.assertTrue(self.consumer.called_on_finish)
+
+    @testing.gen_test
+    def test_on_finished_called_case_05(self):
+        self.consumer.raise_in_prepare = ValueError
+        with self.assertRaises(AssertionError):
+            yield self.process_message(str(uuid.uuid4()))
+        self.assertTrue(self.consumer.called_on_finish)
+
+    @testing.gen_test
+    def test_on_finished_called_case_06(self):
+        self.consumer.raise_in_process = consumer.ConsumerException
+        with self.assertRaises(consumer.ConsumerException):
+            yield self.process_message(str(uuid.uuid4()))
+        self.assertTrue(self.consumer.called_on_finish)
+
+    @testing.gen_test
+    def test_on_finished_called_case_07(self):
+        self.consumer.raise_in_process = consumer.ConfigurationException
+        with self.assertRaises(consumer.ConfigurationException):
+            yield self.process_message(str(uuid.uuid4()))
+        self.assertTrue(self.consumer.called_on_finish)
+
+    @testing.gen_test
+    def test_on_finished_called_case_08(self):
+        self.consumer.raise_in_process = consumer.MessageException
+        with self.assertRaises(consumer.MessageException):
+            yield self.process_message(str(uuid.uuid4()))
+        self.assertTrue(self.consumer.called_on_finish)
+
+    @testing.gen_test
+    def test_on_finished_called_case_09(self):
+        self.consumer.raise_in_process = consumer.ProcessingException
+        with self.assertRaises(consumer.ProcessingException):
+            yield self.process_message(str(uuid.uuid4()))
+        self.assertTrue(self.consumer.called_on_finish)
+
+    @testing.gen_test
+    def test_on_finished_called_case_10(self):
+        self.consumer.raise_in_process = ValueError
+        with self.assertRaises(AssertionError):
+            yield self.process_message(str(uuid.uuid4()))
+        self.assertTrue(self.consumer.called_on_finish)
+
+    @testing.gen_test
+    def test_on_finished_called_case_11(self):
+        self.consumer.raise_in_process = errors.RabbitMQException(
+            self.process.connections['mock'], 999, 'test-message')
+        with self.assertRaises(errors.RabbitMQException):
+            yield self.process_message(str(uuid.uuid4()))
+        self.assertTrue(self.consumer.called_on_finish)
 
 
 class TestPublisher(consumer.Consumer):
@@ -304,3 +449,144 @@ class ConfirmingPublishingTests(testing.AsyncTestCase):
         self.assertListEqual(
             self.consumer.confirmations,
             [True, True, True, False, False, False, True, True, True])
+
+
+class ConsumerPropertyTestCase(testing.AsyncTestCase):
+
+    def get_consumer(self):
+        return TestConsumer
+
+    @testing.gen_test
+    def test_consumer_app_id(self):
+        app_id = str(uuid.uuid4())
+        yield self.process_message(mocks.BODY, properties={'app_id': app_id})
+        self.assertEqual(self.consumer.app_id, app_id)
+
+    def test_consumer_app_id_none(self):
+        self.consumer._message = None
+        self.assertIsNone(self.consumer.app_id)
+
+    @testing.gen_test
+    def test_consumer_content_encoding(self):
+        value = str(uuid.uuid4())
+        yield self.process_message(
+            mocks.BODY, properties={'content_encoding': value})
+        self.assertEqual(self.consumer.content_encoding, value)
+
+    @testing.gen_test
+    def test_consumer_content_type(self):
+        value = str(uuid.uuid4())
+        yield self.process_message(
+            mocks.BODY, properties={'content_type': value})
+        self.assertEqual(self.consumer.content_type, value)
+
+    @testing.gen_test
+    def test_consumer_exchange(self):
+        value = str(uuid.uuid4())
+        yield self.process_message(mocks.BODY, exchange=value)
+        self.assertEqual(self.consumer.exchange, value)
+
+    @testing.gen_test
+    def test_consumer_expiration(self):
+        value = str(uuid.uuid4())
+        yield self.process_message(
+            mocks.BODY,  properties={'expiration': value})
+        self.assertEqual(self.consumer.expiration, value)
+
+    @testing.gen_test
+    def test_consumer_headers(self):
+        value = {str(uuid.uuid4()): str(uuid.uuid4())}
+        yield self.process_message(mocks.BODY,  properties={'headers': value})
+        self.assertDictEqual(self.consumer.headers, value)
+
+    @testing.gen_test
+    def test_consumer_ioloop(self):
+        yield self.process_message(mocks.BODY)
+        self.assertEqual(self.consumer.io_loop, self.io_loop)
+
+    @testing.gen_test
+    def test_consumer_measurement(self):
+        result = yield self.process_message(mocks.BODY)
+        self.assertEqual(result, self.consumer.measurement)
+
+    @testing.gen_test
+    def test_consumer_message_type(self):
+        value = str(uuid.uuid4())
+        yield self.process_message(mocks.BODY, properties={'type': value})
+        self.assertEqual(self.consumer.message_type, value)
+
+    @testing.gen_test
+    def test_consumer_priority(self):
+        value = random.randint(0, 10)
+        yield self.process_message(mocks.BODY, properties={'priority': value})
+        self.assertEqual(self.consumer.priority, value)
+
+    @testing.gen_test
+    def test_consumer_redelivered(self):
+        value = str(uuid.uuid4())
+        yield self.process_message(mocks.BODY)
+        self.assertFalse(self.consumer.redelivered)
+
+    @testing.gen_test
+    def test_consumer_reply_to(self):
+        value = str(uuid.uuid4())
+        yield self.process_message(mocks.BODY, properties={'reply_to': value})
+        self.assertEqual(self.consumer.reply_to, value)
+
+    @testing.gen_test
+    def test_consumer_routing_key(self):
+        value = str(uuid.uuid4())
+        yield self.process_message(mocks.BODY, routing_key=value)
+        self.assertEqual(self.consumer.routing_key, value)
+
+    @testing.gen_test
+    def test_consumer_timestamp(self):
+        value = int(time.time())
+        yield self.process_message(
+            mocks.BODY, 'text/plain', properties={'timestamp': value})
+        self.assertEqual(self.consumer.timestamp, value)
+
+    @testing.gen_test
+    def test_consumer_user_id(self):
+        value = str(uuid.uuid4())
+        yield self.process_message(mocks.BODY, properties={'user_id': value})
+        self.assertEqual(self.consumer.user_id, value)
+
+
+class RequireSettingsConsumer(consumer.Consumer):
+
+    def __init__(self, *args, **kwargs):
+        super(RequireSettingsConsumer, self).__init__(*args, **kwargs)
+        self.setting_key = None
+        self.processed = False
+
+    def prepare(self):
+        self.require_setting(self.setting_key)
+
+    def process(self):
+        self.processed = True
+
+
+class RequireSettingTestCase(testing.AsyncTestCase):
+
+    KEY = str(uuid.uuid4())
+    VALUE = str(uuid.uuid4())
+
+    def get_consumer(self):
+        return RequireSettingsConsumer
+
+    def get_settings(self):
+        return {self.KEY: self.VALUE}
+
+    @testing.gen_test
+    def test_no_exception_raised(self):
+        self.consumer.setting_key = self.KEY
+        yield self.process_message(mocks.BODY)
+        self.assertTrue(self.consumer.processed)
+
+    @testing.gen_test
+    def test_exception_raised(self):
+        self.consumer.setting_key = str(uuid.uuid4())
+        with self.assertRaises(consumer.ConfigurationException):
+            yield self.process_message(mocks.BODY)
+        self.assertFalse(self.consumer.processed)

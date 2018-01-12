@@ -46,7 +46,7 @@ import pika
 from tornado import concurrent, gen, locks
 import yaml
 
-from rejected import data, errors, log
+from rejected import data, errors, log, utils
 
 # Optional imports
 try:
@@ -327,7 +327,7 @@ class Consumer(object):
 
     """Quick-access properties"""
 
-    @property
+    @utils.message_property
     def app_id(self):
         """Access the current message's ``app-id`` property as an attribute of
         the consumer class.
@@ -335,22 +335,18 @@ class Consumer(object):
         :rtype: str
 
         """
-        if not self._message:
-            return None
         return self._message.properties.app_id
 
-    @property
+    @utils.message_property
     def body(self):
         """Access the opaque body from the current message.
 
         :rtype: str
 
         """
-        if not self._message:
-            return None
         return self._message.body
 
-    @property
+    @utils.message_property
     def content_encoding(self):
         """Access the current message's ``content-encoding`` AMQP message
         property as an attribute of the consumer class.
@@ -358,12 +354,10 @@ class Consumer(object):
         :rtype: str
 
         """
-        if not self._message:
-            return None
         return (self._message.properties.content_encoding or
                 '').lower() or None
 
-    @property
+    @utils.message_property
     def content_type(self):
         """Access the current message's ``content-type`` AMQP message property
         as an attribute of the consumer class.
@@ -371,11 +365,9 @@ class Consumer(object):
         :rtype: str
 
         """
-        if not self._message:
-            return None
         return (self._message.properties.content_type or '').lower() or None
 
-    @property
+    @utils.message_property
     def correlation_id(self):
         """Access the current message's ``correlation-id`` AMAP message
         property as an attribute of the consumer class. If the message does not
@@ -387,7 +379,7 @@ class Consumer(object):
         """
         return self._correlation_id
 
-    @property
+    @utils.message_property
     def exchange(self):
         """Access the AMQP exchange the message was published to as an
         attribute of the consumer class.
@@ -395,11 +387,9 @@ class Consumer(object):
         :rtype: str
 
         """
-        if not self._message:
-            return None
         return self._message.exchange
 
-    @property
+    @utils.message_property
     def expiration(self):
         """Access the current message's ``expiration`` AMQP message property as
         an attribute of the consumer class.
@@ -407,11 +397,9 @@ class Consumer(object):
         :rtype: str
 
         """
-        if not self._message:
-            return None
         return self._message.properties.expiration
 
-    @property
+    @utils.message_property
     def headers(self):
         """Access the current message's ``headers`` AMQP message property as an
         attribute of the consumer class.
@@ -419,8 +407,6 @@ class Consumer(object):
         :rtype: dict
 
         """
-        if not self._message:
-            return None
         return self._message.properties.headers or dict()
 
     @property
@@ -435,7 +421,7 @@ class Consumer(object):
         """
         return self._finished
 
-    @property
+    @utils.message_property
     def io_loop(self):
         """Access the :py:class:`tornado.ioloop.IOLoop` instance for the
         current message.
@@ -445,9 +431,9 @@ class Consumer(object):
         :rtype: tornado.ioloop.IOLoop
 
         """
-        return self._message.channel.connection.ioloop
+        return self._connections[self._message.connection].io_loop
 
-    @property
+    @utils.message_property
     def message_id(self):
         """Access the current message's ``message-id`` AMQP message property as
         an attribute of the consumer class.
@@ -455,8 +441,6 @@ class Consumer(object):
         :rtype: str
 
         """
-        if not self._message:
-            return None
         return self._message.properties.message_id
 
     @property
@@ -480,7 +464,7 @@ class Consumer(object):
         """
         return self.__class__.__name__
 
-    @property
+    @utils.message_property
     def priority(self):
         """Access the current message's ``priority`` AMQP message property as
         an attribute of the consumer class.
@@ -488,11 +472,9 @@ class Consumer(object):
         :rtype: int
 
         """
-        if not self._message:
-            return None
         return self._message.properties.priority
 
-    @property
+    @utils.message_property
     def properties(self):
         """Access the current message's AMQP message properties in dict form as
         an attribute of the consumer class.
@@ -500,22 +482,18 @@ class Consumer(object):
         :rtype: dict
 
         """
-        if not self._message:
-            return None
         return dict(self._message.properties)
 
-    @property
+    @utils.message_property
     def redelivered(self):
         """Indicates if the current message has been redelivered.
 
         :rtype: bool
 
         """
-        if not self._message:
-            return None
         return self._message.redelivered
 
-    @property
+    @utils.message_property
     def reply_to(self):
         """Access the current message's ``reply-to`` AMQP message property as
         an attribute of the consumer class.
@@ -523,22 +501,18 @@ class Consumer(object):
         :rtype: str
 
         """
-        if not self._message:
-            return None
         return self._message.properties.reply_to
 
-    @property
+    @utils.message_property
     def routing_key(self):
         """Access the routing key for the current message.
 
         :rtype: str
 
         """
-        if not self._message:
-            return None
         return self._message.routing_key
 
-    @property
+    @utils.message_property
     def message_type(self):
         """Access the current message's ``type`` AMQP message property as an
         attribute of the consumer class.
@@ -546,8 +520,6 @@ class Consumer(object):
         :rtype: str
 
         """
-        if not self._message:
-            return None
         return self._message.properties.type
 
     @property
@@ -575,7 +547,7 @@ class Consumer(object):
         """
         return self._settings
 
-    @property
+    @utils.message_property
     def timestamp(self):
         """Access the unix epoch timestamp value from the AMQP message
         properties of the current message.
@@ -583,11 +555,9 @@ class Consumer(object):
         :rtype: int
 
         """
-        if not self._message:
-            return None
         return self._message.properties.timestamp
 
-    @property
+    @utils.message_property
     def user_id(self):
         """Access the ``user-id`` AMQP message property from the current
         message's properties.
@@ -595,8 +565,6 @@ class Consumer(object):
         :rtype: str
 
         """
-        if not self._message:
-            return None
         return self._message.properties.user_id
 
     """Utility Methods for use by Consumer Code"""
@@ -975,7 +943,7 @@ class Consumer(object):
                             self.headers[_PROCESSING_EXCEPTIONS]))
                 raise gen.Return(data.MESSAGE_DROP)
 
-        result = None
+        # Prepare and process, catching exceptions
         try:
             result = self.prepare()
             if concurrent.is_future(result):
@@ -985,17 +953,21 @@ class Consumer(object):
                 if concurrent.is_future(result):
                     yield result
                     self.logger.debug('Post yield of future process')
-        except KeyboardInterrupt:
-            self.logger.debug('CTRL-C')
-            self._process.reject(message_in.delivery_tag, True)
-            self._process.stop()
-            raise gen.Return(data.MESSAGE_REQUEUE)
 
         except errors.RabbitMQException as error:
             self.logger.critical('RabbitMQException while processing %s: %s',
                                  message_in.delivery_tag, error)
             self._measurement.set_tag('exception', error.__class__.__name__)
             raise gen.Return(data.RABBITMQ_EXCEPTION)
+
+        except ConfigurationException as error:
+            self._log_exception('Exception processing delivery %s: %s',
+                                message_in.delivery_tag, error,
+                                exc_info=sys.exc_info())
+            self._measurement.set_tag('exception', error.__class__.__name__)
+            if error.metric:
+                self._measurement.set_tag('error', error.metric)
+            raise gen.Return(data.CONFIGURATION_EXCEPTION)
 
         except ConsumerException as error:
             self.logger.error('ConsumerException processing delivery %s: %s',
@@ -1031,18 +1003,15 @@ class Consumer(object):
             raise gen.Return(data.UNHANDLED_EXCEPTION)
 
         except Exception as error:
-            exc_info = sys.exc_info()
-            if concurrent.is_future(result):
-                error = result.exception()
-                exc_info = result.exc_info()
             self._log_exception('Exception processing delivery %s: %s',
                                 message_in.delivery_tag, error,
-                                exc_info=exc_info)
+                                exc_info=sys.exc_info())
             self._measurement.set_tag('exception', 'UnhandledException')
             raise gen.Return(data.UNHANDLED_EXCEPTION)
 
-        if not self._finished:
-            self.finish()
+        finally:
+            if not self._finished:
+                self.finish()
 
         # Clean up any pending futures
         for name in self._connections.keys():
@@ -1074,15 +1043,13 @@ class Consumer(object):
         """
         self._connections[connection.name] = connection
 
-    @property
+    @utils.message_property
     def _channel(self):
         """Return the channel of the message that is currently being processed.
 
         :rtype: :class:`pika.channel.Channel`
 
         """
-        if not self._message:
-            return None
         return self._message.channel
 
     def _clear(self):

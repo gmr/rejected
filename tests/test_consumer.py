@@ -1,9 +1,7 @@
 # coding=utf-8
 """Tests for rejected.consumer"""
 import logging
-import os
 import random
-import signal
 import time
 import unittest
 import uuid
@@ -11,9 +9,9 @@ import uuid
 from tornado import gen
 import mock
 
-from rejected import consumer, connection, errors, testing
+from rejected import consumer, connection, data, errors, testing
 
-from . import mocks
+from . import common, mocks
 
 LOGGER = logging.getLogger(__name__)
 
@@ -33,7 +31,8 @@ class ConsumerInitializationTests(unittest.TestCase):
         obj = consumer.Consumer(settings={}, process=None)
         self.assertIsNone(obj._message)
 
-    def test_initialize_is_invoked(self):
+    @staticmethod
+    def test_initialize_is_invoked():
         with mock.patch('rejected.consumer.Consumer.initialize') as init:
             consumer.Consumer(settings={}, process=None)
             init.assert_called_once_with()
@@ -65,38 +64,16 @@ class ConsumerSetConnectionTests(unittest.TestCase):
         self.assertEqual(obj._connections['mock'], conn)
 
 
-class TestConsumer(consumer.Consumer):
-
-    def __init__(self, *args, **kwargs):
-        self.called_initialize = False
-        self.called_prepare = False
-        self.called_process = False
-        self.called_on_finish = False
-        super(TestConsumer, self).__init__(*args, **kwargs)
-
-    def initialize(self):
-        self.called_initialize = True
-
-    @gen.coroutine
-    def prepare(self):
-        self.called_prepare = True
-        return super(TestConsumer, self).prepare()
-
-    def process(self):
-        self.called_process = True
-
-    def on_finish(self):
-        self.called_on_finish = True
-
-
 class ConsumerLifecycleTests(testing.AsyncTestCase):
 
     def get_consumer(self):
-        return TestConsumer
+        return common.TestConsumer
 
     @testing.gen_test
     def test_contract_met(self):
-        yield self.process_message(str(uuid.uuid4()))
+        result = yield self.process_message(str(uuid.uuid4()))
+        self.assertIsInstance(result, data.Measurement)
+        self.assertEqual(result, self.measurement)
         self.assertTrue(self.consumer.called_initialize)
         self.assertTrue(self.consumer.called_prepare)
         self.assertTrue(self.consumer.called_process)
@@ -144,7 +121,9 @@ class FinishedInPrepareTestCase(testing.AsyncTestCase):
 
     @testing.gen_test
     def test_contract_met(self):
-        yield self.process_message(str(uuid.uuid4()))
+        result = yield self.process_message(str(uuid.uuid4()))
+        self.assertIsInstance(result, data.Measurement)
+        self.assertEqual(result, self.measurement)
         self.assertTrue(self.consumer.called_prepare)
         self.assertFalse(self.consumer.called_process)
         self.assertTrue(self.consumer.called_on_finish)
@@ -454,7 +433,7 @@ class ConfirmingPublishingTests(testing.AsyncTestCase):
 class ConsumerPropertyTestCase(testing.AsyncTestCase):
 
     def get_consumer(self):
-        return TestConsumer
+        return common.TestConsumer
 
     @testing.gen_test
     def test_consumer_app_id(self):

@@ -17,7 +17,7 @@ from tornado import gen, testing
 
 try:
     import raven
-except ImportError:
+except ImportError:  # pragma: nocover
     raven = None
 
 from rejected import connection, consumer, data, errors, process
@@ -92,7 +92,6 @@ class AsyncTestCase(testing.AsyncTestCase):
         self.process = self._create_process()
         self.consumer = self._create_consumer()
         self.channel = self.process.connections['mock'].channel
-        print(self.channel.is_closed)
         self.publish_callable = None
         self.publish_calls = []
         self.channel.basic_publish.side_effect = self._on_publish

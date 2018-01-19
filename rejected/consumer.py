@@ -327,7 +327,7 @@ class Consumer(object):
 
     """Quick-access properties"""
 
-    @utils.message_property
+    @utils.MessageProperty
     def app_id(self):
         """Access the current message's ``app-id`` property as an attribute of
         the consumer class.
@@ -337,7 +337,7 @@ class Consumer(object):
         """
         return self._message.properties.app_id
 
-    @utils.message_property
+    @utils.MessageProperty
     def body(self):
         """Access the opaque body from the current message.
 
@@ -346,7 +346,7 @@ class Consumer(object):
         """
         return self._message.body
 
-    @utils.message_property
+    @utils.MessageProperty
     def content_encoding(self):
         """Access the current message's ``content-encoding`` AMQP message
         property as an attribute of the consumer class.
@@ -357,7 +357,7 @@ class Consumer(object):
         return (self._message.properties.content_encoding or
                 '').lower() or None
 
-    @utils.message_property
+    @utils.MessageProperty
     def content_type(self):
         """Access the current message's ``content-type`` AMQP message property
         as an attribute of the consumer class.
@@ -367,7 +367,7 @@ class Consumer(object):
         """
         return (self._message.properties.content_type or '').lower() or None
 
-    @utils.message_property
+    @utils.MessageProperty
     def correlation_id(self):
         """Access the current message's ``correlation-id`` AMAP message
         property as an attribute of the consumer class. If the message does not
@@ -379,7 +379,7 @@ class Consumer(object):
         """
         return self._correlation_id
 
-    @utils.message_property
+    @utils.MessageProperty
     def exchange(self):
         """Access the AMQP exchange the message was published to as an
         attribute of the consumer class.
@@ -389,7 +389,7 @@ class Consumer(object):
         """
         return self._message.exchange
 
-    @utils.message_property
+    @utils.MessageProperty
     def expiration(self):
         """Access the current message's ``expiration`` AMQP message property as
         an attribute of the consumer class.
@@ -399,7 +399,7 @@ class Consumer(object):
         """
         return self._message.properties.expiration
 
-    @utils.message_property
+    @utils.MessageProperty
     def headers(self):
         """Access the current message's ``headers`` AMQP message property as an
         attribute of the consumer class.
@@ -421,7 +421,7 @@ class Consumer(object):
         """
         return self._finished
 
-    @utils.message_property
+    @utils.MessageProperty
     def io_loop(self):
         """Access the :py:class:`tornado.ioloop.IOLoop` instance for the
         current message.
@@ -433,7 +433,7 @@ class Consumer(object):
         """
         return self._connections[self._message.connection].io_loop
 
-    @utils.message_property
+    @utils.MessageProperty
     def message_id(self):
         """Access the current message's ``message-id`` AMQP message property as
         an attribute of the consumer class.
@@ -464,7 +464,7 @@ class Consumer(object):
         """
         return self.__class__.__name__
 
-    @utils.message_property
+    @utils.MessageProperty
     def priority(self):
         """Access the current message's ``priority`` AMQP message property as
         an attribute of the consumer class.
@@ -474,7 +474,7 @@ class Consumer(object):
         """
         return self._message.properties.priority
 
-    @utils.message_property
+    @utils.MessageProperty
     def properties(self):
         """Access the current message's AMQP message properties in dict form as
         an attribute of the consumer class.
@@ -484,7 +484,7 @@ class Consumer(object):
         """
         return dict(self._message.properties)
 
-    @utils.message_property
+    @utils.MessageProperty
     def redelivered(self):
         """Indicates if the current message has been redelivered.
 
@@ -493,7 +493,7 @@ class Consumer(object):
         """
         return self._message.redelivered
 
-    @utils.message_property
+    @utils.MessageProperty
     def reply_to(self):
         """Access the current message's ``reply-to`` AMQP message property as
         an attribute of the consumer class.
@@ -503,7 +503,7 @@ class Consumer(object):
         """
         return self._message.properties.reply_to
 
-    @utils.message_property
+    @utils.MessageProperty
     def routing_key(self):
         """Access the routing key for the current message.
 
@@ -512,7 +512,7 @@ class Consumer(object):
         """
         return self._message.routing_key
 
-    @utils.message_property
+    @utils.MessageProperty
     def message_type(self):
         """Access the current message's ``type`` AMQP message property as an
         attribute of the consumer class.
@@ -547,7 +547,7 @@ class Consumer(object):
         """
         return self._settings
 
-    @utils.message_property
+    @utils.MessageProperty
     def timestamp(self):
         """Access the unix epoch timestamp value from the AMQP message
         properties of the current message.
@@ -557,7 +557,7 @@ class Consumer(object):
         """
         return self._message.properties.timestamp
 
-    @utils.message_property
+    @utils.MessageProperty
     def user_id(self):
         """Access the ``user-id`` AMQP message property from the current
         message's properties.
@@ -1043,7 +1043,7 @@ class Consumer(object):
         """
         self._connections[connection.name] = connection
 
-    @utils.message_property
+    @utils.MessageProperty
     def _channel(self):
         """Return the channel of the message that is currently being processed.
 

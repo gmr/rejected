@@ -76,7 +76,7 @@ def percentile(values, k):
     return values[int(math.ceil(index))]
 
 
-class message_property(object):
+class MessageProperty(object):
     """A decorator that is used in rejected.consumer.Consumer to only return
     property values if the message is set.
 
@@ -85,7 +85,7 @@ class message_property(object):
         self.__get = getter
         self.__set = setter
 
-    def __get__(self, inst, type=None):
+    def __get__(self, inst, _type=None):
         if getattr(inst, '_message'):
             return self.__get(inst)
 

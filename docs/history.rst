@@ -29,6 +29,7 @@ Other Changes
 - REMOVED code duplication when dealing with ``rejected.consumer.Consumer`` property methods
 - ADDED additional exception handling support in ``rejected.testing.AsyncTestCase``
 - REMOVED catching of KeyboardInterrupt in ``rejected.consumer.Consumer.execute`` favoring catching higher up in the processing flow
+- ADDED call to ``Consumer.shutdown`` in ``rejected.testing.AsyncTestCase.tearDown`` (#25 `nvllsvm <https://github.com/nvllsvm>`_)
 
 Bug Fixes
 ^^^^^^^^^

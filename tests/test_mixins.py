@@ -38,3 +38,12 @@ class GarbageCollectorMixinTestCase(testing.AsyncTestCase):
                     {'id': iteration, 'value': str(uuid.uuid4())})
             self.assertEqual(collect.call_count, 5)
 
+    @testing.gen_test
+    def test_collection_cycle_setter_ignores_none(self):
+        self.consumer.collection_cycle = None
+        with mock.patch('gc.collect') as collect:
+            for iteration in range(0, 10):
+                yield self.process_message(
+                    {'id': iteration, 'value': str(uuid.uuid4())})
+            self.assertEqual(collect.call_count, 2)
+

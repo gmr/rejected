@@ -118,6 +118,7 @@ class AsyncTestCase(testing.AsyncTestCase):
         super(AsyncTestCase, self).tearDown()
         if not self.consumer.is_finished:
             self.consumer.finish()
+        self.consumer.shutdown()
 
     def get_consumer(self):
         """Override to return the consumer class for testing.

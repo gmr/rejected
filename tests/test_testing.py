@@ -8,7 +8,6 @@ from . import common
 
 
 class ConsumerLifecycleTests(testing.AsyncTestCase):
-
     def get_consumer(self):
         return common.TestConsumer
 

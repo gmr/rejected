@@ -7,7 +7,6 @@ from rejected import state
 
 
 class TestState(unittest.TestCase):
-
     def setUp(self):
         self._obj = state.State()
 

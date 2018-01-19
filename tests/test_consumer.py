@@ -17,7 +17,6 @@ LOGGER = logging.getLogger(__name__)
 
 
 class ConsumerInitializationTests(unittest.TestCase):
-
     def test_configuration_is_assigned(self):
         cfg = {'foo': 'bar'}
         obj = consumer.Consumer(settings=cfg, process=None)
@@ -39,7 +38,6 @@ class ConsumerInitializationTests(unittest.TestCase):
 
 
 class ConsumerDefaultProcessTests(testing.AsyncTestCase):
-
     def get_consumer(self):
         return consumer.Consumer
 
@@ -55,7 +53,6 @@ class ConsumerDefaultProcessTests(testing.AsyncTestCase):
 
 
 class ConsumerSetConnectionTests(unittest.TestCase):
-
     def test_set_channel_assigns_to_channel(self):
         obj = consumer.Consumer(settings={}, process=None)
         conn = mock.Mock(spec=connection.Connection)
@@ -65,7 +62,6 @@ class ConsumerSetConnectionTests(unittest.TestCase):
 
 
 class ConsumerLifecycleTests(testing.AsyncTestCase):
-
     def get_consumer(self):
         return common.TestConsumer
 
@@ -94,7 +90,6 @@ class ConsumerLifecycleTests(testing.AsyncTestCase):
 
 
 class TestFinishedConsumer(consumer.Consumer):
-
     def __init__(self, *args, **kwargs):
         self.called_prepare = False
         self.called_process = False
@@ -115,7 +110,6 @@ class TestFinishedConsumer(consumer.Consumer):
 
 
 class FinishedInPrepareTestCase(testing.AsyncTestCase):
-
     def get_consumer(self):
         return TestFinishedConsumer
 
@@ -130,7 +124,6 @@ class FinishedInPrepareTestCase(testing.AsyncTestCase):
 
 
 class TestOnFinishConsumer(consumer.Consumer):
-
     def __init__(self, *args, **kwargs):
         self.called_on_finish = False
         self.raise_in_prepare = None
@@ -152,7 +145,6 @@ class TestOnFinishConsumer(consumer.Consumer):
 
 
 class OnFinishAfterExceptionTests(testing.AsyncTestCase):
-
     def get_consumer(self):
         return TestOnFinishConsumer
 
@@ -245,14 +237,12 @@ class TestPublisher(consumer.Consumer):
             properties = self.headers.get('properties', {})
             self.rpc_reply(self.settings['body'], properties)
         else:
-            self.publish_message(self.settings['exchange'],
-                                 self.settings['routing_key'],
-                                 {'content_type': 'text/plain'},
-                                 self.settings['body'])
+            self.publish_message(
+                self.settings['exchange'], self.settings['routing_key'],
+                {'content_type': 'text/plain'}, self.settings['body'])
 
 
 class ConsumerPublishingTests(testing.AsyncTestCase):
-
     def get_settings(self):
         return {
             'exchange': str(uuid.uuid4()),
@@ -282,9 +272,10 @@ class ConsumerPublishingTests(testing.AsyncTestCase):
             'reply_to': str(uuid.uuid4())
         }
 
-        yield self.process_message(self.consumer.settings['body'],
-                                   properties=properties,
-                                   exchange=self.consumer.settings['exchange'])
+        yield self.process_message(
+            self.consumer.settings['body'],
+            properties=properties,
+            exchange=self.consumer.settings['exchange'])
 
         self.assertEqual(self.published_messages[0].properties.correlation_id,
                          properties['message_id'])
@@ -311,9 +302,10 @@ class ConsumerPublishingTests(testing.AsyncTestCase):
             'reply_to': str(uuid.uuid4())
         }
 
-        yield self.process_message(self.consumer.settings['body'],
-                                   properties=properties,
-                                   exchange=self.consumer.settings['exchange'])
+        yield self.process_message(
+            self.consumer.settings['body'],
+            properties=properties,
+            exchange=self.consumer.settings['exchange'])
 
         self.assertEqual(self.published_messages[0].exchange,
                          self.consumer.settings['exchange'])
@@ -345,7 +337,6 @@ class ConsumerPublishingTests(testing.AsyncTestCase):
 
 
 class TestConfirmingPublisher(consumer.Consumer):
-
     def initialize(self):
         self.confirmations = []
 
@@ -354,10 +345,8 @@ class TestConfirmingPublisher(consumer.Consumer):
         for iteration in range(0, 3):
             self.logger.info('Publishing message %i', iteration)
             confirmation = yield self.publish_message(
-                self.settings['exchange'],
-                self.settings['routing_key'],
-                self.properties,
-                self.settings['body'])
+                self.settings['exchange'], self.settings['routing_key'],
+                self.properties, self.settings['body'])
             self.confirmations.append(confirmation)
         self.logger.info('Confirmations: %r', self.confirmations)
 
@@ -410,8 +399,8 @@ class ConfirmingPublishingTests(testing.AsyncTestCase):
 
     @testing.gen_test
     def test_confirmation_branch_case(self):
-        def raise_undelivered(
-                _exchange, _routing_key, properties, _body, _mandatory):
+        def raise_undelivered(_exchange, _routing_key, properties, _body,
+                              _mandatory):
             if properties.type == 'raise':
                 LOGGER.debug('Raising testing.UndeliveredMessage()')
                 raise testing.UndeliveredMessage()
@@ -419,9 +408,12 @@ class ConfirmingPublishingTests(testing.AsyncTestCase):
         with self.publishing_side_effect(raise_undelivered):
             yield self.process_message(self.consumer.settings['body'],
                                        'text/plain')
-            yield self.process_message(self.consumer.settings['body'],
-                                       'text/plain',
-                                       properties={'type': 'raise'})
+            yield self.process_message(
+                self.consumer.settings['body'],
+                'text/plain',
+                properties={
+                    'type': 'raise'
+                })
             yield self.process_message(self.consumer.settings['body'],
                                        'text/plain')
 
@@ -431,7 +423,6 @@ class ConfirmingPublishingTests(testing.AsyncTestCase):
 
 
 class ConsumerPropertyTestCase(testing.AsyncTestCase):
-
     def get_consumer(self):
         return common.TestConsumer
 
@@ -449,14 +440,18 @@ class ConsumerPropertyTestCase(testing.AsyncTestCase):
     def test_consumer_content_encoding(self):
         value = str(uuid.uuid4())
         yield self.process_message(
-            mocks.BODY, properties={'content_encoding': value})
+            mocks.BODY, properties={
+                'content_encoding': value
+            })
         self.assertEqual(self.consumer.content_encoding, value)
 
     @testing.gen_test
     def test_consumer_content_type(self):
         value = str(uuid.uuid4())
         yield self.process_message(
-            mocks.BODY, properties={'content_type': value})
+            mocks.BODY, properties={
+                'content_type': value
+            })
         self.assertEqual(self.consumer.content_type, value)
 
     @testing.gen_test
@@ -469,13 +464,15 @@ class ConsumerPropertyTestCase(testing.AsyncTestCase):
     def test_consumer_expiration(self):
         value = str(uuid.uuid4())
         yield self.process_message(
-            mocks.BODY,  properties={'expiration': value})
+            mocks.BODY, properties={
+                'expiration': value
+            })
         self.assertEqual(self.consumer.expiration, value)
 
     @testing.gen_test
     def test_consumer_headers(self):
         value = {str(uuid.uuid4()): str(uuid.uuid4())}
-        yield self.process_message(mocks.BODY,  properties={'headers': value})
+        yield self.process_message(mocks.BODY, properties={'headers': value})
         self.assertDictEqual(self.consumer.headers, value)
 
     @testing.gen_test
@@ -522,7 +519,9 @@ class ConsumerPropertyTestCase(testing.AsyncTestCase):
     def test_consumer_timestamp(self):
         value = int(time.time())
         yield self.process_message(
-            mocks.BODY, 'text/plain', properties={'timestamp': value})
+            mocks.BODY, 'text/plain', properties={
+                'timestamp': value
+            })
         self.assertEqual(self.consumer.timestamp, value)
 
     @testing.gen_test
@@ -533,7 +532,6 @@ class ConsumerPropertyTestCase(testing.AsyncTestCase):
 
 
 class RequireSettingsConsumer(consumer.Consumer):
-
     def __init__(self, *args, **kwargs):
         super(RequireSettingsConsumer, self).__init__(*args, **kwargs)
         self.setting_key = None

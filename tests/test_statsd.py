@@ -7,7 +7,6 @@ from rejected import statsd
 
 
 class TestCase(unittest.TestCase):
-
     def setUp(self):
         super(TestCase, self).setUp()
         self.name = str(uuid.uuid4())
@@ -33,17 +32,15 @@ class TestCase(unittest.TestCase):
 
 
 class SendTestCase(TestCase):
-
     def setUp(self):
         super(SendTestCase, self).setUp()
         self.socket = mock.Mock()
         self.statsd._socket = self.socket
 
     def payload_format(self, key, value, metric_type):
-        return self.statsd.PAYLOAD_FORMAT.format(self.settings['prefix'],
-                                                 self.statsd._hostname,
-                                                 self.name, key, value,
-                                                 metric_type).encode('utf-8')
+        return self.statsd.PAYLOAD_FORMAT.format(
+            self.settings['prefix'], self.statsd._hostname, self.name, key,
+            value, metric_type).encode('utf-8')
 
     def test_add_timing(self):
         self.statsd.add_timing('foo', 2.5)

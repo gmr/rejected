@@ -5,7 +5,6 @@ from rejected import utils
 
 
 class TestImportNamspacedClass(unittest.TestCase):
-
     def test_import_consumer(self):
         import logging
         (result_class,
@@ -29,7 +28,6 @@ class TestImportNamspacedClass(unittest.TestCase):
 
 
 class Decorated(object):
-
     def __init__(self):
         self._message = {}
 
@@ -44,7 +42,6 @@ class Decorated(object):
 
 
 class MessagePropertyDecoratorTestCase(unittest.TestCase):
-
     def test_empty_foo(self):
         obj = Decorated()
         self.assertIsNone(obj.foo)

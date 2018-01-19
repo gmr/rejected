@@ -9,15 +9,14 @@ from rejected import consumer, log, testing
 
 
 class FilterTestCase(unittest.TestCase):
-
     def setUp(self):
-        self.log_record = logging.LogRecord(
-            'test', logging.INFO, path.realpath(__file__), 13,
-            'Example logged message', [], None, 'setUp')
+        self.log_record = logging.LogRecord('test', logging.INFO,
+                                            path.realpath(__file__), 13,
+                                            'Example logged message', [], None,
+                                            'setUp')
 
 
 class CorrelationIDFilterTestCase(FilterTestCase):
-
     def setUp(self):
         super(CorrelationIDFilterTestCase, self).setUp()
         self.log_filter = log.CorrelationIDFilter()
@@ -31,7 +30,6 @@ class CorrelationIDFilterTestCase(FilterTestCase):
 
 
 class NoCorrelationIDFilterTestCase(FilterTestCase):
-
     def setUp(self):
         super(NoCorrelationIDFilterTestCase, self).setUp()
         self.log_filter = log.NoCorrelationIDFilter()
@@ -45,7 +43,6 @@ class NoCorrelationIDFilterTestCase(FilterTestCase):
 
 
 class CorrelationIDAdapterTestCase(testing.AsyncTestCase):
-
     def test_that_correlation_adapter_is_assigned(self):
         self.assertIsInstance(self.consumer.logger, log.CorrelationIDAdapter)
 
@@ -54,26 +51,26 @@ class CorrelationIDAdapterTestCase(testing.AsyncTestCase):
         msg, kwargs = self.consumer.logger.process('Test', {})
         self.assertEqual(msg, 'Test')
         self.assertDictEqual(
-            kwargs['extra'],
-            {'parent': self.consumer.name,
-             'correlation_id': self.consumer.correlation_id})
+            kwargs['extra'], {
+                'parent': self.consumer.name,
+                'correlation_id': self.consumer.correlation_id
+            })
 
 
 # Tests for deprecated classes
 
 
 class CorrelationAdapterTestCase(unittest.TestCase):
-
     def test_that_warnings_warn_is_invoked(self):
         with mock.patch('warnings.warn') as warn:
             log.CorrelationAdapter(
-                logging.getLogger(__name__),
-                {'parent': mock.Mock(spec=consumer.Consumer)})
+                logging.getLogger(__name__), {
+                    'parent': mock.Mock(spec=consumer.Consumer)
+                })
             warn.assert_called_once()
 
 
 class CorrelationFilterDeprecationTestCase(unittest.TestCase):
-
     def test_that_warnings_warn_is_invoked(self):
         with mock.patch('warnings.warn') as warn:
             log.CorrelationFilter()
@@ -81,7 +78,6 @@ class CorrelationFilterDeprecationTestCase(unittest.TestCase):
 
 
 class CorrelationFilterExistsTestCase(FilterTestCase):
-
     def setUp(self):
         super(CorrelationFilterExistsTestCase, self).setUp()
         self.log_filter = log.CorrelationFilter(exists=True)
@@ -95,7 +91,6 @@ class CorrelationFilterExistsTestCase(FilterTestCase):
 
 
 class CorrelationFilterExistsFalseTestCase(FilterTestCase):
-
     def setUp(self):
         super(CorrelationFilterExistsFalseTestCase, self).setUp()
         self.log_filter = log.CorrelationFilter(exists=False)

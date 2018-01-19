@@ -10,7 +10,6 @@ from . import mocks
 
 
 class TestProperties(unittest.TestCase):
-
     def setUp(self):
         self.properties = data.Properties(mocks.PROPERTIES)
 
@@ -42,28 +41,22 @@ class TestProperties(unittest.TestCase):
                          mocks.PROPERTIES.message_id)
 
     def test_priority(self):
-        self.assertEqual(self.properties.priority,
-                         mocks.PROPERTIES.priority)
+        self.assertEqual(self.properties.priority, mocks.PROPERTIES.priority)
 
     def test_reply_to(self):
-        self.assertEqual(self.properties.reply_to,
-                         mocks.PROPERTIES.reply_to)
+        self.assertEqual(self.properties.reply_to, mocks.PROPERTIES.reply_to)
 
     def test_timestamp(self):
-        self.assertEqual(self.properties.timestamp,
-                         mocks.PROPERTIES.timestamp)
+        self.assertEqual(self.properties.timestamp, mocks.PROPERTIES.timestamp)
 
     def test_type(self):
-        self.assertEqual(self.properties.type,
-                         mocks.PROPERTIES.type)
+        self.assertEqual(self.properties.type, mocks.PROPERTIES.type)
 
     def test_user_id(self):
-        self.assertEqual(self.properties.user_id,
-                         mocks.PROPERTIES.user_id)
+        self.assertEqual(self.properties.user_id, mocks.PROPERTIES.user_id)
 
 
 class TestPartialProperties(unittest.TestCase):
-
     def setUp(self):
         self.properties = data.Properties(
             content_type='application/json', priority=2)
@@ -106,10 +99,9 @@ class TestPartialProperties(unittest.TestCase):
 
 
 class TestMessage(unittest.TestCase):
-
     def setUp(self):
-        self.message = data.Message(
-            'mock', mocks.CHANNEL, mocks.METHOD, mocks.PROPERTIES, mocks.BODY)
+        self.message = data.Message('mock', mocks.CHANNEL, mocks.METHOD,
+                                    mocks.PROPERTIES, mocks.BODY)
 
     def test_body(self):
         self.assertEqual(self.message.body, mocks.BODY)
@@ -176,8 +168,7 @@ class TestMessage(unittest.TestCase):
                          mocks.PROPERTIES.timestamp)
 
     def test_type(self):
-        self.assertEqual(self.message.properties.type,
-                         mocks.PROPERTIES.type)
+        self.assertEqual(self.message.properties.type, mocks.PROPERTIES.type)
 
     def test_user_id(self):
         self.assertEqual(self.message.properties.user_id,
@@ -185,7 +176,6 @@ class TestMessage(unittest.TestCase):
 
 
 class TestMeasurement(unittest.TestCase):
-
     def setUp(self):
         self.measurement = data.Measurement()
 
@@ -194,8 +184,9 @@ class TestMeasurement(unittest.TestCase):
             self.assertDictEqual(dict(value), {})
 
     def test_repr(self):
-        self.assertEqual(repr(self.measurement),
-                         '<Measurement id={}>'.format(id(self.measurement)))
+        self.assertEqual(
+            repr(self.measurement), '<Measurement id={}>'.format(
+                id(self.measurement)))
 
     def test_incr_decr(self):
         keys = [str(uuid.uuid4()) for _i in range(0, 10)]
@@ -212,8 +203,11 @@ class TestMeasurement(unittest.TestCase):
         self.measurement.set_tag('foo', 'bar')
         self.measurement.set_tag('baz', True)
         self.measurement.set_tag('qux', 1)
-        self.assertDictEqual(self.measurement.tags,
-                             {'foo': 'bar', 'baz': True, 'qux': 1})
+        self.assertDictEqual(self.measurement.tags, {
+            'foo': 'bar',
+            'baz': True,
+            'qux': 1
+        })
 
     def test_add_duration(self):
         expectation = random.random()

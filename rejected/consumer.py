@@ -14,8 +14,8 @@ message's property, it will automatically be decoded.
 
 Supported `SmartConsumer` MIME types are:
 
- - application/msgpack (with u-msgpack-python installed)
  - application/json
+ - application/msgpack (with u-msgpack-python installed)
  - application/pickle
  - application/x-pickle
  - application/x-plist
@@ -42,6 +42,7 @@ import time
 import uuid
 import zlib
 
+from ietfparse import headers
 import pika
 from tornado import concurrent, gen, locks
 import yaml
@@ -67,17 +68,17 @@ try:
 except NameError:  # pragma: nocover
     unicode = str
 
-
-DEFAULT_CHANNEL = 'default'
+_DEFAULT_CHANNEL = 'default'
 _DROPPED_MESSAGE = 'X-Rejected-Dropped'
 _PROCESSING_EXCEPTIONS = 'X-Processing-Exceptions'
 _EXCEPTION_FROM = 'X-Exception-From'
+_PYTHON3 = True if sys.version_info > (3, 0, 0) else False
 
-BS4_MIME_TYPES = ('text/html', 'text/xml')
-PICKLE_MIME_TYPES = ('application/pickle', 'application/x-pickle',
-                     'application/x-vnd.python.pickle',
-                     'application/vnd.python.pickle')
-YAML_MIME_TYPES = ('text/yaml', 'text/x-yaml')
+_BS4_SUBTYPES = ('html', 'xml')
+_IGNORE_SUBTYPES = ('plain', 'octet-stream')
+_PICKLE_SUBTYPES = ('pickle', 'x-pickle', 'x-vnd.python.pickle',
+                    'vnd.python.pickle')
+_YAML_SUBTYPES = ('yaml', 'x-yaml')
 
 
 class Consumer(object):
@@ -190,13 +191,13 @@ class Consumer(object):
         self._connections = {}
         self._correlation_id = None
         self._drop_exchange = kwargs.get('drop_exchange') or self.DROP_EXCHANGE
-        self._drop_invalid = (kwargs.get('drop_invalid_messages') or
-                              self.DROP_INVALID_MESSAGES)
-        self._error_exchange = (kwargs.get('error_exchange') or
-                                self.ERROR_EXCHANGE)
-        self._error_max_retry = (kwargs.get('error_max_retry') or
-                                 self.ERROR_MAX_RETRIES or
-                                 self.ERROR_MAX_RETRY)
+        self._drop_invalid = (kwargs.get('drop_invalid_messages')
+                              or self.DROP_INVALID_MESSAGES)
+        self._error_exchange = (kwargs.get('error_exchange')
+                                or self.ERROR_EXCHANGE)
+        self._error_max_retry = (kwargs.get('error_max_retry')
+                                 or self.ERROR_MAX_RETRIES
+                                 or self.ERROR_MAX_RETRY)
         self._finished = False
         self._message = None
         self._message_type = kwargs.get('message_type') or self.MESSAGE_TYPE
@@ -354,8 +355,8 @@ class Consumer(object):
         :rtype: str
 
         """
-        return (self._message.properties.content_encoding or
-                '').lower() or None
+        return (self._message.properties.content_encoding
+                or '').lower() or None
 
     @utils.MessageProperty
     def content_type(self):
@@ -600,8 +601,13 @@ class Consumer(object):
         self._finished = True
         self.on_finish()
 
-    def publish_message(self, exchange, routing_key, properties, body,
-                        channel=None, connection=None):
+    def publish_message(self,
+                        exchange,
+                        routing_key,
+                        properties,
+                        body,
+                        channel=None,
+                        connection=None):
         """Publish a message to RabbitMQ on the same channel the original
         message was received on. If
         `publisher confirmations <https://www.rabbitmq.com/confirms.html>`_
@@ -626,11 +632,11 @@ class Consumer(object):
 
         """
         conn = self._publish_connection(channel or connection)
-        self.logger.debug('Publishing message to %s:%s (%s)',
-                          exchange, routing_key, conn.name)
+        self.logger.debug('Publishing message to %s:%s (%s)', exchange,
+                          routing_key, conn.name)
         basic_properties = self._get_pika_properties(properties)
-        with self._measurement.track_duration(
-                'publish.{}.{}'.format(exchange, routing_key)):
+        with self._measurement.track_duration('publish.{}.{}'.format(
+                exchange, routing_key)):
             conn.channel.basic_publish(
                 exchange=exchange,
                 routing_key=routing_key,
@@ -640,7 +646,11 @@ class Consumer(object):
             return self._publisher_confirmation_future(
                 conn.name, exchange, routing_key, basic_properties)
 
-    def rpc_reply(self, body, properties=None, exchange=None, reply_to=None,
+    def rpc_reply(self,
+                  body,
+                  properties=None,
+                  exchange=None,
+                  reply_to=None,
                   connection=None):
         """Reply to the message that is currently being processed.
 
@@ -696,9 +706,9 @@ class Consumer(object):
             properties['message_id'] = str(uuid.uuid4())
         if not properties.get('timestamp'):
             properties['timestamp'] = int(time.time())
-        return self.publish_message(exchange or self.exchange,
-                                    reply_to or self.reply_to,
-                                    properties, body, connection)
+        return self.publish_message(exchange or self.exchange, reply_to
+                                    or self.reply_to, properties, body,
+                                    connection)
 
     def send_exception_to_sentry(self, exc_info):
         """Send an exception to Sentry if enabled.
@@ -717,8 +727,8 @@ class Consumer(object):
 
         """
         if self.sentry_client:
-            self.logger.debug(
-                'Setting sentry context for %s to %s', tag, value)
+            self.logger.debug('Setting sentry context for %s to %s', tag,
+                              value)
             self.sentry_client.tags_context({tag: value})
 
     def stats_add_duration(self, key, duration):
@@ -838,8 +848,8 @@ class Consumer(object):
         try:
             yield
         finally:
-            self.stats_add_duration(
-                key, max(start_time, time.time()) - start_time)
+            self.stats_add_duration(key,
+                                    max(start_time, time.time()) - start_time)
 
     def unset_sentry_context(self, tag):
         """Remove a context tag from sentry
@@ -896,8 +906,8 @@ class Consumer(object):
         # If timestamp is set, record age of the message coming in
         if message_in.properties.timestamp:
             message_age = float(
-                    max(message_in.properties.timestamp, time.time()) -
-                    message_in.properties.timestamp)
+                max(message_in.properties.timestamp, time.time()) -
+                message_in.properties.timestamp)
             if message_age > 0:
                 measurement.add_duration(self.message_age_key(), message_age)
 
@@ -931,16 +941,14 @@ class Consumer(object):
                 raise gen.Return(data.MESSAGE_EXCEPTION)
 
         # Check the number of ProcessingErrors and possibly drop the message
-        if (self._error_max_retry and
-                _PROCESSING_EXCEPTIONS in self.headers):
+        if self._error_max_retry and _PROCESSING_EXCEPTIONS in self.headers:
             if self.headers[_PROCESSING_EXCEPTIONS] >= self._error_max_retry:
                 self.logger.warning('Dropping message with %i deaths due to '
                                     'ERROR_MAX_RETRY',
                                     self.headers[_PROCESSING_EXCEPTIONS])
                 if self._drop_exchange:
-                    self._republish_dropped_message(
-                        'max retries ({})'.format(
-                            self.headers[_PROCESSING_EXCEPTIONS]))
+                    self._republish_dropped_message('max retries ({})'.format(
+                        self.headers[_PROCESSING_EXCEPTIONS]))
                 raise gen.Return(data.MESSAGE_DROP)
 
         # Prepare and process, catching exceptions
@@ -961,9 +969,11 @@ class Consumer(object):
             raise gen.Return(data.RABBITMQ_EXCEPTION)
 
         except ConfigurationException as error:
-            self._log_exception('Exception processing delivery %s: %s',
-                                message_in.delivery_tag, error,
-                                exc_info=sys.exc_info())
+            self._log_exception(
+                'Exception processing delivery %s: %s',
+                message_in.delivery_tag,
+                error,
+                exc_info=sys.exc_info())
             self._measurement.set_tag('exception', error.__class__.__name__)
             if error.metric:
                 self._measurement.set_tag('error', error.metric)
@@ -992,8 +1002,8 @@ class Consumer(object):
             self._measurement.set_tag('exception', error.__class__.__name__)
             if error.metric:
                 self._measurement.set_tag('error', error.metric)
-            self._republish_processing_error(
-                error.metric or error.__class__.__name__)
+            self._republish_processing_error(error.metric
+                                             or error.__class__.__name__)
             raise gen.Return(data.PROCESSING_EXCEPTION)
 
         except NotImplementedError as error:
@@ -1003,9 +1013,11 @@ class Consumer(object):
             raise gen.Return(data.UNHANDLED_EXCEPTION)
 
         except Exception as error:
-            self._log_exception('Exception processing delivery %s: %s',
-                                message_in.delivery_tag, error,
-                                exc_info=sys.exc_info())
+            self._log_exception(
+                'Exception processing delivery %s: %s',
+                message_in.delivery_tag,
+                error,
+                exc_info=sys.exc_info())
             self._measurement.set_tag('exception', 'UnhandledException')
             raise gen.Return(data.UNHANDLED_EXCEPTION)
 
@@ -1095,8 +1107,11 @@ class Consumer(object):
         if all(exc_info):
             exc_type, exc_value, tb = exc_info
             exc_name = exc_type.__name__
-            self.logger.exception('Processor handled %s: %s', exc_name,
-                                  exc_value, exc_info=exc_info)
+            self.logger.exception(
+                'Processor handled %s: %s',
+                exc_name,
+                exc_value,
+                exc_info=exc_info)
         self._process.send_exception_to_sentry(exc_info)
 
     def _publisher_confirmation_future(self, name, exchange, routing_key,
@@ -1161,9 +1176,7 @@ class Consumer(object):
         properties['headers']['X-Original-Exchange'] = self._message.exchange
 
         self._message.channel.basic_publish(
-            self._drop_exchange,
-            self._message.routing_key,
-            self._message.body,
+            self._drop_exchange, self._message.routing_key, self._message.body,
             pika.BasicProperties(**properties))
 
     def _republish_processing_error(self, error):
@@ -1194,11 +1207,10 @@ class Consumer(object):
             except TypeError:
                 properties['headers'][_PROCESSING_EXCEPTIONS] = 1
 
-        self._message.channel.basic_publish(
-            self._error_exchange,
-            self._message.routing_key,
-            self._message.body,
-            pika.BasicProperties(**properties))
+        self._message.channel.basic_publish(self._error_exchange,
+                                            self._message.routing_key,
+                                            self._message.body,
+                                            pika.BasicProperties(**properties))
 
 
 class SmartConsumer(Consumer):
@@ -1218,6 +1230,7 @@ class SmartConsumer(Consumer):
     *Supported MIME types for automatic serialization and deserialization are:*
 
      - application/json
+     - application/msgpack
      - application/pickle
      - application/x-pickle
      - application/x-plist
@@ -1242,10 +1255,16 @@ class SmartConsumer(Consumer):
         into the same class.
 
     """
-    def publish_message(self, exchange, routing_key, properties, body,
+
+    def publish_message(self,
+                        exchange,
+                        routing_key,
+                        properties,
+                        body,
                         no_serialization=False,
                         no_encoding=False,
-                        channel=None, connection=None):
+                        channel=None,
+                        connection=None):
         """Publish a message to RabbitMQ on the same channel the original
         message was received on.
 
@@ -1261,6 +1280,10 @@ class SmartConsumer(Consumer):
 
         Both of these behaviors can be disabled by setting
         ``no_serialization`` or ``no_encoding`` to ``True``.
+
+        If you pass an unsupported content-type or content-encoding when using
+        the auto-serialization and auto-encoding features, a :exc:`ValueError`
+        will be raised.
 
         .. versionchanged:: 4.0.0
            The method returns a :py:class:`~tornado.concurrent.Future` if
@@ -1279,21 +1302,19 @@ class SmartConsumer(Consumer):
         :param str connection: The connection to use. If it is not
             specified, the channel that the message was delivered on is used.
         :rtype: tornado.concurrent.Future or None
+        :raises: ValueError
 
         """
         # Auto-serialize the content if needed
-        is_string = (isinstance(body, str) or
-                     isinstance(body, bytes) or
-                     isinstance(body, unicode))
-        if (not no_serialization and not is_string and
-                properties.get('content_type')):
-            self.logger.debug('Auto-serializing message body')
-            body = self._auto_serialize(properties.get('content_type'), body)
+        is_string = (isinstance(body, str) or isinstance(body, bytes)
+                     or isinstance(body, unicode))
+        if properties.get('content_type') and \
+                not no_serialization and not is_string:
+            body = self._auto_serialize(properties['content_type'], body)
 
         # Auto-encode the message body if needed
-        if not no_encoding and properties.get('content_encoding'):
-            self.logger.debug('Auto-encoding message body')
-            body = self._auto_encode(properties.get('content_encoding'), body)
+        if properties.get('content_encoding') and not no_encoding:
+            body = self._auto_encode(properties['content_encoding'], body)
 
         return super(SmartConsumer, self).publish_message(
             exchange, routing_key, properties, body, channel or connection)
@@ -1310,41 +1331,51 @@ class SmartConsumer(Consumer):
         if self._message_body:
             return self._message_body
 
-        # Handle bzip2 compressed content
-        elif self.content_encoding == 'bzip2':
+        self._message_body = self._message.body
+        if self.content_encoding == 'bzip2':
             self._message_body = self._decode_bz2(self._message.body)
-
-        # Handle zlib compressed content
         elif self.content_encoding == 'gzip':
             self._message_body = self._decode_gzip(self._message.body)
+        elif self.content_encoding is not None:
+            self.logger.debug('Unsupported content-encoding: %s',
+                              self.content_encoding)
 
-        # Else we want to assign self._message.body to self._message_body
-        else:
-            self._message_body = self._message.body
+        try:
+            cth = headers.parse_content_type(self.content_type)
+        except (TypeError, ValueError):
+            return self._message_body
+
+        encoding = cth.parameters.get('charset', 'utf-8')
 
         # Handle the auto-deserialization
-        if self.content_type == 'application/json':
-            self._message_body = self._load_json_value(self._message_body)
-
-        elif umsgpack and self.content_type == 'application/msgpack':
-            self._message_body = self._load_msgpack_value(self._message_body)
-
-        elif self.content_type in PICKLE_MIME_TYPES:
-            self._message_body = self._load_pickle_value(self._message_body)
-
-        elif self.content_type == 'application/x-plist':
-            self._message_body = self._load_plist_value(self._message_body)
-
-        elif self.content_type == 'text/csv':
-            self._message_body = self._load_csv_value(self._message_body)
-
-        elif bs4 and self.content_type in BS4_MIME_TYPES:
-            self._message_body = self._load_bs4_value(self._message_body)
-
-        elif self.content_type in YAML_MIME_TYPES:
-            self._message_body = self._load_yaml_value(self._message_body)
-
-        # Return the message body
+        if cth.content_type == 'application':
+            if cth.content_subtype == 'json':
+                self._message_body = self._load_json_value(
+                    self._message_body, encoding)
+            elif cth.content_subtype == 'msgpack' and umsgpack:
+                self._message_body = self._load_msgpack_value(
+                    self._message_body)
+            elif cth.content_subtype in _PICKLE_SUBTYPES:
+                self._message_body = self._load_pickle_value(
+                    self._message_body)
+            elif cth.content_subtype == 'x-plist':
+                self._message_body = self._load_plist_value(self._message_body)
+            elif cth.content_subtype not in _IGNORE_SUBTYPES:
+                self.logger.debug('Unsupported content-type: %s',
+                                  self.content_type)
+        elif cth.content_type == 'text':
+            if cth.content_subtype == 'csv':
+                self._message_body = self._load_csv_value(
+                    self._message_body, encoding)
+            elif cth.content_subtype in _BS4_SUBTYPES and bs4:
+                self._message_body = self._load_bs4_value(
+                    self._message_body, cth.content_subtype, encoding)
+            elif cth.content_subtype in _YAML_SUBTYPES:
+                self._message_body = self._load_yaml_value(
+                    self._message_body, encoding)
+            elif cth.content_subtype not in _IGNORE_SUBTYPES:
+                self.logger.debug('Unsupported content-type: %s',
+                                  self.content_type)
         return self._message_body
 
     def _auto_encode(self, content_encoding, value):
@@ -1355,14 +1386,12 @@ class SmartConsumer(Consumer):
         :rtype: value
 
         """
+        self.logger.debug('Attempting to auto-encode as %s', content_encoding)
         if content_encoding == 'gzip':
             return self._encode_gzip(value)
-
-        if content_encoding == 'bzip2':
+        elif content_encoding == 'bzip2':
             return self._encode_bz2(value)
-
-        self.logger.warning(
-            'Invalid content-encoding specified for auto-encoding')
+        self.logger.debug('Unsupported content-encoding: %s', content_encoding)
         return value
 
     def _auto_serialize(self, content_type, value):
@@ -1373,40 +1402,27 @@ class SmartConsumer(Consumer):
         :rtype: str
 
         """
-        if content_type == 'application/json':
-            self.logger.debug('Auto-serializing content as JSON')
-            return self._dump_json_value(value)
-
-        elif umsgpack and content_type == 'application/msgpack':
-            self.logger.debug('Auto-serializing content as msgpack')
-            return self._dump_msgpack_value(value)
-
-        elif content_type in PICKLE_MIME_TYPES:
-            self.logger.debug('Auto-serializing content as Pickle')
-            return self._dump_pickle_value(value)
-
-        elif content_type == 'application/x-plist':
-            self.logger.debug('Auto-serializing content as plist')
-            return self._dump_plist_value(value)
-
-        elif content_type == 'text/csv':
-            self.logger.debug('Auto-serializing content as csv')
-            return self._dump_csv_value(value)
-
-        # If it's XML or HTML auto
-        elif (bs4 and isinstance(value, bs4.BeautifulSoup) and
-              content_type in ('text/html', 'text/xml')):
-            self.logger.debug('Dumping BS4 object into HTML or XML')
-            return self._dump_bs4_value(value)
-
-        # If it's YAML, load the content via pyyaml into a dict
-        elif self.content_type in YAML_MIME_TYPES:
-            self.logger.debug('Auto-serializing content as YAML')
-            return self._dump_yaml_value(value)
-
-        self.logger.warning(
-            'Invalid content-type specified for auto-serialization')
-        return value
+        cth = headers.parse_content_type(content_type)
+        self.logger.debug('Attempting to auto-serialize as %s (%r)',
+                          content_type, cth)
+        if cth.content_type == 'application':
+            if cth.content_subtype == 'json':
+                return self._dump_json_value(value)
+            elif cth.content_subtype == 'msgpack' and umsgpack:
+                return self._dump_msgpack_value(value)
+            elif cth.content_subtype in _PICKLE_SUBTYPES:
+                return self._dump_pickle_value(value)
+            elif cth.content_subtype == 'x-plist':
+                return self._dump_plist_value(value)
+        elif cth.content_type == 'text':
+            if cth.content_subtype == 'csv':
+                return self._dump_csv_value(value)
+            elif (cth.content_subtype in _BS4_SUBTYPES and bs4
+                  and isinstance(value, bs4.BeautifulSoup)):
+                return self._dump_bs4_value(value, cth.content_subtype)
+            elif cth.content_subtype in _YAML_SUBTYPES:
+                return self._dump_yaml_value(value)
+        raise ValueError('Unsupported content-type: {}'.format(content_type))
 
     @staticmethod
     def _decode_bz2(value):
@@ -1428,44 +1444,49 @@ class SmartConsumer(Consumer):
         """
         return zlib.decompress(value)
 
-    @staticmethod
-    def _dump_bs4_value(value):
+    def _dump_bs4_value(self, value, subtype):
         """Return a BeautifulSoup object as a string
 
         :param bs4.BeautifulSoup value: The object to return a string from
         :rtype: str
 
         """
+        self.logger.debug('Auto-serializing body as %s', subtype)
         return str(value)
 
-    @staticmethod
-    def _dump_csv_value(value):
-        """Take a list of lists and return it as a CSV value
+    def _dump_csv_value(self, rows):
+        """Take a list of dicts and return it as a CSV value. The
 
-        :param list value: A list of lists to return as a CSV
+        .. versionchanged:: 4.0.0
+
+        :param list rows: A list of lists to return as a CSV
         :rtype: str
 
         """
-        buff = io.StringIO()
-        writer = csv.writer(buff, quotechar='"', quoting=csv.QUOTE_ALL)
-        writer.writerows(value)
-        buff.seek(0)
-        value = buff.read()
+        self.logger.debug('Auto-serializing body as csv')
+        buff = io.StringIO() if _PYTHON3 else io.BytesIO()
+        writer = csv.DictWriter(
+            buff,
+            sorted(set([k for r in rows for k in r.keys()])),
+            dialect='excel')
+        writer.writeheader()
+        writer.writerows(rows)
+        value = buff.getvalue()
         buff.close()
         return value
 
-    @staticmethod
-    def _dump_json_value(value):
+    def _dump_json_value(self, value):
         """Serialize a value into JSON
 
         :param object value: The value to serialize
+        :param str encoding: The encoding to use
         :rtype: bytes
 
         """
-        return json.dumps(value, ensure_ascii=True).encode('utf-8')
+        self.logger.debug('Auto-serializing body as json')
+        return json.dumps(value)
 
-    @staticmethod
-    def _dump_msgpack_value(value):
+    def _dump_msgpack_value(self, value):
         """Serialize a value into MessagePack
 
         :param object value: The value to serialize
@@ -1473,84 +1494,77 @@ class SmartConsumer(Consumer):
         :rtype: bytes
 
         """
+        self.logger.debug('Auto-serializing body as msgpack')
         return umsgpack.packb(value)
 
-    @staticmethod
-    def _dump_pickle_value(value):
+    def _dump_pickle_value(self, value):
         """Serialize a value into the pickle format
 
         :param object value: The object to pickle
         :rtype: bytes
 
         """
+        self.logger.debug('Auto-serializing body as pickle')
         return pickle.dumps(value)
 
-    @staticmethod
-    def _dump_plist_value(value):
+    def _dump_plist_value(self, value):
         """Create a plist value from a dictionary
 
         :param dict value: The value to make the plist from
         :rtype: bytes
 
         """
-        if hasattr(plistlib, 'dumps'):
-            return plistlib.dumps(value)
-        try:
-            return plistlib.writePlistToString(value).encode('utf-8')
-        except AttributeError:
-            return plistlib.writePlistToBytes(value)
+        self.logger.debug('Auto-serializing body as plist')
+        if hasattr(plistlib, 'dumps'):  # pragma: nocover
+            return plistlib.dumps(value)  # Python 3.4+
+        return plistlib.writePlistToString(value).encode('utf-8')
 
-    @staticmethod
-    def _dump_yaml_value(value):
+    def _dump_yaml_value(self, value):
         """Dump an object into a YAML string
 
         :param object value: The value to dump as a YAML string
         :rtype: str
 
         """
+        self.logger.debug('Auto-serializing body as yaml')
         return yaml.dump(value)
 
-    @staticmethod
-    def _encode_bz2(value):
+    def _encode_bz2(self, value):
         """Return a bzip2 compressed value
 
         :param str value: Uncompressed value
         :rtype: bytes
 
         """
+        self.logger.debug('Auto-encoding body with bzip2')
         if not isinstance(value, bytes):
             value = value.encode('utf-8')
         return bz2.compress(value)
 
-    @staticmethod
-    def _encode_gzip(value):
+    def _encode_gzip(self, value):
         """Return zlib compressed value
 
         :param str value: Uncompressed value
         :rtype: bytes
 
         """
+        self.logger.debug('Auto-encoding body with gzip')
         if not isinstance(value, bytes):
             value = value.encode('utf-8')
         return zlib.compress(value)
 
-    @staticmethod
-    def _load_bs4_value(value):
+    def _load_bs4_value(self, value, subtype, encoding):
         """Load an HTML or XML string into an lxml etree object.
 
         :param str value: The HTML or XML string
+        :param str subtype: One of ``html`` or ``xml``
         :rtype: bs4.BeautifulSoup
         :raises: ConsumerException
 
         """
-        if not bs4:
-            raise ConsumerException('BeautifulSoup4 is not enabled')
-        if isinstance(value, bytes):
-            value = value.decode('utf-8')
-        return bs4.BeautifulSoup(value)
+        return bs4.BeautifulSoup(self._maybe_decode(value, encoding), subtype)
 
-    @staticmethod
-    def _load_csv_value(value):
+    def _load_csv_value(self, value, encoding):
         """Create a csv.DictReader instance for the sniffed dialect for the
         value passed in.
 
@@ -1558,28 +1572,29 @@ class SmartConsumer(Consumer):
         :rtype: csv.DictReader
 
         """
-        if isinstance(value, bytes):
-            value = value.decode('utf-8')
-        csv_buffer = io.StringIO(value)
-        dialect = csv.Sniffer().sniff(csv_buffer.read(1024))
-        csv_buffer.seek(0)
-        return csv.DictReader(csv_buffer, dialect=dialect)
+        buff = io.StringIO() if _PYTHON3 else io.BytesIO()
+        buff.write(self._maybe_decode(value, encoding))
+        buff.seek(0)
+        dialect = csv.Sniffer().sniff(buff.read(1024))
+        buff.seek(0)
+        return csv.DictReader(buff, dialect=dialect)
 
-    def _load_json_value(self, value):
+    def _load_json_value(self, value, encoding):
         """Deserialize a JSON string returning the native Python data type
         for the value.
 
         :param str value: The JSON string
+        :param str encoding: The string encoding that was used
         :rtype: object
 
         """
-        if isinstance(value, bytes):
-            value = value.decode('utf-8')
         try:
-            return json.loads(value, encoding='utf-8')
+            return json.loads(
+                self._maybe_decode(value, encoding), encoding=encoding)
         except ValueError as error:
-            self.logger.exception('Could not decode message body: %s', error)
-            raise MessageException(error)
+            self.logger.exception(
+                'Could not deserialize the message message body: %s', error)
+            raise MessageException(str(error), 'json-serialization')
 
     def _load_msgpack_value(self, value):
         """Deserialize a msgpack string returning the native Python data type
@@ -1591,9 +1606,10 @@ class SmartConsumer(Consumer):
         """
         try:
             return umsgpack.unpackb(value)
-        except ValueError as error:
-            self.logger.exception('Could not decode message body: %s', error)
-            raise MessageException(error)
+        except (TypeError, ValueError, umsgpack.UnpackException) as error:
+            self.logger.exception('Could not deserialize the message body: %s',
+                                  error)
+            raise MessageException(str(error), 'msgpack-serialization')
 
     @staticmethod
     def _load_pickle_value(value):
@@ -1615,15 +1631,11 @@ class SmartConsumer(Consumer):
         :rtype: dict
 
         """
-        if hasattr(plistlib, 'loads'):
-            return plistlib.loads(value)
-        try:
-            return plistlib.readPlistFromString(value)
-        except AttributeError:
-            return plistlib.readPlistFromBytes(value)
+        if hasattr(plistlib, 'loads'):  # pragma: nocover
+            return plistlib.loads(value)  # Python 3.4+
+        return plistlib.readPlistFromString(value)
 
-    @staticmethod
-    def _load_yaml_value(value):
+    def _load_yaml_value(self, value, encoding):
         """Load an YAML string into an dict object.
 
         :param str value: The YAML string
@@ -1631,7 +1643,17 @@ class SmartConsumer(Consumer):
         :raises: ConsumerException
 
         """
-        return yaml.load(value)
+        return yaml.load(self._maybe_decode(value, encoding))
+
+    def _maybe_decode(self, value, encoding='utf-8'):
+        if _PYTHON3 and isinstance(value, bytes):  # pragma: nocover
+            try:
+                return value.decode(encoding)
+            except UnicodeDecodeError as error:
+                self.logger.exception('Could not decode %s: %s', encoding,
+                                      error)
+                raise MessageException(str(error), 'encoding')
+        return value
 
 
 class ConfigurationException(errors.RejectedException):

@@ -48,7 +48,8 @@ setuptools.setup(
         'html': ['beautifulsoup4'],
         'influxdb': ['sprockets-influxdb'],
         'msgpack': ['u-msgpack-python'],
-        'sentry': ['raven']
+        'sentry': ['raven'],
+        'xml': ['beautifulsoup4', 'lxml'],
     },
     tests_require=read_requirements('testing.txt'),
     entry_points=dict(console_scripts=['rejected=rejected.controller:main']),

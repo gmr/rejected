@@ -30,7 +30,7 @@ Other Changes
 - ADDED additional exception handling support in ``rejected.testing.AsyncTestCase``
 - REMOVED catching of KeyboardInterrupt in ``rejected.consumer.Consumer.execute`` favoring catching higher up in the processing flow
 - ADDED call to ``Consumer.shutdown`` in ``rejected.testing.AsyncTestCase.tearDown`` (#25 `nvllsvm <https://github.com/nvllsvm>`_)
-- CHANGED``rejected.consumer.SmartConsumer`` parsing of ``content-type`` to use `ietfparse <https://pypi.python.org/pypi/ietfparse>_`, including charset for use in decoding in Python 3
+- CHANGED``rejected.consumer.SmartConsumer`` parsing of ``content-type`` to use `ietfparse <https://pypi.python.org/pypi/ietfparse>`_, including charset for use in decoding in Python 3
 - CHANGED In ``rejected.consumer.SmartConsumer`` attempting to auto-encode or auto-serialize a non-string or non-bytes object with an invalid content encoding or content type will now raise a :exc:`ValueError`
 - CHANGED ``rejected.consumer.SmartConsumer`` auto-serialization of CSV to use csv.DictWriter and it now expects a list of dict rows
 - ADDED the raising of a ``rejected.consumer.MessageException`` in ``rejected.consumer.SmartConsumer`` when attempting to decode a message body and a decoding error is raised

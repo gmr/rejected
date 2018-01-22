@@ -28,39 +28,22 @@ Supported `SmartConsumer` MIME types are:
  - text/x-yaml
 
 """
-import bz2
 import contextlib
-import csv
 import datetime
+import flatdict
+import importlib
 import io
-import json
 import logging
-import pickle
-import plistlib
+import pkg_resources
 import sys
 import time
 import uuid
-import zlib
 
 from ietfparse import headers
 import pika
 from tornado import concurrent, gen, locks
-import yaml
 
 from rejected import data, errors, log, utils
-
-# Optional imports
-try:
-    import bs4
-except ImportError:  # pragma: nocover
-    logging.warning('BeautifulSoup not found, disabling html and xml support')
-    bs4 = None
-
-try:
-    import umsgpack
-except ImportError:  # pragma: nocover
-    logging.warning('umsgpack not found, disabling msgpack support')
-    umsgpack = None
 
 # Python3 Support
 try:
@@ -73,12 +56,6 @@ _DROPPED_MESSAGE = 'X-Rejected-Dropped'
 _PROCESSING_EXCEPTIONS = 'X-Processing-Exceptions'
 _EXCEPTION_FROM = 'X-Exception-From'
 _PYTHON3 = True if sys.version_info > (3, 0, 0) else False
-
-_BS4_SUBTYPES = ('html', 'xml')
-_IGNORE_SUBTYPES = ('plain', 'octet-stream')
-_PICKLE_SUBTYPES = ('pickle', 'x-pickle', 'x-vnd.python.pickle',
-                    'vnd.python.pickle')
-_YAML_SUBTYPES = ('yaml', 'x-yaml')
 
 
 class Consumer(object):
@@ -1255,6 +1232,111 @@ class SmartConsumer(Consumer):
         into the same class.
 
     """
+    _IGNORE_TYPES = {'application/octet-stream', 'text/plain'}
+
+    _CODEC_MAP = {
+        'bzip2': 'bz2',
+        'gzip': 'zlib',
+        'zlib': 'zlib'
+    }
+
+    _SERIALIZATION_MAP = flatdict.FlatDict({
+        'application': {
+            'json': {
+                'module': 'json',
+                'load': 'loads',
+                'dump': 'dumps',
+                'encoding': True
+            },
+            'msgpack': {
+                'module': 'umsgpack',
+                'load': 'unpackb',
+                'dump': 'packb',
+                'binary': True,
+                'enabled': False
+            },
+            'pickle': {
+                'module': 'pickle',
+                'load': 'loads',
+                'dump': 'dumps',
+                'binary': True
+            },
+            'x-pickle': {
+                'module': 'pickle',
+                'load': 'loads',
+                'dump': 'dumps',
+                'binary': True
+            },
+            'x-plist': {
+                'module': 'plistlib',
+                'load': 'loads' if _PYTHON3 else 'readPlistFromString',
+                'dump': 'dumps' if _PYTHON3 else 'writePlistToString',
+                'binary': True
+            },
+            'vnd.python.pickle': {
+                'module': 'pickle',
+                'load': 'loads',
+                'dump': 'dumps',
+                'binary': True
+            },
+            'x-vnd.python.pickle': {
+                'module': 'pickle',
+                'load': 'loads',
+                'dump': 'dumps',
+                'binary': True
+            }
+        },
+        'text': {
+            'csv': {
+                'module': 'csv',
+                'load': '_load_csv',
+                'dump': '_dump_csv',
+                'common': False
+            },
+            'html': {
+                'module': 'bs4',
+                'load': '_load_html',
+                'dump': '_dump_bs4',
+                'common': False,
+                'enabled': False
+            },
+            'xml': {
+                'module': 'bs4',
+                'load': '_load_xml',
+                'dump': '_dump_bs4',
+                'common': False,
+                'enabled': False
+            },
+            'yaml': {
+                'module': 'yaml',
+                'load': 'load',
+                'dump': 'dump'
+            }
+        }
+    }, delimiter='/')
+
+    def __init__(self, *args, **kwargs):
+        """Creates a new instance of the
+        :class:`~rejected.consumer.SmartConsumer` class. To perform
+        initialization tasks, extend
+        :meth:`~rejected.consumer.SmartConsumer.initialize` or ensure you
+        :meth:`super` this method first.
+
+        """
+        super(SmartConsumer, self).__init__(*args, **kwargs)
+        installed = pkg_resources.AvailableDistributions()
+        for key, pkg in {'application/msgpack': 'u-msgpack-python',
+                         'text/html': ('beautifulsoup4', 'lxml'),
+                         'text/xml': ('beautifulsoup4', 'lxml')}.items():
+            if isinstance(pkg, tuple):
+                self._SERIALIZATION_MAP[key]['enabled'] = \
+                    all([p in installed for p in pkg])
+            else:
+                self._SERIALIZATION_MAP[key]['enabled'] = pkg in installed
+            self.logger.debug(
+                '%s is %s in serialization map', key,
+                'enabled' if self._SERIALIZATION_MAP[key]['enabled'] else
+                'disabled')
 
     def publish_message(self,
                         exchange,
@@ -1308,13 +1390,16 @@ class SmartConsumer(Consumer):
         # Auto-serialize the content if needed
         is_string = (isinstance(body, str) or isinstance(body, bytes)
                      or isinstance(body, unicode))
-        if properties.get('content_type') and \
-                not no_serialization and not is_string:
-            body = self._auto_serialize(properties['content_type'], body)
+        if not no_serialization and not is_string and \
+                properties.get('content_type'):
+            body = self._serialize(
+                body, headers.parse_content_type(properties['content_type']))
 
         # Auto-encode the message body if needed
-        if properties.get('content_encoding') and not no_encoding:
-            body = self._auto_encode(properties['content_encoding'], body)
+        if not no_encoding and \
+                properties.get('content_encoding') in self._CODEC_MAP.keys():
+            body = self._compress(
+                body, self._CODEC_MAP[properties['content_encoding']])
 
         return super(SmartConsumer, self).publish_message(
             exchange, routing_key, properties, body, channel or connection)
@@ -1327,134 +1412,35 @@ class SmartConsumer(Consumer):
         :rtype: any
 
         """
-        # Return a materialized view of the body if it has been previously set
-        if self._message_body:
+        if self._message_body:  # If already set, return it
             return self._message_body
-
-        self._message_body = self._message.body
-        if self.content_encoding == 'bzip2':
-            self._message_body = self._decode_bz2(self._message.body)
-        elif self.content_encoding == 'gzip':
-            self._message_body = self._decode_gzip(self._message.body)
-        elif self.content_encoding is not None:
-            self.logger.debug('Unsupported content-encoding: %s',
-                              self.content_encoding)
-
-        try:
-            cth = headers.parse_content_type(self.content_type)
-        except (TypeError, ValueError):
-            return self._message_body
-
-        encoding = cth.parameters.get('charset', 'utf-8')
-
-        # Handle the auto-deserialization
-        if cth.content_type == 'application':
-            if cth.content_subtype == 'json':
-                self._message_body = self._load_json_value(
-                    self._message_body, encoding)
-            elif cth.content_subtype == 'msgpack' and umsgpack:
-                self._message_body = self._load_msgpack_value(
-                    self._message_body)
-            elif cth.content_subtype in _PICKLE_SUBTYPES:
-                self._message_body = self._load_pickle_value(
-                    self._message_body)
-            elif cth.content_subtype == 'x-plist':
-                self._message_body = self._load_plist_value(self._message_body)
-            elif cth.content_subtype not in _IGNORE_SUBTYPES:
-                self.logger.debug('Unsupported content-type: %s',
-                                  self.content_type)
-        elif cth.content_type == 'text':
-            if cth.content_subtype == 'csv':
-                self._message_body = self._load_csv_value(
-                    self._message_body, encoding)
-            elif cth.content_subtype in _BS4_SUBTYPES and bs4:
-                self._message_body = self._load_bs4_value(
-                    self._message_body, cth.content_subtype, encoding)
-            elif cth.content_subtype in _YAML_SUBTYPES:
-                self._message_body = self._load_yaml_value(
-                    self._message_body, encoding)
-            elif cth.content_subtype not in _IGNORE_SUBTYPES:
-                self.logger.debug('Unsupported content-type: %s',
-                                  self.content_type)
+        self._message_body = self._maybe_decompress_body()
+        self._message_body = self._maybe_deserialize_body()
         return self._message_body
 
-    def _auto_encode(self, content_encoding, value):
-        """Based upon the value of the content_encoding, encode the value.
+    def _compress(self, value, module_name):
+        """Compress the value passed in using the named compression module.
 
-        :param str content_encoding: The content encoding type (gzip, bzip2)
-        :param str value: The value to encode
-        :rtype: value
-
-        """
-        self.logger.debug('Attempting to auto-encode as %s', content_encoding)
-        if content_encoding == 'gzip':
-            return self._encode_gzip(value)
-        elif content_encoding == 'bzip2':
-            return self._encode_bz2(value)
-        self.logger.debug('Unsupported content-encoding: %s', content_encoding)
-        return value
-
-    def _auto_serialize(self, content_type, value):
-        """Auto-serialization of the value based upon the content-type value.
-
-        :param str content_type: The content type to serialize
-        :param any value: The value to serialize
-        :rtype: str
+        :param bytes value: The uncompressed value
+        :rtype: bytes
 
         """
-        cth = headers.parse_content_type(content_type)
-        self.logger.debug('Attempting to auto-serialize as %s (%r)',
-                          content_type, cth)
-        if cth.content_type == 'application':
-            if cth.content_subtype == 'json':
-                return self._dump_json_value(value)
-            elif cth.content_subtype == 'msgpack' and umsgpack:
-                return self._dump_msgpack_value(value)
-            elif cth.content_subtype in _PICKLE_SUBTYPES:
-                return self._dump_pickle_value(value)
-            elif cth.content_subtype == 'x-plist':
-                return self._dump_plist_value(value)
-        elif cth.content_type == 'text':
-            if cth.content_subtype == 'csv':
-                return self._dump_csv_value(value)
-            elif (cth.content_subtype in _BS4_SUBTYPES and bs4
-                  and isinstance(value, bs4.BeautifulSoup)):
-                return self._dump_bs4_value(value, cth.content_subtype)
-            elif cth.content_subtype in _YAML_SUBTYPES:
-                return self._dump_yaml_value(value)
-        raise ValueError('Unsupported content-type: {}'.format(content_type))
+        self.logger.debug('Decompressing with %s', module_name)
+        if not isinstance(value, bytes):
+            value = value.encode('utf-8')
+        return self._maybe_import(module_name).compress(value)
 
     @staticmethod
-    def _decode_bz2(value):
-        """Return a bz2 decompressed value
-
-        :param bytes value: Compressed value
-        :rtype: str
-
-        """
-        return bz2.decompress(value)
-
-    @staticmethod
-    def _decode_gzip(value):
-        """Return a zlib decompressed value
-
-        :param bytes value: Compressed value
-        :rtype: str
-
-        """
-        return zlib.decompress(value)
-
-    def _dump_bs4_value(self, value, subtype):
+    def _dump_bs4(value):
         """Return a BeautifulSoup object as a string
 
         :param bs4.BeautifulSoup value: The object to return a string from
         :rtype: str
 
         """
-        self.logger.debug('Auto-serializing body as %s', subtype)
         return str(value)
 
-    def _dump_csv_value(self, rows):
+    def _dump_csv(self, rows):
         """Take a list of dicts and return it as a CSV value. The
 
         .. versionchanged:: 4.0.0
@@ -1463,7 +1449,8 @@ class SmartConsumer(Consumer):
         :rtype: str
 
         """
-        self.logger.debug('Auto-serializing body as csv')
+        self.logger.debug('Writing %r', rows)
+        csv = self._maybe_import('csv')
         buff = io.StringIO() if _PYTHON3 else io.BytesIO()
         writer = csv.DictWriter(
             buff,
@@ -1475,185 +1462,155 @@ class SmartConsumer(Consumer):
         buff.close()
         return value
 
-    def _dump_json_value(self, value):
-        """Serialize a value into JSON
-
-        :param object value: The value to serialize
-        :param str encoding: The encoding to use
-        :rtype: bytes
-
-        """
-        self.logger.debug('Auto-serializing body as json')
-        return json.dumps(value)
-
-    def _dump_msgpack_value(self, value):
-        """Serialize a value into MessagePack
-
-        :param object value: The value to serialize
-        :type value: str or dict or list
-        :rtype: bytes
-
-        """
-        self.logger.debug('Auto-serializing body as msgpack')
-        return umsgpack.packb(value)
-
-    def _dump_pickle_value(self, value):
-        """Serialize a value into the pickle format
-
-        :param object value: The object to pickle
-        :rtype: bytes
-
-        """
-        self.logger.debug('Auto-serializing body as pickle')
-        return pickle.dumps(value)
-
-    def _dump_plist_value(self, value):
-        """Create a plist value from a dictionary
-
-        :param dict value: The value to make the plist from
-        :rtype: bytes
-
-        """
-        self.logger.debug('Auto-serializing body as plist')
-        if hasattr(plistlib, 'dumps'):  # pragma: nocover
-            return plistlib.dumps(value)  # Python 3.4+
-        return plistlib.writePlistToString(value).encode('utf-8')
-
-    def _dump_yaml_value(self, value):
-        """Dump an object into a YAML string
-
-        :param object value: The value to dump as a YAML string
-        :rtype: str
-
-        """
-        self.logger.debug('Auto-serializing body as yaml')
-        return yaml.dump(value)
-
-    def _encode_bz2(self, value):
-        """Return a bzip2 compressed value
-
-        :param str value: Uncompressed value
-        :rtype: bytes
-
-        """
-        self.logger.debug('Auto-encoding body with bzip2')
-        if not isinstance(value, bytes):
-            value = value.encode('utf-8')
-        return bz2.compress(value)
-
-    def _encode_gzip(self, value):
-        """Return zlib compressed value
-
-        :param str value: Uncompressed value
-        :rtype: bytes
-
-        """
-        self.logger.debug('Auto-encoding body with gzip')
-        if not isinstance(value, bytes):
-            value = value.encode('utf-8')
-        return zlib.compress(value)
-
-    def _load_bs4_value(self, value, subtype, encoding):
-        """Load an HTML or XML string into an lxml etree object.
+    def _load_bs4(self, value, markup):
+        """Load an HTML or XML string into a :class:`bs4.BeautifulSoup`
+        instance.
 
         :param str value: The HTML or XML string
-        :param str subtype: One of ``html`` or ``xml``
+        :param str markup: One of ``html`` or ``xml``
         :rtype: bs4.BeautifulSoup
         :raises: ConsumerException
 
         """
-        return bs4.BeautifulSoup(self._maybe_decode(value, encoding), subtype)
+        return self._maybe_import('bs4').BeautifulSoup(
+            value, 'lxml' if markup == 'html' else 'lxml-xml')
 
-    def _load_csv_value(self, value, encoding):
-        """Create a csv.DictReader instance for the sniffed dialect for the
-        value passed in.
+    def _load_csv(self, value):
+        """Return a class:`csv.DictReader` instance for value passed in.
 
         :param str value: The CSV value
         :rtype: csv.DictReader
 
         """
+        csv = self._maybe_import('csv')
         buff = io.StringIO() if _PYTHON3 else io.BytesIO()
-        buff.write(self._maybe_decode(value, encoding))
+        buff.write(value)
         buff.seek(0)
         dialect = csv.Sniffer().sniff(buff.read(1024))
         buff.seek(0)
         return csv.DictReader(buff, dialect=dialect)
 
-    def _load_json_value(self, value, encoding):
-        """Deserialize a JSON string returning the native Python data type
-        for the value.
+    def _load_html(self, value):
+        """Load a HTML string into a :class:`bs4.BeautifulSoup` instance.
 
-        :param str value: The JSON string
-        :param str encoding: The string encoding that was used
-        :rtype: object
+        :param str value: The HTML string
+        :rtype: bs4.BeautifulSoup
 
         """
-        try:
-            return json.loads(
-                self._maybe_decode(value, encoding), encoding=encoding)
-        except ValueError as error:
-            self.logger.exception(
-                'Could not deserialize the message message body: %s', error)
-            raise MessageException(str(error), 'json-serialization')
+        return self._load_bs4(value, 'html')
 
-    def _load_msgpack_value(self, value):
-        """Deserialize a msgpack string returning the native Python data type
-        for the value.
+    def _load_xml(self, value):
+        """Load a XML string into a :class:`bs4.BeautifulSoup` instance.
 
-        :param str value: The msgpack string
-        :rtype: object
+        :param str value: The XML string
+        :rtype: bs4.BeautifulSoup
 
         """
-        try:
-            return umsgpack.unpackb(value)
-        except (TypeError, ValueError, umsgpack.UnpackException) as error:
-            self.logger.exception('Could not deserialize the message body: %s',
-                                  error)
-            raise MessageException(str(error), 'msgpack-serialization')
-
-    @staticmethod
-    def _load_pickle_value(value):
-        """Deserialize a pickle string returning the native Python data type
-        for the value.
-
-        :param bytes value: The pickle string
-        :rtype: object
-
-        """
-        return pickle.loads(value)
-
-    @staticmethod
-    def _load_plist_value(value):
-        """Deserialize a plist string returning the native Python data type
-        for the value.
-
-        :param bytes value: The pickle string
-        :rtype: dict
-
-        """
-        if hasattr(plistlib, 'loads'):  # pragma: nocover
-            return plistlib.loads(value)  # Python 3.4+
-        return plistlib.readPlistFromString(value)
-
-    def _load_yaml_value(self, value, encoding):
-        """Load an YAML string into an dict object.
-
-        :param str value: The YAML string
-        :rtype: any
-        :raises: ConsumerException
-
-        """
-        return yaml.load(self._maybe_decode(value, encoding))
+        return self._load_bs4(value, 'xml')
 
     def _maybe_decode(self, value, encoding='utf-8'):
-        if _PYTHON3 and isinstance(value, bytes):  # pragma: nocover
+        """If a bytes object is passed in, in the Python 3 environment,
+        decode it using the specified encoding to turn it to a str instance.
+
+        :param mixed value: The value to possibly decode
+        :param str encoding: The encoding to use
+        :rtype: str
+
+        """
+        if _PYTHON3 and isinstance(value, bytes):
             try:
                 return value.decode(encoding)
-            except UnicodeDecodeError as error:
-                self.logger.exception('Could not decode %s: %s', encoding,
-                                      error)
-                raise MessageException(str(error), 'encoding')
+            except Exception as err:
+                self.logger.exception('Error decoding value: %s', err)
+                raise MessageException(
+                    str(err), 'decoding-{}'.format(encoding))
         return value
+
+    def _maybe_decompress_body(self):
+        """Attempt to decompress the message body passed in using the named
+        compression module, if specified.
+
+        :rtype: bytes
+
+        """
+        if self.content_encoding:
+            if self.content_encoding in self._CODEC_MAP.keys():
+                module_name = self._CODEC_MAP[self.content_encoding]
+                self.logger.debug('Decompressing with %s', module_name)
+                module = self._maybe_import(module_name)
+                return module.decompress(self._message.body)
+            self.logger.debug('Unsupported content-encoding: %s',
+                              self.content_encoding)
+        return self._message.body
+
+    def _maybe_deserialize_body(self):
+        """Attempt to deserialize the message body based upon the content-type.
+
+        :rtype: mixed
+
+        """
+        if not self.content_type:
+            return self._message_body
+        ct = headers.parse_content_type(self.content_type)
+        key = '{}/{}'.format(ct.content_type, ct.content_subtype)
+        if key not in self._SERIALIZATION_MAP:
+            if key not in self._IGNORE_TYPES:
+                self.logger.debug('Unsupported content-type: %s',
+                                  self.content_type)
+            return self._message_body
+        elif not self._SERIALIZATION_MAP[key].get('enabled', True):
+            self.logger.debug('%s is not enabled in the serialization map',
+                              key)
+            return self._message_body
+        value = self._message_body
+        if not self._SERIALIZATION_MAP[key].get('binary'):
+            value = self._maybe_decode(
+                self._message_body, ct.parameters.get('charset', 'utf-8'))
+        return self._maybe_invoke_serialization(value, 'load', key)
+
+    def _maybe_import(self, module):
+        if not hasattr(sys.modules[__name__], module):
+            self.logger.debug('Importing %s', module)
+            setattr(sys.modules[__name__], module,
+                    importlib.import_module(module))
+        return sys.modules[module]
+
+    def _maybe_invoke_serialization(self, value, method_type, key):
+        if self._SERIALIZATION_MAP[key].get('common', True):
+            self.logger.debug('Invoking %s %s using %s', method_type, key,
+                              self._SERIALIZATION_MAP[key]['module'])
+            method = getattr(
+                self._maybe_import(self._SERIALIZATION_MAP[key]['module']),
+                self._SERIALIZATION_MAP[key][method_type])
+        else:
+            method = getattr(self, self._SERIALIZATION_MAP[key][method_type])
+        self.logger.debug('Invoking %r for %s %s', method, method_type, key)
+        try:
+            return method(value)
+        except Exception as err:
+            self.logger.exception('Error %sing body: %s', method_type, err)
+            raise MessageException(
+                str(err), 'serialization-{}'.format(method_type))
+
+    def _serialize(self, value, ct):
+        """Auto-serialization of the value based upon the content-type value.
+
+        :param any value: The value to serialize
+        :param ietfparse.: The content type to serialize
+        :rtype: str
+        :raises: ValueError
+
+        """
+        key = '{}/{}'.format(ct.content_type, ct.content_subtype)
+        if key not in self._SERIALIZATION_MAP:
+            raise ValueError('Unsupported content-type: {}'.format(key))
+        elif not self._SERIALIZATION_MAP[key].get('enabled', True):
+            self.logger.debug('%s is not enabled in the serialization map',
+                              key)
+            raise ValueError('Disabled content-type: {}'.format(key))
+        return self._maybe_invoke_serialization(
+            self._maybe_decode(value, ct.parameters.get('charset', 'utf-8')),
+            'dump', key)
 
 
 class ConfigurationException(errors.RejectedException):

@@ -45,7 +45,7 @@ setuptools.setup(
     include_package_data=True,
     install_requires=read_requirements('installation.txt'),
     extras_require={
-        'html': ['beautifulsoup4'],
+        'html': ['beautifulsoup4', 'lxml'],
         'influxdb': ['sprockets-influxdb'],
         'msgpack': ['u-msgpack-python'],
         'sentry': ['raven'],

@@ -144,9 +144,7 @@ class ConsumerTestCase(testing.AsyncTestCase):
         with mock.patch.object(self.consumer.logger, 'debug') as debug:
             yield self.process_message(content_type, content_type)
             self.assertEqual(self.consumer.content_type, content_type)
-            self.assertNotIn(
-                mock.call('Unsupported content-type: %s', content_type),
-                debug.mock_calls)
+            debug.assert_any_call('Unsupported content-type: %s', content_type)
 
     @testing.gen_test
     def test_unsupported_text_content_type(self):
@@ -221,7 +219,9 @@ class TestPublishingConsumer(consumer.SmartConsumer):
     @gen.coroutine
     def process(self):
         if self.content_type == 'text/csv':
+            self.logger.debug('Reading in csv')
             body = [row for row in self.body]
+            self.logger.debug('Body is now: %r', body)
         elif self.headers.get('json'):
             body = json.loads(self.body)
         elif self.headers.get('decode'):
@@ -229,6 +229,13 @@ class TestPublishingConsumer(consumer.SmartConsumer):
             self.logger.debug('Content: %r', body)
         else:
             body = self.body
+
+        if 'toggle' in self.headers:
+            self._SERIALIZATION_MAP[self.headers['toggle']]['enabled'] = \
+                self.headers[self.headers['toggle']]
+            self.logger.info(
+                'Set %s to %r', self.headers['toggle'],
+                self._SERIALIZATION_MAP[self.headers['toggle']]['enabled'])
         try:
             self.publish_message(self.exchange, self.routing_key,
                                  self.properties, body)
@@ -395,9 +402,47 @@ class PublishingTestCase(testing.AsyncTestCase):
                 })
 
     @testing.gen_test
+    def test_serialize_html_bs4(self):
+        body = '<html><body><a href="hello">{}</a></body></html>'.format(
+            str(uuid.uuid4()))
+        yield self.process_message(body, 'text/html')
+        self.assertEqual(self.published_messages[0].body, body)
+
+    @testing.gen_test
+    def test_serialize_html_bs4_disabled(self):
+        body = '<html><body><a href="hello">{}</a></body></html>'.format(
+            str(uuid.uuid4()))
+        headers = {'toggle': 'text/html', 'text/html': False}
+        with self.assertRaises(consumer.ProcessingException):
+            yield self.process_message(body, 'text/html',
+                                       properties={'headers': headers})
+
+    @testing.gen_test
     def test_serialize_xml(self):
         body = ('<?xml version="1.0" encoding="utf-8"?>\n<foo>'
                 '<bar>{}</bar><baz>{}</baz></foo>').format(
                     str(uuid.uuid4()), str(uuid.uuid4()))
         yield self.process_message(body, 'text/xml')
         self.assertEqual(self.published_messages[0].body, body)
+
+    @testing.gen_test
+    def test_serialize_xml_bs4_disabled(self):
+        body = ('<?xml version="1.0" encoding="utf-8"?>\n<foo>'
+                '<bar>{}</bar><baz>{}</baz></foo>').format(
+                    str(uuid.uuid4()), str(uuid.uuid4()))
+        self.consumer._SERIALIZATION_MAP['text/xml']['enabled'] = False
+        with mock.patch.object(self.consumer.logger, 'debug') as debug:
+            yield self.process_message(body, 'text/xml')
+            debug.assert_any_call(
+                '%s is not enabled in the serialization map', 'text/xml')
+
+    @testing.gen_test
+    def test_serialize_xml_bs4_disabled_on_publish(self):
+        body = ('<?xml version="1.0" encoding="utf-8"?>\n<foo>'
+                '<bar>{}</bar><baz>{}</baz></foo>').format(
+                    str(uuid.uuid4()), str(uuid.uuid4()))
+
+        headers = {'toggle': 'text/xml', 'text/xml': False}
+        with self.assertRaises(consumer.ProcessingException):
+            yield self.process_message(
+                body, 'text/xml', properties={'headers': headers})

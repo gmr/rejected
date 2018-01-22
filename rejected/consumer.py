@@ -28,39 +28,19 @@ Supported `SmartConsumer` MIME types are:
  - text/x-yaml
 
 """
-import bz2
 import contextlib
-import csv
 import datetime
 import io
-import json
 import logging
-import pickle
-import plistlib
 import sys
 import time
 import uuid
-import zlib
 
 from ietfparse import headers
 import pika
 from tornado import concurrent, gen, locks
-import yaml
 
 from rejected import data, errors, log, utils
-
-# Optional imports
-try:
-    import bs4
-except ImportError:  # pragma: nocover
-    logging.warning('BeautifulSoup not found, disabling html and xml support')
-    bs4 = None
-
-try:
-    import umsgpack
-except ImportError:  # pragma: nocover
-    logging.warning('umsgpack not found, disabling msgpack support')
-    umsgpack = None
 
 # Python3 Support
 try:
@@ -1352,7 +1332,7 @@ class SmartConsumer(Consumer):
             if cth.content_subtype == 'json':
                 self._message_body = self._load_json_value(
                     self._message_body, encoding)
-            elif cth.content_subtype == 'msgpack' and umsgpack:
+            elif cth.content_subtype == 'msgpack':
                 self._message_body = self._load_msgpack_value(
                     self._message_body)
             elif cth.content_subtype in _PICKLE_SUBTYPES:
@@ -1367,7 +1347,7 @@ class SmartConsumer(Consumer):
             if cth.content_subtype == 'csv':
                 self._message_body = self._load_csv_value(
                     self._message_body, encoding)
-            elif cth.content_subtype in _BS4_SUBTYPES and bs4:
+            elif cth.content_subtype in _BS4_SUBTYPES:
                 self._message_body = self._load_bs4_value(
                     self._message_body, cth.content_subtype, encoding)
             elif cth.content_subtype in _YAML_SUBTYPES:
@@ -1408,7 +1388,7 @@ class SmartConsumer(Consumer):
         if cth.content_type == 'application':
             if cth.content_subtype == 'json':
                 return self._dump_json_value(value)
-            elif cth.content_subtype == 'msgpack' and umsgpack:
+            elif cth.content_subtype == 'msgpack':
                 return self._dump_msgpack_value(value)
             elif cth.content_subtype in _PICKLE_SUBTYPES:
                 return self._dump_pickle_value(value)
@@ -1417,28 +1397,31 @@ class SmartConsumer(Consumer):
         elif cth.content_type == 'text':
             if cth.content_subtype == 'csv':
                 return self._dump_csv_value(value)
-            elif (cth.content_subtype in _BS4_SUBTYPES and bs4
-                  and isinstance(value, bs4.BeautifulSoup)):
+            elif cth.content_subtype in _BS4_SUBTYPES:
                 return self._dump_bs4_value(value, cth.content_subtype)
             elif cth.content_subtype in _YAML_SUBTYPES:
                 return self._dump_yaml_value(value)
         raise ValueError('Unsupported content-type: {}'.format(content_type))
 
     @staticmethod
-    def _decode_bz2(value):
+    @utils.on_demand_import('bz2')
+    def _decode_bz2(value, bz2):
         """Return a bz2 decompressed value
 
         :param bytes value: Compressed value
+        :param module bz2: The bzip2 module, dynamically loaded
         :rtype: str
 
         """
         return bz2.decompress(value)
 
     @staticmethod
-    def _decode_gzip(value):
+    @utils.on_demand_import('zlib')
+    def _decode_gzip(value, zlib):
         """Return a zlib decompressed value
 
         :param bytes value: Compressed value
+        :param module zlib: The zlib module, dynamically loaded
         :rtype: str
 
         """
@@ -1454,12 +1437,14 @@ class SmartConsumer(Consumer):
         self.logger.debug('Auto-serializing body as %s', subtype)
         return str(value)
 
-    def _dump_csv_value(self, rows):
+    @utils.on_demand_import('csv')
+    def _dump_csv_value(self, rows, csv):
         """Take a list of dicts and return it as a CSV value. The
 
         .. versionchanged:: 4.0.0
 
         :param list rows: A list of lists to return as a CSV
+        :param module csv: The csv module, dynamically loaded
         :rtype: str
 
         """
@@ -1475,64 +1460,75 @@ class SmartConsumer(Consumer):
         buff.close()
         return value
 
-    def _dump_json_value(self, value):
+    @utils.on_demand_import('json')
+    def _dump_json_value(self, value, json):
         """Serialize a value into JSON
 
         :param object value: The value to serialize
-        :param str encoding: The encoding to use
+        :param module json: The json module, dynamically loaded
         :rtype: bytes
 
         """
         self.logger.debug('Auto-serializing body as json')
         return json.dumps(value)
 
-    def _dump_msgpack_value(self, value):
+    @utils.on_demand_import('umsgpack')
+    def _dump_msgpack_value(self, value, umsgpack):
         """Serialize a value into MessagePack
 
         :param object value: The value to serialize
         :type value: str or dict or list
+        :param module umsgpack: The umsgpack module, dynamically loaded
         :rtype: bytes
 
         """
         self.logger.debug('Auto-serializing body as msgpack')
         return umsgpack.packb(value)
 
-    def _dump_pickle_value(self, value):
+    @utils.on_demand_import('pickle')
+    def _dump_pickle_value(self, value, pickle):
         """Serialize a value into the pickle format
 
         :param object value: The object to pickle
+        :param module pickle: The pickle module, dynamically loaded
         :rtype: bytes
 
         """
         self.logger.debug('Auto-serializing body as pickle')
         return pickle.dumps(value)
 
-    def _dump_plist_value(self, value):
+    @utils.on_demand_import('plistlib')
+    def _dump_plist_value(self, value, plistlib):
         """Create a plist value from a dictionary
 
         :param dict value: The value to make the plist from
+        :param module plistlib: The plistlib module, dynamically loaded
         :rtype: bytes
 
         """
         self.logger.debug('Auto-serializing body as plist')
-        if hasattr(plistlib, 'dumps'):  # pragma: nocover
-            return plistlib.dumps(value)  # Python 3.4+
+        if hasattr(plistlib, 'dumps'):
+            return plistlib.dumps(value)
         return plistlib.writePlistToString(value).encode('utf-8')
 
-    def _dump_yaml_value(self, value):
+    @utils.on_demand_import('yaml')
+    def _dump_yaml_value(self, value, yaml):
         """Dump an object into a YAML string
 
         :param object value: The value to dump as a YAML string
+        :param module yaml: The yaml module, dynamically loaded
         :rtype: str
 
         """
         self.logger.debug('Auto-serializing body as yaml')
         return yaml.dump(value)
 
-    def _encode_bz2(self, value):
+    @utils.on_demand_import('bz2')
+    def _encode_bz2(self, value, bz2):
         """Return a bzip2 compressed value
 
         :param str value: Uncompressed value
+        :param module bz2: The bz2 module, dynamically loaded
         :rtype: bytes
 
         """
@@ -1541,19 +1537,21 @@ class SmartConsumer(Consumer):
             value = value.encode('utf-8')
         return bz2.compress(value)
 
-    def _encode_gzip(self, value):
+    @utils.on_demand_import('zlib')
+    def _encode_gzip(self, value, zlib):
         """Return zlib compressed value
 
         :param str value: Uncompressed value
         :rtype: bytes
 
         """
-        self.logger.debug('Auto-encoding body with gzip')
+        self.logger.debug('Auto-encoding body with zlib')
         if not isinstance(value, bytes):
             value = value.encode('utf-8')
         return zlib.compress(value)
 
-    def _load_bs4_value(self, value, subtype, encoding):
+    @utils.on_demand_import('bs4')
+    def _load_bs4_value(self, value, subtype, encoding, bs4):
         """Load an HTML or XML string into an lxml etree object.
 
         :param str value: The HTML or XML string
@@ -1564,7 +1562,8 @@ class SmartConsumer(Consumer):
         """
         return bs4.BeautifulSoup(self._maybe_decode(value, encoding), subtype)
 
-    def _load_csv_value(self, value, encoding):
+    @utils.on_demand_import('csv')
+    def _load_csv_value(self, value, encoding, csv):
         """Create a csv.DictReader instance for the sniffed dialect for the
         value passed in.
 
@@ -1579,7 +1578,8 @@ class SmartConsumer(Consumer):
         buff.seek(0)
         return csv.DictReader(buff, dialect=dialect)
 
-    def _load_json_value(self, value, encoding):
+    @utils.on_demand_import('json')
+    def _load_json_value(self, value, encoding, json):
         """Deserialize a JSON string returning the native Python data type
         for the value.
 
@@ -1596,7 +1596,8 @@ class SmartConsumer(Consumer):
                 'Could not deserialize the message message body: %s', error)
             raise MessageException(str(error), 'json-serialization')
 
-    def _load_msgpack_value(self, value):
+    @utils.on_demand_import('umsgpack')
+    def _load_msgpack_value(self, value, umsgpack):
         """Deserialize a msgpack string returning the native Python data type
         for the value.
 
@@ -1612,7 +1613,8 @@ class SmartConsumer(Consumer):
             raise MessageException(str(error), 'msgpack-serialization')
 
     @staticmethod
-    def _load_pickle_value(value):
+    @utils.on_demand_import('pickle')
+    def _load_pickle_value(value, pickle):
         """Deserialize a pickle string returning the native Python data type
         for the value.
 
@@ -1623,7 +1625,8 @@ class SmartConsumer(Consumer):
         return pickle.loads(value)
 
     @staticmethod
-    def _load_plist_value(value):
+    @utils.on_demand_import('plistlib')
+    def _load_plist_value(value, plistlib):
         """Deserialize a plist string returning the native Python data type
         for the value.
 
@@ -1635,7 +1638,8 @@ class SmartConsumer(Consumer):
             return plistlib.loads(value)  # Python 3.4+
         return plistlib.readPlistFromString(value)
 
-    def _load_yaml_value(self, value, encoding):
+    @utils.on_demand_import('yaml')
+    def _load_yaml_value(self, value, encoding, yaml):
         """Load an YAML string into an dict object.
 
         :param str value: The YAML string
@@ -1702,3 +1706,4 @@ class ProcessingException(errors.RejectedException):
     :param str metric: An optional value for auto-instrumentation of exceptions
 
     """
+

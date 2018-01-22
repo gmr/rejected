@@ -1,6 +1,7 @@
 import importlib
 import math
 import pkg_resources
+import sys
 
 
 def get_package_version(module_obj, value):
@@ -59,6 +60,17 @@ def message_info(exchange, routing_key, properties):
     if routing_key:
         output.append('using "{}"'.format(routing_key))
     return ' '.join(output)
+
+
+def on_demand_import(module):
+    def wrapper(f):
+        def ensure_import(*args, **kwargs):
+            if module not in globals():
+                globals()[module] = importlib.import_module(module)
+            kwargs[module] = globals()[module]
+            return f(*args, **kwargs)
+        return ensure_import
+    return wrapper
 
 
 def percentile(values, k):

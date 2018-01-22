@@ -2,14 +2,6 @@ sudo: false
 
 language: python
 
-python:
-  - 2.7
-  - 3.4
-  - 3.5
-  - 3.6
-  - pypy
-  - pypy3
-
 env:
   global:
     - PATH=$HOME/.local/bin:$PATH
@@ -26,28 +18,39 @@ install:
 
 stages:
   - test
-  - upload_coverage
-  - deploy
+  - name: upload_coverage
+    if: branch = master
+  - name: deploy
+    if: tag IS present
+
+script: nosetests
 
 jobs:
   include:
     - stage: test
       services:
         - rabbitmq
+      python:
+        - 2.7
+        - 3.4
+        - 3.5
+        - 3.6
+        - pypy
+        - pypy3
       script: nosetests
       after_success:
         - aws cp .coverage "s3://com-gavinroy-travis/rejected/$TRAVIS_BUILD_NUMBER/.coverage.${TRAVIS_PYTHON_VERSION}"
     - stage: upload coverage
       python: 3.5
-      script: |
-        mkdir coverage
-        aws cp --recursive s3://com-gavinroy-travis/rejected/$TRAVIS_BUILD_NUMBER/ coverage
-        cd coverage
-        coverage combine
-        cd ..
-        mv coverage/.coverage .
-        coverage report
-        codecov
+      script:
+        - mkdir coverage
+        - aws cp --recursive s3://com-gavinroy-travis/rejected/$TRAVIS_BUILD_NUMBER/ coverage
+        - cd coverage
+        - coverage combine
+        - cd ..
+        - mv coverage/.coverage .
+        - coverage report
+        - codecov
     - stage: deploy
       python: 3.5
       deploy:

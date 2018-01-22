@@ -1,12 +1,6 @@
 sudo: false
-language: python
 
-env:
-  global:
-    - PATH=$HOME/.local/bin:$PATH
-    - AWS_DEFAULT_REGION=us-east-1
-    - secure: YJ5Nt+/iox51vQmpdaOH0SnIy1dN9wxeFK4GnFlfXODGp3ktwUFq+/0BF8nDNFEyzUgIG0qaCsgxR1BRRtgm/mEn7/6Py+xGuP/6lf/9ITdu5eFiLe+lQUFlzyKVJMdxsrLWjQZHBgSE+F62Hx2+6ulbvToOwmHJemrUoyVspQQ=
-    - secure: eP//5fjwn70cgsZ0u62BHWV5hJo6PTfhE7PaGGRyqOWlmtK/z2xDnENhZ1Y9VO0oCYsH2jzrEtix/4/U85wWLapCcNW8eXs/PzSwGqm0qw3D/GeMkjt/eiCRuL/CzE0Fk+IRmnpw4Qa00fYOE8wuqySDlcRwUZsNFwD0VgO7pC0=
+language: python
 
 python:
   - 2.7
@@ -16,12 +10,19 @@ python:
   - pypy
   - pypy3
 
+env:
+  global:
+    - PATH=$HOME/.local/bin:$PATH
+    - AWS_DEFAULT_REGION=us-east-1
+    - secure: YJ5Nt+/iox51vQmpdaOH0SnIy1dN9wxeFK4GnFlfXODGp3ktwUFq+/0BF8nDNFEyzUgIG0qaCsgxR1BRRtgm/mEn7/6Py+xGuP/6lf/9ITdu5eFiLe+lQUFlzyKVJMdxsrLWjQZHBgSE+F62Hx2+6ulbvToOwmHJemrUoyVspQQ=
+    - secure: eP//5fjwn70cgsZ0u62BHWV5hJo6PTfhE7PaGGRyqOWlmtK/z2xDnENhZ1Y9VO0oCYsH2jzrEtix/4/U85wWLapCcNW8eXs/PzSwGqm0qw3D/GeMkjt/eiCRuL/CzE0Fk+IRmnpw4Qa00fYOE8wuqySDlcRwUZsNFwD0VgO7pC0=
+
 before_install:
-- pip install --user awscli
+  - pip install awscli
 
 install:
-- pip install --user -r requires/testing.txt
-- python setup.py develop
+  - pip install -r requires/testing.txt
+  - python setup.py develop
 
 stages:
   - test
@@ -32,7 +33,7 @@ jobs:
   include:
     - stage: test
       services:
-      - rabbitmq
+        - rabbitmq
       script: nosetests
       after_success:
         - aws cp .coverage "s3://com-gavinroy-travis/rejected/$TRAVIS_BUILD_NUMBER/.coverage.${TRAVIS_PYTHON_VERSION}"

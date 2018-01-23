@@ -34,7 +34,7 @@ stages:
 script: nosetests
 
 after_success:
-  - aws cp .coverage "s3://com-gavinroy-travis/rejected/$TRAVIS_BUILD_NUMBER/.coverage.${TRAVIS_PYTHON_VERSION}"
+  - aws s3 cp .coverage "s3://com-gavinroy-travis/rejected/$TRAVIS_BUILD_NUMBER/.coverage.${TRAVIS_PYTHON_VERSION}"
 
 jobs:
   include:
@@ -46,7 +46,7 @@ jobs:
       python: 3.5
       script:
         - mkdir coverage
-        - aws cp --recursive s3://com-gavinroy-travis/rejected/$TRAVIS_BUILD_NUMBER/ coverage
+        - aws s3 cp --recursive s3://com-gavinroy-travis/rejected/$TRAVIS_BUILD_NUMBER/ coverage
         - cd coverage
         - coverage combine
         - cd ..

@@ -17,10 +17,8 @@ env:
     - secure: YJ5Nt+/iox51vQmpdaOH0SnIy1dN9wxeFK4GnFlfXODGp3ktwUFq+/0BF8nDNFEyzUgIG0qaCsgxR1BRRtgm/mEn7/6Py+xGuP/6lf/9ITdu5eFiLe+lQUFlzyKVJMdxsrLWjQZHBgSE+F62Hx2+6ulbvToOwmHJemrUoyVspQQ=
     - secure: eP//5fjwn70cgsZ0u62BHWV5hJo6PTfhE7PaGGRyqOWlmtK/z2xDnENhZ1Y9VO0oCYsH2jzrEtix/4/U85wWLapCcNW8eXs/PzSwGqm0qw3D/GeMkjt/eiCRuL/CzE0Fk+IRmnpw4Qa00fYOE8wuqySDlcRwUZsNFwD0VgO7pC0=
 
-before_install:
-  - pip install awscli
-
 install:
+  - pip install awscli
   - pip install -r requires/testing.txt
   - python setup.py develop
 
@@ -43,7 +41,9 @@ jobs:
         - rabbitmq
       script: nosetests
     - stage: upload coverage
-      python: 3.5
+      python: 3.6
+      install:
+        - pip install awscli
       script:
         - mkdir coverage
         - aws s3 cp --recursive s3://com-gavinroy-travis/rejected/$TRAVIS_BUILD_NUMBER/ coverage
@@ -54,7 +54,7 @@ jobs:
         - coverage report
       after_success: codecov
     - stage: deploy
-      python: 3.5
+      python: 3.6
       deploy:
         distributions: sdist bdist_wheel
         provider: pypi

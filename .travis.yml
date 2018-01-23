@@ -43,7 +43,7 @@ jobs:
     - stage: upload coverage
       python: 3.6
       install:
-        - pip install awscli
+        - pip install awscli coverage codecov
       script:
         - mkdir coverage
         - aws s3 cp --recursive s3://com-gavinroy-travis/rejected/$TRAVIS_BUILD_NUMBER/ coverage

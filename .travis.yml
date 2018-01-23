@@ -33,14 +33,15 @@ stages:
 
 script: nosetests
 
+after_success:
+  - aws cp .coverage "s3://com-gavinroy-travis/rejected/$TRAVIS_BUILD_NUMBER/.coverage.${TRAVIS_PYTHON_VERSION}"
+
 jobs:
   include:
     - stage: test
       services:
         - rabbitmq
       script: nosetests
-      after_success:
-        - aws cp .coverage "s3://com-gavinroy-travis/rejected/$TRAVIS_BUILD_NUMBER/.coverage.${TRAVIS_PYTHON_VERSION}"
     - stage: upload coverage
       python: 3.5
       script:
@@ -51,7 +52,7 @@ jobs:
         - cd ..
         - mv coverage/.coverage .
         - coverage report
-        - codecov
+      after_success: codecov
     - stage: deploy
       python: 3.5
       deploy:

@@ -1,6 +1,8 @@
 from os import path
 import setuptools
 
+from rejected import __version__
+
 
 def read_requirements(name):
     requirements = []
@@ -18,7 +20,7 @@ def read_requirements(name):
 
 setuptools.setup(
     name='rejected',
-    version='4.0.0',
+    version=__version__,
     description='Rejected is a Python RabbitMQ Consumer Framework and '
                 'Controller Daemon',
     long_description=open('README.rst').read(),
@@ -52,5 +54,7 @@ setuptools.setup(
         'xml': ['beautifulsoup4', 'lxml'],
     },
     tests_require=read_requirements('testing.txt'),
-    entry_points=dict(console_scripts=['rejected=rejected.controller:main']),
+    entry_points=dict(console_scripts=[
+        'consumerd=rejected.controller:main'
+    ]),
     zip_safe=True)

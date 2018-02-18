@@ -146,7 +146,7 @@ def add_parser_arguments():
 def main():
     """Called when invoking the command line script."""
     add_parser_arguments()
-    parser.description('RabbitMQ consumer framework')
+    parser.description('Rejected AMQP consumer supervisor')
     helper.start(Controller)
 
 

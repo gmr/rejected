@@ -9,7 +9,7 @@ import uuid
 import zlib
 
 import bs4
-from rejected import consumer, testing
+from rejected import errors, smart_consumer, testing
 from tornado import gen
 import umsgpack
 import yaml
@@ -17,7 +17,7 @@ import yaml
 LOGGER = logging.getLogger(__name__)
 
 
-class TestConsumer(consumer.SmartConsumer):
+class TestConsumer(smart_consumer.SmartConsumer):
     def process(self):
         self.logger.info('Body: %r', self.body)
 
@@ -109,12 +109,12 @@ class ConsumerTestCase(testing.AsyncTestCase):
 
     @testing.gen_test
     def test_invalid_json(self):
-        with self.assertRaises(consumer.MessageException):
+        with self.assertRaises(errors.MessageException):
             yield self.process_message('[{"foo", "baz":}', 'application/json')
 
     @testing.gen_test
     def test_invalid_json_encoding(self):
-        with self.assertRaises(consumer.MessageException):
+        with self.assertRaises(errors.MessageException):
             yield self.process_message(b'\x81',
                                        'application/json; charset=utf-8')
 
@@ -126,7 +126,7 @@ class ConsumerTestCase(testing.AsyncTestCase):
 
     @testing.gen_test
     def test_invalid_msgpack(self):
-        with self.assertRaises(consumer.MessageException):
+        with self.assertRaises(errors.MessageException):
             yield self.process_message('\x81\x99\x13foo\xc4\x03bar',
                                        'application/msgpack')
 
@@ -212,7 +212,7 @@ class ConsumerTestCase(testing.AsyncTestCase):
             debug.assert_any_call('Unsupported content-encoding: %s', encoding)
 
 
-class TestPublishingConsumer(consumer.SmartConsumer):
+class TestPublishingConsumer(smart_consumer.SmartConsumer):
 
     PUBLISHER_CONFIRMATIONS = True
 
@@ -240,7 +240,7 @@ class TestPublishingConsumer(consumer.SmartConsumer):
             self.publish_message(self.exchange, self.routing_key,
                                  self.properties, body)
         except ValueError as error:
-            raise consumer.ProcessingException(str(error))
+            raise errors.ProcessingException(str(error))
 
 
 class PublishingTestCase(testing.AsyncTestCase):
@@ -349,7 +349,7 @@ class PublishingTestCase(testing.AsyncTestCase):
 
     @testing.gen_test
     def test_serialize_invalid_application_type(self):
-        with self.assertRaises(consumer.ProcessingException):
+        with self.assertRaises(errors.ProcessingException):
             yield self.process_message(
                 json.dumps({
                     'id': str(uuid.uuid4())
@@ -363,7 +363,7 @@ class PublishingTestCase(testing.AsyncTestCase):
 
     @testing.gen_test
     def test_serialize_invalid_content_type(self):
-        with self.assertRaises(consumer.ProcessingException):
+        with self.assertRaises(errors.ProcessingException):
             yield self.process_message(
                 json.dumps({
                     'id': str(uuid.uuid4())
@@ -389,7 +389,7 @@ class PublishingTestCase(testing.AsyncTestCase):
 
     @testing.gen_test
     def test_serialize_invalid_text_type(self):
-        with self.assertRaises(consumer.ProcessingException):
+        with self.assertRaises(errors.ProcessingException):
             yield self.process_message(
                 json.dumps({
                     'id': str(uuid.uuid4())
@@ -413,7 +413,7 @@ class PublishingTestCase(testing.AsyncTestCase):
         body = '<html><body><a href="hello">{}</a></body></html>'.format(
             str(uuid.uuid4()))
         headers = {'toggle': 'text/html', 'text/html': False}
-        with self.assertRaises(consumer.ProcessingException):
+        with self.assertRaises(errors.ProcessingException):
             yield self.process_message(body, 'text/html',
                                        properties={'headers': headers})
 
@@ -443,6 +443,6 @@ class PublishingTestCase(testing.AsyncTestCase):
                     str(uuid.uuid4()), str(uuid.uuid4()))
 
         headers = {'toggle': 'text/xml', 'text/xml': False}
-        with self.assertRaises(consumer.ProcessingException):
+        with self.assertRaises(errors.ProcessingException):
             yield self.process_message(
                 body, 'text/xml', properties={'headers': headers})

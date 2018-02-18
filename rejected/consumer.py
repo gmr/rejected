@@ -1,61 +1,25 @@
 """
-The :py:class:`Consumer`, and :py:class:`SmartConsumer` provide base
-classes to extend for consumer applications.
-
-While the :py:class:`Consumer` class provides all the structure required for
-implementing a rejected consumer, the :py:class:`SmartConsumer` adds
-functionality designed to make writing consumers even easier. When messages
-are received by consumers extending :py:class:`SmartConsumer`, if the message's
-``content_type`` property contains one of the supported mime-types, the message
-body will automatically be deserialized, making the deserialized message body
-available via the ``body`` attribute. Additionally, should one of the supported
-``content_encoding`` types (``gzip`` or ``bzip2``) be specified in the
-message's property, it will automatically be decoded.
-
-Supported `SmartConsumer` MIME types are:
-
- - application/json
- - application/msgpack (with u-msgpack-python installed)
- - application/pickle
- - application/x-pickle
- - application/x-plist
- - application/x-vnd.python.pickle
- - application/vnd.python.pickle
- - text/csv
- - text/html (with beautifulsoup4 installed)
- - text/xml (with beautifulsoup4 installed)
- - text/yaml
- - text/x-yaml
+The :class:`Consumer` class provides all the structure required for
+implementing a rejected consumer.
 
 """
 import contextlib
 import datetime
-import flatdict
-import importlib
-import io
 import logging
-import pkg_resources
 import sys
 import time
 import uuid
 
-from ietfparse import headers
 import pika
 from tornado import concurrent, gen, locks
 
-from rejected import data, errors, log, utils
-
-# Python3 Support
-try:
-    unicode()
-except NameError:  # pragma: nocover
-    unicode = str
+from rejected import data, log, utils
+from rejected.errors import *
 
 _DEFAULT_CHANNEL = 'default'
 _DROPPED_MESSAGE = 'X-Rejected-Dropped'
 _PROCESSING_EXCEPTIONS = 'X-Processing-Exceptions'
 _EXCEPTION_FROM = 'X-Exception-From'
-_PYTHON3 = True if sys.version_info > (3, 0, 0) else False
 
 
 class Consumer(object):
@@ -73,8 +37,12 @@ class Consumer(object):
     not performed. Use in conjunction with
     :const:`~rejected.consumer.Consumer.DROP_INVALID_MESSAGES`.
 
-    :default: :class:`None`
-    :type: str or list(str)
+    :default: :data:`None`
+    :type: :class:`str` or 
+           :class:`list` ( :class:`str` ) or 
+           :class:`set` ( :class:`str` ) or
+           :class:`tuple` ( :class:`str` ) or
+           :data:`None`
     """
 
     DROP_INVALID_MESSAGES = False
@@ -82,16 +50,16 @@ class Consumer(object):
     supported message type as defined in
     :const:`~rejected.consumer.Consumer.MESSAGE_TYPE`.
 
-    :default: :class:`False`
-    :type: bool
+    :default: :data:`False`
+    :type: :class:`bool`
     """
 
     DROP_EXCHANGE = None
     """Assign an exchange to publish dropped messages to. If set to
-    :class:`None`, dropped messages are not republished.
+    :data:`None`, dropped messages are not republished.
 
-    :default: :class:`None`
-    :type: :class:`str` or :class:`None`
+    :default: :data:`None`
+    :type: :class:`str` or :data:`None`
     """
 
     ERROR_MAX_RETRIES = None
@@ -103,8 +71,8 @@ class Consumer(object):
 
     .. versionadded:: 4.0.0
 
-    :default: :class:`None`
-    :type: int or None
+    :default: :data:`None`
+    :type: :class:`int` or :data:`None`
     """
 
     ERROR_MAX_RETRY = None
@@ -116,16 +84,16 @@ class Consumer(object):
 
     .. deprecated:: 4.0.0
 
-    :default: :class:`None`
-    :type: int or None
+    :default: :data:`None`
+    :type: :class:`int` or :data:`None`
     """
 
     ERROR_EXCHANGE = 'errors'
     """The exchange a message will be published to if a
     :exc:`~rejected.consumer.ProcessingException` is raised.
 
-    :default: :const:`errors`
-    :type: str
+    :default: ``errors``
+    :type: :class:`str`
     """
 
     IGNORE_OOB_STATS = False
@@ -134,8 +102,8 @@ class Consumer(object):
 
     .. versionadded:: 4.0.0
 
-    :default: :class:`False`
-    :type: bool
+    :default: :data:`False`
+    :type: :class:`bool`
     """
 
     MESSAGE_AGE_KEY = 'message_age'
@@ -154,14 +122,13 @@ class Consumer(object):
 
     .. versionadded:: 3.18.6
 
-    :default: :const:`message_age`
-    :type: str
+    :default: ``message_age``
+    :type: :class:`str`
     """
 
     def __init__(self, *args, **kwargs):
         """Creates a new instance of the :class:`~rejected.consumer.Consumer`
-        class. To perform initialization tasks, extend
-        :meth:`~rejected.consumer.Consumer.initialize`.
+        class.
 
         """
         self._confirmation_futures = {}
@@ -214,9 +181,9 @@ class Consumer(object):
         If this method returns a :class:`~tornado.concurrent.Future`, execution
         will not proceed until the Future has completed.
 
-        :raises: :exc:`rejected.consumer.ConsumerException`
-        :raises: :exc:`rejected.consumer.MessageException`
-        :raises: :exc:`rejected.consumer.ProcessingException`
+        :raises: :exc:`rejected.errors.ConsumerException`
+        :raises: :exc:`rejected.errors.MessageException`
+        :raises: :exc:`rejected.errors.ProcessingException`
 
         """
         pass
@@ -227,14 +194,14 @@ class Consumer(object):
 
         If the message can not be processed and the Consumer should stop after
         ``N`` failures to process messages, raise the
-        :exc:`~rejected.consumer.ConsumerException`.
+        :exc:`~rejected.errors.ConsumerException`.
 
         .. note:: Asynchronous support: Decorate this method with
             :func:`tornado.gen.coroutine` to make it asynchronous.
 
-        :raises: :exc:`rejected.consumer.ConsumerException`
-        :raises: :exc:`rejected.consumer.MessageException`
-        :raises: :exc:`rejected.consumer.ProcessingException`
+        :raises: :exc:`rejected.errors.ConsumerException`
+        :raises: :exc:`rejected.errors.MessageException`
+        :raises: :exc:`rejected.errors.ProcessingException`
 
         """
         raise NotImplementedError
@@ -246,30 +213,43 @@ class Consumer(object):
 
         .. versionadded:: 3.18.6
 
-        :rtype: str
+        :rtype: :class:`str`
 
         """
         return self.MESSAGE_AGE_KEY
 
-    def on_finish(self):
-        """Called after a message has been processed.
+    def on_finish(self, exc=None):
+        """Called after a message has been processed.  Override this method to
+        perform cleanup, logging, etc.
 
-        Override this method to perform cleanup, logging, etc.
-        This method is a counterpart to
-        :meth:`~rejected.consumer.Consumer.prepare`.  ``on_finish`` may
-        not produce any output, as it is called after all processing has
-        taken place.
+        If an exception is raised during the processing of a message, the
+        exception instance is passed into this method.
 
-        If any exception is raised during the processing of a message,
-        :meth:`~rejected.consumer.Consumer.on_finish` is not called.
+        If a message is dropped due to setting
+        :attr:`~rejected.consumer.Consumer.DROP_INVALID_MESSAGES` to
+        :data:`True` or :attr:`~rejected.consumer.Consumer.ERROR_MAX_RETRY`,
+        this method will not be invoked.
+
+        .. versionchanged:: 4.0.0
 
         .. note:: Asynchronous support: Decorate this method with
             :func:`tornado.gen.coroutine` to make it asynchronous.
 
+        :param exc: The instance of the exception raised during processing
+            if an exception is raised.
+        :type exc:
+            :exc:`rejected.errors.ExecutionFinished` or
+            :exc:`rejected.errors.ConsumerException` or
+            :exc:`rejected.errors.MessageException` or
+            :exc:`rejected.errors.ProcessingException` or
+            :exc:`rejected.errors.RabbitMQException` or
+            :exc:`Exception` or
+            :data:`None`
+
         """
         pass
 
-    def on_blocked(self, name):  # pragma: nocover
+    def on_blocked(self, name):
         """Called when a connection for this consumer is blocked.
 
         Implement this method to respond to being blocked.
@@ -281,7 +261,7 @@ class Consumer(object):
         """
         pass
 
-    def on_unblocked(self, name):  # pragma: nocover
+    def on_unblocked(self, name):
         """Called when a connection for this consumer is unblocked.
 
         Implement this method to respond to being blocked.
@@ -293,7 +273,7 @@ class Consumer(object):
         """
         pass
 
-    def shutdown(self):  # pragma: nocover
+    def shutdown(self):
         """Implement to cleanly shutdown your application code when rejected is
         stopping the consumer.
 
@@ -305,87 +285,87 @@ class Consumer(object):
 
     """Quick-access properties"""
 
-    @utils.MessageProperty
+    @property
     def app_id(self):
         """Access the current message's ``app-id`` property as an attribute of
         the consumer class.
 
-        :rtype: str
+        :rtype: :class:`str` or :data:`None`
 
         """
-        return self._message.properties.app_id
+        return self._message.properties.app_id if self._message else None
 
-    @utils.MessageProperty
+    @property
     def body(self):
         """Access the opaque body from the current message.
 
-        :rtype: str
+        :rtype: :class:`bytes` or :data:`None`
 
         """
-        return self._message.body
+        return self._message.body if self._message else None
 
-    @utils.MessageProperty
+    @property
     def content_encoding(self):
         """Access the current message's ``content-encoding`` AMQP message
         property as an attribute of the consumer class.
 
-        :rtype: str
+        :rtype: :class:`str` or :data:`None`
 
         """
-        return (self._message.properties.content_encoding
-                or '').lower() or None
+        return self._message.properties.content_encoding \
+            if self._message else None
 
-    @utils.MessageProperty
+    @property
     def content_type(self):
         """Access the current message's ``content-type`` AMQP message property
         as an attribute of the consumer class.
 
-        :rtype: str
+        :rtype: :class:`str` or :data:`None`
 
         """
-        return (self._message.properties.content_type or '').lower() or None
+        return self._message.properties.content_type if self._message else None
 
-    @utils.MessageProperty
+    @property
     def correlation_id(self):
         """Access the current message's ``correlation-id`` AMAP message
         property as an attribute of the consumer class. If the message does not
         have a ``correlation-id`` then, each message is assigned a new UUIDv4
         based ``correlation-id`` value.
 
-        :rtype: str
+        :rtype: :class:`str` or :data:`None`
 
         """
-        return self._correlation_id
+        return self._correlation_id if self._message else None
 
-    @utils.MessageProperty
+    @property
     def exchange(self):
         """Access the AMQP exchange the message was published to as an
         attribute of the consumer class.
 
-        :rtype: str
+        :rtype: :class:`str` or :data:`None`
 
         """
-        return self._message.exchange
+        return self._message.exchange if self._message else None
 
-    @utils.MessageProperty
+    @property
     def expiration(self):
         """Access the current message's ``expiration`` AMQP message property as
         an attribute of the consumer class.
 
-        :rtype: str
+        :rtype: :class:`str` or :data:`None`
 
         """
-        return self._message.properties.expiration
+        return self._message.properties.expiration if self._message else None
 
-    @utils.MessageProperty
+    @property
     def headers(self):
         """Access the current message's ``headers`` AMQP message property as an
         attribute of the consumer class.
 
-        :rtype: dict
+        :rtype: :class:`dict`
 
         """
-        return self._message.properties.headers or dict()
+        return self._message.properties.headers or {} if self._message else {}
 
     @property
     def is_finished(self):
@@ -394,32 +374,33 @@ class Consumer(object):
 
         .. versionadded:: 4.0.0
 
-        :rtype: bool
+        :rtype: :class:`bool`
 
         """
         return self._finished
 
-    @utils.MessageProperty
+    @property
     def io_loop(self):
-        """Access the :py:class:`tornado.ioloop.IOLoop` instance for the
+        """Access the :class:`tornado.ioloop.IOLoop` instance for the
         current message.
 
         .. versionadded:: 3.18.4
 
-        :rtype: tornado.ioloop.IOLoop
+        :rtype: :class:`tornado.ioloop.IOLoop` or :data:`None`
 
         """
-        return self._connections[self._message.connection].io_loop
+        if self._message and self._message.connection:
+            return self._connections[self._message.connection].io_loop
 
-    @utils.MessageProperty
+    @property
     def message_id(self):
         """Access the current message's ``message-id`` AMQP message property as
         an attribute of the consumer class.
 
-        :rtype: str
+        :rtype: :class:`str` or :data:`None`
 
         """
-        return self._message.properties.message_id
+        return self._message.properties.message_id if self._message else None
 
     @property
     def measurement(self):
@@ -428,7 +409,7 @@ class Consumer(object):
 
         .. versionadded:: 4.0.0
 
-        :rtype: rejected.data.Measurement
+        :rtype: :class:`rejected.data.Measurement`
 
         """
         return self._measurement
@@ -437,79 +418,80 @@ class Consumer(object):
     def name(self):
         """Property returning the name of the consumer class.
 
-        :rtype: str
+        :rtype: :class:`str`
 
         """
         return self.__class__.__name__
 
-    @utils.MessageProperty
+    @property
     def priority(self):
         """Access the current message's ``priority`` AMQP message property as
         an attribute of the consumer class.
 
-        :rtype: int
+        :rtype: :class:`int` or :data:`None`
 
         """
-        return self._message.properties.priority
+        return self._message.properties.priority if self._message else None
 
-    @utils.MessageProperty
+    @property
     def properties(self):
         """Access the current message's AMQP message properties in dict form as
         an attribute of the consumer class.
 
-        :rtype: dict
+        :rtype: :class:`dict` or :data:`None`
 
         """
-        return dict(self._message.properties)
+        return dict(self._message.properties) if self._message else None
 
-    @utils.MessageProperty
+    @property
     def redelivered(self):
         """Indicates if the current message has been redelivered.
 
-        :rtype: bool
+        :rtype: :class:`bool` or :data:`None`
 
         """
-        return self._message.redelivered
+        return self._message.redelivered if self._message else None
 
-    @utils.MessageProperty
+    @property
     def reply_to(self):
         """Access the current message's ``reply-to`` AMQP message property as
         an attribute of the consumer class.
 
-        :rtype: str
+        :rtype: :class:`str` or :data:`None`
 
         """
-        return self._message.properties.reply_to
+        return self._message.properties.reply_to if self._message else None
 
-    @utils.MessageProperty
+    @property
     def routing_key(self):
         """Access the routing key for the current message.
 
-        :rtype: str
+        :rtype: :class:`str` or :data:`None`
 
         """
-        return self._message.routing_key
+        return self._message.routing_key if self._message else None
 
-    @utils.MessageProperty
+    @property
     def message_type(self):
         """Access the current message's ``type`` AMQP message property as an
         attribute of the consumer class.
 
-        :rtype: str
+        :rtype: :class:`str` or :data:`None`
 
         """
-        return self._message.properties.type
+        return self._message.properties.type if self._message else None
 
     @property
     def sentry_client(self):
-        """Access the Sentry raven ``Client`` instance or ``None``
+        """Access the Sentry raven :class:`~raven.Client` instance or
+        :data:`None`
 
         Use this object to add tags or additional context to Sentry
-        error reports (see :meth:`raven.base.Client.tags_context`) or
-        to report messages (via :meth:`raven.base.Client.captureMessage`)
+        error reports (see :meth:`raven.Client.tags_context`) or
+        to report messages (via :meth:`raven.Client.captureMessage`)
         directly to Sentry.
 
-        :rtype: :class:`raven.base.Client`
+        :rtype: :class:`raven.Client` or :data:`None`
 
         """
         if hasattr(self._process, 'sentry_client'):
@@ -520,30 +502,30 @@ class Consumer(object):
         """Access the consumer settings as specified by the ``config`` section
         for the consumer in the rejected configuration.
 
-        :rtype: dict
+        :rtype: :class:`dict`
 
         """
         return self._settings
 
-    @utils.MessageProperty
+    @property
     def timestamp(self):
         """Access the unix epoch timestamp value from the AMQP message
         properties of the current message.
 
-        :rtype: int
+        :rtype: :class:`int` or :data:`None`
 
         """
-        return self._message.properties.timestamp
+        return self._message.properties.timestamp if self._message else None
 
-    @utils.MessageProperty
+    @property
     def user_id(self):
         """Access the ``user-id`` AMQP message property from the current
         message's properties.
 
-        :rtype: str
+        :rtype: :class:`str` or :data:`None`
 
         """
-        return self._message.properties.user_id
+        return self._message.properties.user_id if self._message else None
 
     """Utility Methods for use by Consumer Code"""
 
@@ -555,9 +537,11 @@ class Consumer(object):
         setting is not found, this method will cause the
         consumer to shutdown prior to receiving any messages from RabbitMQ.
 
-        :param str name: The parameter name
-        :param str feature: A friendly name for the setting feature
-        :raises: rejected.consumer.ConfigurationException
+        :param name: The parameter name
+        :type name: :class:`str`
+        :param feature: A friendly name for the setting feature
+        :type feature: :class:`str`
+        :raises: :exc:`~rejected.errors.ConfigurationException`
 
         """
         if name not in self.settings:
@@ -575,40 +559,42 @@ class Consumer(object):
         if self._finished:
             self.logger.warning('Finished called when already finished')
             return
-        self._finished = True
-        self.on_finish()
+        raise ExecutionFinished
 
     def publish_message(self,
                         exchange,
                         routing_key,
                         properties,
                         body,
-                        channel=None,
                         connection=None):
         """Publish a message to RabbitMQ on the same channel the original
         message was received on. If
         `publisher confirmations <https://www.rabbitmq.com/confirms.html>`_
         are enabled, the method will return a
-        :class:`~tornado.concurrent.Future` that will resolve a :type:`bool`
+        :class:`~tornado.concurrent.Future` that will resolve a :class:`bool`
         that indicates if the publishing was successful.
 
         .. versionchanged:: 4.0.0
-           - Return a :class:`~tornado.concurrent.Future` if publisher
-                confirmations are enabled
-           - Deprecated ``channel``
+            Return a :class:`~tornado.concurrent.Future` if
+            `publisher confirmations <https://www.rabbitmq.com/confirms.html>`_
+            are enabled. Removed the ``channel`` parameter.
 
-        :param str exchange: The exchange to publish to
-        :param str routing_key: The routing key to publish with
-        :param dict properties: The message properties
-        :param str body: The message body
-        :param str channel: **Deprecated in 4.0.0** Specify the connection
-            parameter instead.
-        :param str connection: The connection to use. If it is not
+        :param exchange: The exchange to publish to
+        :type exchange: :class:`str`
+        :param routing_key: The routing key to publish with
+        :type routing_key: :class:`str`
+        :param properties: The message properties
+        :type properties: :class:`dict`
+        :param body: The message body
+        :type body: :class:`bytes` or :class:`str`
+        :param connection: The connection to use. If it is not
             specified, the channel that the message was delivered on is used.
-        :rtype: tornado.concurrent.Future or None
+        :type connection: :class:`str`
+
+        :rtype: :class:`tornado.concurrent.Future` or :data:`None`
 
         """
-        conn = self._publish_connection(channel or connection)
+        conn = self._publish_connection(connection)
         self.logger.debug('Publishing message to %s:%s (%s)', exchange,
                           routing_key, conn.name)
         basic_properties = self._get_pika_properties(properties)
@@ -630,6 +616,8 @@ class Consumer(object):
                   reply_to=None,
                   connection=None):
         """Reply to the message that is currently being processed.
+
+        .. versionadded:: 4.0.0
 
         If the exchange is not specified, the exchange of the message that is
         currently being processed by the Consumer will be used.
@@ -653,23 +641,23 @@ class Consumer(object):
         confirmations enabled, a :py:class:`~tornado.concurrent.Future` is
         returned.
 
-        :param bytes body: The message body
+        :param body: The message body
+        :type body: :class:`bytes` or :class:`str`
         :param properties: The AMQP properties to use for the reply message
-        :type properties: dict or None
+        :type properties: :class:`dict` or :data:`None`
         :param exchange: The exchange to publish to. Defaults to the exchange
             of the message that is currently being processed by the Consumer.
-        :type exchange: str or None
+        :type exchange: :class:`str` or :data:`None`
         :param reply_to: The routing key to send the reply to. Defaults to the
             reply_to property of the message that is currently being processed
             by the Consumer. If neither are set, a :exc:`ValueError` is
             raised.
-        :type reply_to: str or None
-        :param str connection: The connection to use. If it is not
+        :type reply_to: class:`str` or :data:`None`
+        :param connection: The connection to use. If it is not
             specified, the channel that the message was delivered on is used.
-        :rtype: tornado.concurrent.Future or None
-        :raises: ValueError
-
-        .. versionadded:: 4.0.0
+        :type connection: :class:`str`
+        :rtype: :class:`tornado.concurrent.Future` or :data:`None`
+        :raises: :exc:`ValueError`
 
         """
         if reply_to is None and self.reply_to is None:
@@ -690,8 +678,9 @@ class Consumer(object):
     def send_exception_to_sentry(self, exc_info):
         """Send an exception to Sentry if enabled.
 
-        :param tuple exc_info: exception information as returned from
+        :param exc_info: exception information as returned from
             :func:`sys.exc_info`
+        :type exc_info: :class:`tuple`
 
         """
         self._process.send_exception_to_sentry(exc_info)
@@ -699,8 +688,10 @@ class Consumer(object):
     def set_sentry_context(self, tag, value):
         """Set a context tag in Sentry for the given key and value.
 
-        :param str tag: The context tag name
-        :param str value: The context value
+        :param tag: The context tag name
+        :type tag: :class:`str`
+        :param value: The context value
+        :type value: :class:`str`
 
         """
         if self.sentry_client:
@@ -711,16 +702,18 @@ class Consumer(object):
     def stats_add_duration(self, key, duration):
         """Add a duration to the per-message measurements
 
+        .. versionadded:: 3.19.0
+
         .. note:: If this method is called when there is not a message being
             processed, a message will be logged at the ``warning`` level to
             indicate the value is being dropped. To suppress these warnings,
-            set the :attr:`rejected.consumer.Consumer.IGNORE_OOB_STATS`
-            attribute to `True`.
+            set the :attr:`~rejected.consumer.Consumer.IGNORE_OOB_STATS`
+            attribute to :data:`True`.
 
-        .. versionadded:: 3.19.0
-
-        :param str key: The key to add the timing to
-        :param int|float duration: The timing value in seconds
+        :param key: The key to add the timing to
+        :type key: :class:`str`
+        :param duration: The timing value in seconds
+        :type duration: :class:`int` or :class:`float`
 
         """
         if not self._measurement:
@@ -733,17 +726,18 @@ class Consumer(object):
     def stats_incr(self, key, value=1):
         """Increment the specified key in the per-message measurements
 
+        .. versionadded:: 3.13.0
 
         .. note:: If this method is called when there is not a message being
             processed, a message will be logged at the ``warning`` level to
             indicate the value is being dropped. To suppress these warnings,
             set the :attr:`rejected.consumer.Consumer.IGNORE_OOB_STATS`
-            attribute to `True`.
+            attribute to :data:`True`.
 
-        .. versionadded:: 3.13.0
-
-        :param str key: The key to increment
-        :param int value: The value to increment the key by
+        :param key: The key to increment
+        :type key: :class:`str`
+        :param value: The value to increment the key by
+        :type value: :class:`int`
 
         """
         if not self._measurement:
@@ -755,16 +749,18 @@ class Consumer(object):
     def stats_set_tag(self, key, value=1):
         """Set the specified tag/value in the per-message measurements
 
+        .. versionadded:: 3.13.0
+
         .. note:: If this method is called when there is not a message being
             processed, a message will be logged at the ``warning`` level to
             indicate the value is being dropped. To suppress these warnings,
             set the :attr:`rejected.consumer.Consumer.IGNORE_OOB_STATS`
-            attribute to `True`.
+            attribute to :data:`True`.
 
-        .. versionadded:: 3.13.0
-
-        :param str key: The key to increment
-        :param int value: The value to increment the key by
+        :param key: The key to set
+        :type key: :class:`str`
+        :param value: The value to set
+        :type value: :class:`int`
 
         """
         if not self._measurement:
@@ -776,16 +772,18 @@ class Consumer(object):
     def stats_set_value(self, key, value=1):
         """Set the specified key/value in the per-message measurements
 
+        .. versionadded:: 3.13.0
+
         .. note:: If this method is called when there is not a message being
             processed, a message will be logged at the ``warning`` level to
             indicate the value is being dropped. To suppress these warnings,
             set the :attr:`rejected.consumer.Consumer.IGNORE_OOB_STATS`
-            attribute to `True`.
+            attribute to :data:`True`.
 
-        .. versionadded:: 3.13.0
-
-        :param str key: The key to increment
-        :param int value: The value to increment the key by
+        :param key: The key to set the value for
+        :type key: :class:`str`
+        :param value: The value
+        :type value: :class:`int` or :class:`float`
 
         """
         if not self._measurement:
@@ -799,11 +797,13 @@ class Consumer(object):
     def stats_track_duration(self, key):
         """Time around a context and add to the the per-message measurements
 
+        .. versionadded:: 3.19.0
+
         .. note:: If this method is called when there is not a message being
             processed, a message will be logged at the ``warning`` level to
             indicate the value is being dropped. To suppress these warnings,
             set the :attr:`rejected.consumer.Consumer.IGNORE_OOB_STATS`
-            attribute to `True`.
+            attribute to :data:`True`.
 
 
     .. code-block:: python
@@ -816,22 +816,22 @@ class Consumer(object):
                with self.stats_track_duration('track-time'):
                    yield self._time_consuming_function()
 
-        .. versionadded:: 3.19.0
-
-        :param str key: The key for the timing to track
+        :param key: The key for the timing to track
+        :type key: :class:`str`
 
         """
         start_time = time.time()
         try:
             yield
         finally:
-            self.stats_add_duration(key,
-                                    max(start_time, time.time()) - start_time)
+            self.stats_add_duration(
+                key, max(start_time, time.time()) - start_time)
 
     def unset_sentry_context(self, tag):
         """Remove a context tag from sentry
 
-        :param str tag: The context tag to remove
+        :param tag: The context tag to remove
+        :type tag: :class:`str`
 
         """
         if self.sentry_client:
@@ -842,15 +842,15 @@ class Consumer(object):
         """Function that will allow Rejected to process IOLoop events while
         in a tight-loop inside an asynchronous consumer.
 
-    .. code-block:: python
-       :caption: Example Usage
+        .. code-block:: python
+           :caption: Example Usage
 
-       class Consumer(consumer.Consumer):
+           class Consumer(consumer.Consumer):
 
-           @gen.coroutine
-           def process(self):
-               for iteration in range(0, 1000000):
-                   yield self.yield_to_ioloop()
+               @gen.coroutine
+               def process(self):
+                   for iteration in range(0, 1000000):
+                       yield self.yield_to_ioloop()
 
         """
         try:
@@ -872,141 +872,53 @@ class Consumer(object):
         :type message_in: :class:`rejected.data.Message`
         :param measurement: For collecting per-message instrumentation
         :type measurement: :class:`rejected.data.Measurement`
-        :rtype: bool
 
         """
         self.logger.debug('Received: %r', message_in)
-        self._clear()
-        self._message = message_in
-        self._measurement = measurement
 
-        # If timestamp is set, record age of the message coming in
-        if message_in.properties.timestamp:
-            message_age = float(
-                max(message_in.properties.timestamp, time.time()) -
-                message_in.properties.timestamp)
-            if message_age > 0:
-                measurement.add_duration(self.message_age_key(), message_age)
-
-        # Ensure there is a correlation ID
-        self._correlation_id = message_in.properties.correlation_id or \
-            message_in.properties.message_id or \
-            str(uuid.uuid4())
-
-        # Set the Correlation ID for the connection for logging
-        self._connections[message_in.connection].correlation_id = \
-            self._correlation_id
-
-        if self.message_type:
-            self.set_sentry_context('type', self.message_type)
-
-        # Validate the message type if the child sets MESSAGE_TYPE
-        if self._message_type:
-            if isinstance(self._message_type, (tuple, list, set)):
-                message_supported = self.message_type in self._message_type
-            else:
-                message_supported = self.message_type == self._message_type
-
-            if not message_supported:
-                self.logger.warning('Received unsupported message type: %s',
-                                    self.message_type)
-                # Should the message be dropped or returned to the broker?
-                if self._drop_invalid:
-                    if self._drop_exchange:
-                        self._republish_dropped_message('invalid type')
-                    raise gen.Return(data.MESSAGE_DROP)
-                raise gen.Return(data.MESSAGE_EXCEPTION)
-
-        # Check the number of ProcessingErrors and possibly drop the message
-        if self._error_max_retry and _PROCESSING_EXCEPTIONS in self.headers:
-            if self.headers[_PROCESSING_EXCEPTIONS] >= self._error_max_retry:
-                self.logger.warning('Dropping message with %i deaths due to '
-                                    'ERROR_MAX_RETRY',
-                                    self.headers[_PROCESSING_EXCEPTIONS])
-                if self._drop_exchange:
-                    self._republish_dropped_message('max retries ({})'.format(
-                        self.headers[_PROCESSING_EXCEPTIONS]))
-                raise gen.Return(data.MESSAGE_DROP)
-
-        # Prepare and process, catching exceptions
         try:
-            result = self.prepare()
-            if concurrent.is_future(result):
-                yield result
-            if not self._finished:
-                result = self.process()
-                if concurrent.is_future(result):
-                    yield result
-                    self.logger.debug('Post yield of future process')
+            self._preprocess(message_in, measurement)
+        except DropMessage:
+            raise gen.Return(data.MESSAGE_DROP)
+        except MessageException as exc:
+            raise gen.Return(self._on_message_exception(exc))
 
-        except errors.RabbitMQException as error:
-            self.logger.critical('RabbitMQException while processing %s: %s',
-                                 message_in.delivery_tag, error)
-            self._measurement.set_tag('exception', error.__class__.__name__)
+        try:
+            yield self._execute()
+        except ExecutionFinished as exc:
+            self.logger.debug('Execution finished early')
+            if not self._finished:
+                self.on_finish(exc)
+
+        except RabbitMQException as exc:
+            self._handle_exception(exc)
             raise gen.Return(data.RABBITMQ_EXCEPTION)
 
-        except ConfigurationException as error:
-            self._log_exception(
-                'Exception processing delivery %s: %s',
-                message_in.delivery_tag,
-                error,
-                exc_info=sys.exc_info())
-            self._measurement.set_tag('exception', error.__class__.__name__)
-            if error.metric:
-                self._measurement.set_tag('error', error.metric)
+        except ConfigurationException as exc:
+            self._handle_exception(exc)
             raise gen.Return(data.CONFIGURATION_EXCEPTION)
 
-        except ConsumerException as error:
-            self.logger.error('ConsumerException processing delivery %s: %s',
-                              message_in.delivery_tag, error)
-            self._measurement.set_tag('exception', error.__class__.__name__)
-            if error.metric:
-                self._measurement.set_tag('error', error.metric)
+        except ConsumerException as exc:
+            self._handle_exception(exc)
             raise gen.Return(data.CONSUMER_EXCEPTION)
 
-        except MessageException as error:
-            self.logger.info('MessageException processing delivery %s: %s',
-                             message_in.delivery_tag, error)
-            self._measurement.set_tag('exception', error.__class__.__name__)
-            if error.metric:
-                self._measurement.set_tag('error', error.metric)
-            raise gen.Return(data.MESSAGE_EXCEPTION)
+        except MessageException as exc:
+            raise gen.Return(self._on_message_exception(exc))
 
-        except ProcessingException as error:
-            self.logger.warning(
-                'ProcessingException processing delivery %s: %s',
-                message_in.delivery_tag, error)
-            self._measurement.set_tag('exception', error.__class__.__name__)
-            if error.metric:
-                self._measurement.set_tag('error', error.metric)
-            self._republish_processing_error(error.metric
-                                             or error.__class__.__name__)
+        except ProcessingException as exc:
+            self._handle_exception(exc)
+            self._republish_processing_error(
+                exc.metric or exc.__class__.__name__)
             raise gen.Return(data.PROCESSING_EXCEPTION)
 
-        except NotImplementedError as error:
-            self._log_exception('NotImplementedError processing delivery'
-                                ' %s: %s', message_in.delivery_tag, error)
-            self._measurement.set_tag('exception', 'NotImplementedError')
+        except (NotImplementedError, Exception) as exc:
+            self._handle_exception(exc)
             raise gen.Return(data.UNHANDLED_EXCEPTION)
 
-        except Exception as error:
-            self._log_exception(
-                'Exception processing delivery %s: %s',
-                message_in.delivery_tag,
-                error,
-                exc_info=sys.exc_info())
-            self._measurement.set_tag('exception', 'UnhandledException')
-            raise gen.Return(data.UNHANDLED_EXCEPTION)
+        else:
+            self._finished = True
 
-        finally:
-            if not self._finished:
-                self.finish()
-
-        # Clean up any pending futures
-        for name in self._connections.keys():
-            self._connections[name].clear_confirmation_futures()
-
-        self.logger.debug('Post finish')
+        self._maybe_clear_confirmation_futures()
         raise gen.Return(data.MESSAGE_ACK)
 
     def remove_connection(self, name):
@@ -1032,20 +944,33 @@ class Consumer(object):
         """
         self._connections[connection.name] = connection
 
-    @utils.MessageProperty
+    @property
     def _channel(self):
         """Return the channel of the message that is currently being processed.
 
         :rtype: :class:`pika.channel.Channel`
 
         """
-        return self._message.channel
+        return self._message.channel if self._message else None
 
     def _clear(self):
         """Resets all assigned data for the current message."""
         self._finished = False
+        self._measurement = None
         self._message = None
         self._message_body = None
+
+    @gen.coroutine
+    def _execute(self):
+        """Invoke the lifecycle methods for a message
+        (prepare, process, on_finish), yielding if any are coroutines.
+
+        """
+        for call in (self.prepare, self.process, self.on_finish):
+            self.logger.debug('Invoking %r', call)
+            result = call()
+            if concurrent.is_future(result):
+                yield result
 
     @staticmethod
     def _get_pika_properties(properties_in):
@@ -1062,34 +987,115 @@ class Consumer(object):
                 setattr(properties, key, properties_in.get(key))
         return properties
 
-    def _log_exception(self, msg_format, *args, **kwargs):
-        """Customize the logging of uncaught exceptions.
+    def _handle_exception(self, exc):
+        """Common exception handling behavior across all exceptions.
 
-        :param str msg_format: format of msg to log with ``self.logger.error``
-        :param args: positional arguments to pass to ``self.logger.error``
-        :param kwargs: keyword args to pass into ``self.logger.error``
-        :keyword bool send_to_sentry: if omitted or *truthy*, this keyword
-            will send the captured exception to Sentry (if enabled).
-
-        This for internal use and should not be extended or used directly.
-
-        By default, this method will log the message using
-        :meth:`logging.Logger.error` and send the exception to Sentry.
-        If an exception is currently active, then the traceback will be
-        logged at the debug level.
+        .. note:: This for internal use and should not be extended or used
+            directly.
 
         """
-        self.logger.error(msg_format, *args)
-        exc_info = kwargs.get('exc_info', sys.exc_info())
-        if all(exc_info):
-            exc_type, exc_value, tb = exc_info
-            exc_name = exc_type.__name__
-            self.logger.exception(
-                'Processor handled %s: %s',
-                exc_name,
-                exc_value,
-                exc_info=exc_info)
+        exc_info = sys.exc_info()
+        self.logger.exception(
+            '%s while processing message #%s',
+            exc.__class__.__name__, self._message.delivery_tag,
+            exc_info=exc_info)
+        self._measurement.set_tag('exception', exc.__class__.__name__)
+        if hasattr(exc, 'metric') and exc.metric:
+            self._measurement.set_tag('error', exc.metric)
         self._process.send_exception_to_sentry(exc_info)
+        self._maybe_clear_confirmation_futures()
+        if not self._finished:
+            self.on_finish(exc)
+        self._finished = True
+
+    def _maybe_clear_confirmation_futures(self):
+        """Invoked when the message has finished processing, ensuring there
+        are no confirmation futures pending.
+
+        """
+        for name in self._connections.keys():
+            self._connections[name].clear_confirmation_futures()
+
+    def _maybe_drop_message(self):
+        """Check to see if processing this message would exceed the configured
+        error max retry value. If so, if a drop exchange is configured, publish
+        to that. Finally, raise :exc:`DropMessage`.
+
+        :raises: rejected.errors.DropMessage
+
+        """
+        if self.headers[_PROCESSING_EXCEPTIONS] >= self._error_max_retry:
+            self.logger.warning('Dropping message with %i deaths due to '
+                                'ERROR_MAX_RETRY',
+                                self.headers[_PROCESSING_EXCEPTIONS])
+            if self._drop_exchange:
+                self._republish_dropped_message('max retries ({})'.format(
+                    self.headers[_PROCESSING_EXCEPTIONS]))
+            raise DropMessage
+
+    def _maybe_set_message_age(self):
+        """If timestamp is set and the relative age is > 0, record age of the
+        message coming in
+
+        """
+        if self._message.properties.timestamp:
+            message_age = float(
+                max(self._message.properties.timestamp, time.time()) -
+                self._message.properties.timestamp)
+            if message_age > 0:
+                self.measurement.add_duration(
+                    self.message_age_key(), message_age)
+
+    def _on_message_exception(self, exc):
+        """Common code that is invoked when a :exc:`MessageException` is
+        raised.
+
+         :param rejected.errors.MessageException exc: The exception raised
+         :rtype: int
+
+         """
+        self._handle_exception(exc)
+        return data.MESSAGE_EXCEPTION
+
+    def _preprocess(self, message_in, measurement):
+        """Invoked at the start of execution, setting internal state,
+        validating that the message should be processed and not dropped.
+
+        :param message_in: The message to process
+        :type message_in: :class:`rejected.data.Message`
+        :param measurement: For collecting per-message instrumentation
+        :type measurement: :class:`rejected.data.Measurement`
+        :raises: rejected.errors.MessageException
+        :raises: rejected.errors.DropMessage
+
+        """
+        self._clear()
+        self._message = message_in
+        self._measurement = measurement
+
+        self._maybe_set_message_age()
+
+        # Ensure there is a correlation ID
+        self._correlation_id = (
+                self._message.properties.correlation_id or
+                self._message.properties.message_id or
+                str(uuid.uuid4()))
+
+        # Set the Correlation ID for the connection for logging
+        self._connections[self._message.connection].correlation_id = \
+            self._correlation_id
+
+        # Set the sentry context for the message type if set
+        if self.message_type:
+            self.set_sentry_context('type', self.message_type)
+
+        # Validate the message type if validation is turned on
+        if self._message_type:
+            self._validate_message_type()
+
+        # Check the number of ProcessingErrors and possibly drop the message
+        if self._error_max_retry and _PROCESSING_EXCEPTIONS in self.headers:
+            self._maybe_drop_message()
 
     def _publisher_confirmation_future(self, name, exchange, routing_key,
                                        properties):
@@ -1130,7 +1136,7 @@ class Consumer(object):
         except KeyError:
             raise ValueError('Channel {} not found'.format(name))
         if not conn.is_connected or conn.channel.is_closed:
-            raise errors.RabbitMQException(conn.name, 599, 'NOT_CONNECTED')
+            raise RabbitMQException(conn.name, 599, 'NOT_CONNECTED')
         return conn
 
     def _republish_dropped_message(self, reason):
@@ -1184,478 +1190,34 @@ class Consumer(object):
             except TypeError:
                 properties['headers'][_PROCESSING_EXCEPTIONS] = 1
 
-        self._message.channel.basic_publish(self._error_exchange,
-                                            self._message.routing_key,
-                                            self._message.body,
-                                            pika.BasicProperties(**properties))
+        self._message.channel.basic_publish(
+            self._error_exchange, self._message.routing_key,
+            self._message.body, pika.BasicProperties(**properties))
 
+    def _unsupported_message_type(self):
+        """Check if the current message matches the configured message type(s).
 
-class SmartConsumer(Consumer):
-    """Base class to ease the implementation of strongly typed message
-    consumers that validate and automatically decode and deserialize the
-    inbound message body based upon the message properties. Additionally,
-    should one of the supported ``content_encoding`` types (``gzip`` or
-    ``bzip2``) be specified in the message's property, it will automatically
-    be decoded.
-
-    When publishing a message, the message can be automatically serialized
-    and encoded. If the ``content_type`` property is specified, the consumer
-    will attempt to automatically serialize the message body. If the
-    ``content_encoding`` property is specified using a supported encoding
-    (``gzip`` or ``bzip2``), it will automatically be encoded as well.
-
-    *Supported MIME types for automatic serialization and deserialization are:*
-
-     - application/json
-     - application/msgpack
-     - application/pickle
-     - application/x-pickle
-     - application/x-plist
-     - application/x-vnd.python.pickle
-     - application/vnd.python.pickle
-     - text/csv
-     - text/html (with beautifulsoup4 installed)
-     - text/xml (with beautifulsoup4 installed)
-     - text/yaml
-     - text/x-yaml
-
-    In any of the consumer base classes, if the ``MESSAGE_TYPE`` attribute is
-    set, the ``type`` property of incoming messages will be validated against
-    when a message is received, checking for string equality against the
-    ``MESSAGE_TYPE`` attribute. If they are not matched, the consumer will not
-    process the message and will drop the message without an exception if the
-    ``DROP_INVALID_MESSAGES`` attribute is set to ``True``. If it is ``False``,
-    a :py:class:`ConsumerException` is raised.
-
-    .. note:: Since 3.17, :class:`~rejected.consumer.SmartConsumer` and
-        :class:`~rejected.consumer.SmartPublishingConsumer` have been combined
-        into the same class.
-
-    """
-    _IGNORE_TYPES = {'application/octet-stream', 'text/plain'}
-
-    _CODEC_MAP = {
-        'bzip2': 'bz2',
-        'gzip': 'zlib',
-        'zlib': 'zlib'
-    }
-
-    _SERIALIZATION_MAP = flatdict.FlatDict({
-        'application': {
-            'json': {
-                'module': 'json',
-                'load': 'loads',
-                'dump': 'dumps',
-                'encoding': True
-            },
-            'msgpack': {
-                'module': 'umsgpack',
-                'load': 'unpackb',
-                'dump': 'packb',
-                'binary': True,
-                'enabled': False
-            },
-            'pickle': {
-                'module': 'pickle',
-                'load': 'loads',
-                'dump': 'dumps',
-                'binary': True
-            },
-            'x-pickle': {
-                'module': 'pickle',
-                'load': 'loads',
-                'dump': 'dumps',
-                'binary': True
-            },
-            'x-plist': {
-                'module': 'plistlib',
-                'load': 'loads' if _PYTHON3 else 'readPlistFromString',
-                'dump': 'dumps' if _PYTHON3 else 'writePlistToString',
-                'binary': True
-            },
-            'vnd.python.pickle': {
-                'module': 'pickle',
-                'load': 'loads',
-                'dump': 'dumps',
-                'binary': True
-            },
-            'x-vnd.python.pickle': {
-                'module': 'pickle',
-                'load': 'loads',
-                'dump': 'dumps',
-                'binary': True
-            }
-        },
-        'text': {
-            'csv': {
-                'module': 'csv',
-                'load': '_load_csv',
-                'dump': '_dump_csv',
-                'common': False
-            },
-            'html': {
-                'module': 'bs4',
-                'load': '_load_html',
-                'dump': '_dump_bs4',
-                'common': False,
-                'enabled': False
-            },
-            'xml': {
-                'module': 'bs4',
-                'load': '_load_xml',
-                'dump': '_dump_bs4',
-                'common': False,
-                'enabled': False
-            },
-            'yaml': {
-                'module': 'yaml',
-                'load': 'load',
-                'dump': 'dump'
-            }
-        }
-    }, delimiter='/')
-
-    def __init__(self, *args, **kwargs):
-        """Creates a new instance of the
-        :class:`~rejected.consumer.SmartConsumer` class. To perform
-        initialization tasks, extend
-        :meth:`~rejected.consumer.SmartConsumer.initialize` or ensure you
-        :meth:`super` this method first.
+        :rtype: bool
 
         """
-        super(SmartConsumer, self).__init__(*args, **kwargs)
-        installed = pkg_resources.AvailableDistributions()
-        for key, pkg in {'application/msgpack': 'u-msgpack-python',
-                         'text/html': ('beautifulsoup4', 'lxml'),
-                         'text/xml': ('beautifulsoup4', 'lxml')}.items():
-            if isinstance(pkg, tuple):
-                self._SERIALIZATION_MAP[key]['enabled'] = \
-                    all([p in installed for p in pkg])
-            else:
-                self._SERIALIZATION_MAP[key]['enabled'] = pkg in installed
-            self.logger.debug(
-                '%s is %s in serialization map', key,
-                'enabled' if self._SERIALIZATION_MAP[key]['enabled'] else
-                'disabled')
+        if isinstance(self._message_type, (tuple, list, set)):
+            return self.message_type not in self._message_type
+        return self.message_type != self._message_type
 
-    def publish_message(self,
-                        exchange,
-                        routing_key,
-                        properties,
-                        body,
-                        no_serialization=False,
-                        no_encoding=False,
-                        channel=None,
-                        connection=None):
-        """Publish a message to RabbitMQ on the same channel the original
-        message was received on.
+    def _validate_message_type(self):
+        """Check to see if the current message's AMQP type property is
+        supported and if not, raise either a :exc:`DropMessage` or
+        :exc:`MessageException`.
 
-        By default, if you pass a non-string object to the body and the
-        properties have a supported ``content_type`` set, the body will be
-        auto-serialized in the specified ``content_type``.
-
-        If the properties do not have a timestamp set, it will be set to the
-        current time.
-
-        If you specify a ``content_encoding`` in the properties and the
-        encoding is supported, the body will be auto-encoded.
-
-        Both of these behaviors can be disabled by setting
-        ``no_serialization`` or ``no_encoding`` to ``True``.
-
-        If you pass an unsupported content-type or content-encoding when using
-        the auto-serialization and auto-encoding features, a :exc:`ValueError`
-        will be raised.
-
-        .. versionchanged:: 4.0.0
-           The method returns a :py:class:`~tornado.concurrent.Future` if
-           `publisher confirmations <https://www.rabbitmq.com/confirms.html>`_
-           are enabled on for the connection. In addition, The ``channel``
-           parameter is deprecated and will be removed in a future release.
-
-        :param str exchange: The exchange to publish to
-        :param str routing_key: The routing key to publish with
-        :param dict properties: The message properties
-        :param mixed body: The message body to publish
-        :param bool no_serialization: Turn off auto-serialization of the body
-        :param bool no_encoding: Turn off auto-encoding of the body
-        :param str channel: **Deprecated in 4.0.0** Specify the connection
-            parameter instead.
-        :param str connection: The connection to use. If it is not
-            specified, the channel that the message was delivered on is used.
-        :rtype: tornado.concurrent.Future or None
-        :raises: ValueError
+        :raises: DropMessage
+        :raises: MessageException
 
         """
-        # Auto-serialize the content if needed
-        is_string = (isinstance(body, str) or isinstance(body, bytes)
-                     or isinstance(body, unicode))
-        if not no_serialization and not is_string and \
-                properties.get('content_type'):
-            body = self._serialize(
-                body, headers.parse_content_type(properties['content_type']))
-
-        # Auto-encode the message body if needed
-        if not no_encoding and \
-                properties.get('content_encoding') in self._CODEC_MAP.keys():
-            body = self._compress(
-                body, self._CODEC_MAP[properties['content_encoding']])
-
-        return super(SmartConsumer, self).publish_message(
-            exchange, routing_key, properties, body, channel or connection)
-
-    @property
-    def body(self):
-        """Return the message body, unencoded if needed,
-        deserialized if possible.
-
-        :rtype: any
-
-        """
-        if self._message_body:  # If already set, return it
-            return self._message_body
-        self._message_body = self._maybe_decompress_body()
-        self._message_body = self._maybe_deserialize_body()
-        return self._message_body
-
-    def _compress(self, value, module_name):
-        """Compress the value passed in using the named compression module.
-
-        :param bytes value: The uncompressed value
-        :rtype: bytes
-
-        """
-        self.logger.debug('Decompressing with %s', module_name)
-        if not isinstance(value, bytes):
-            value = value.encode('utf-8')
-        return self._maybe_import(module_name).compress(value)
-
-    @staticmethod
-    def _dump_bs4(value):
-        """Return a BeautifulSoup object as a string
-
-        :param bs4.BeautifulSoup value: The object to return a string from
-        :rtype: str
-
-        """
-        return str(value)
-
-    def _dump_csv(self, rows):
-        """Take a list of dicts and return it as a CSV value. The
-
-        .. versionchanged:: 4.0.0
-
-        :param list rows: A list of lists to return as a CSV
-        :rtype: str
-
-        """
-        self.logger.debug('Writing %r', rows)
-        csv = self._maybe_import('csv')
-        buff = io.StringIO() if _PYTHON3 else io.BytesIO()
-        writer = csv.DictWriter(
-            buff,
-            sorted(set([k for r in rows for k in r.keys()])),
-            dialect='excel')
-        writer.writeheader()
-        writer.writerows(rows)
-        value = buff.getvalue()
-        buff.close()
-        return value
-
-    def _load_bs4(self, value, markup):
-        """Load an HTML or XML string into a :class:`bs4.BeautifulSoup`
-        instance.
-
-        :param str value: The HTML or XML string
-        :param str markup: One of ``html`` or ``xml``
-        :rtype: bs4.BeautifulSoup
-        :raises: ConsumerException
-
-        """
-        return self._maybe_import('bs4').BeautifulSoup(
-            value, 'lxml' if markup == 'html' else 'lxml-xml')
-
-    def _load_csv(self, value):
-        """Return a class:`csv.DictReader` instance for value passed in.
-
-        :param str value: The CSV value
-        :rtype: csv.DictReader
-
-        """
-        csv = self._maybe_import('csv')
-        buff = io.StringIO() if _PYTHON3 else io.BytesIO()
-        buff.write(value)
-        buff.seek(0)
-        dialect = csv.Sniffer().sniff(buff.read(1024))
-        buff.seek(0)
-        return csv.DictReader(buff, dialect=dialect)
-
-    def _load_html(self, value):
-        """Load a HTML string into a :class:`bs4.BeautifulSoup` instance.
-
-        :param str value: The HTML string
-        :rtype: bs4.BeautifulSoup
-
-        """
-        return self._load_bs4(value, 'html')
-
-    def _load_xml(self, value):
-        """Load a XML string into a :class:`bs4.BeautifulSoup` instance.
-
-        :param str value: The XML string
-        :rtype: bs4.BeautifulSoup
-
-        """
-        return self._load_bs4(value, 'xml')
-
-    def _maybe_decode(self, value, encoding='utf-8'):
-        """If a bytes object is passed in, in the Python 3 environment,
-        decode it using the specified encoding to turn it to a str instance.
-
-        :param mixed value: The value to possibly decode
-        :param str encoding: The encoding to use
-        :rtype: str
-
-        """
-        if _PYTHON3 and isinstance(value, bytes):
-            try:
-                return value.decode(encoding)
-            except Exception as err:
-                self.logger.exception('Error decoding value: %s', err)
-                raise MessageException(
-                    str(err), 'decoding-{}'.format(encoding))
-        return value
-
-    def _maybe_decompress_body(self):
-        """Attempt to decompress the message body passed in using the named
-        compression module, if specified.
-
-        :rtype: bytes
-
-        """
-        if self.content_encoding:
-            if self.content_encoding in self._CODEC_MAP.keys():
-                module_name = self._CODEC_MAP[self.content_encoding]
-                self.logger.debug('Decompressing with %s', module_name)
-                module = self._maybe_import(module_name)
-                return module.decompress(self._message.body)
-            self.logger.debug('Unsupported content-encoding: %s',
-                              self.content_encoding)
-        return self._message.body
-
-    def _maybe_deserialize_body(self):
-        """Attempt to deserialize the message body based upon the content-type.
-
-        :rtype: mixed
-
-        """
-        if not self.content_type:
-            return self._message_body
-        ct = headers.parse_content_type(self.content_type)
-        key = '{}/{}'.format(ct.content_type, ct.content_subtype)
-        if key not in self._SERIALIZATION_MAP:
-            if key not in self._IGNORE_TYPES:
-                self.logger.debug('Unsupported content-type: %s',
-                                  self.content_type)
-            return self._message_body
-        elif not self._SERIALIZATION_MAP[key].get('enabled', True):
-            self.logger.debug('%s is not enabled in the serialization map',
-                              key)
-            return self._message_body
-        value = self._message_body
-        if not self._SERIALIZATION_MAP[key].get('binary'):
-            value = self._maybe_decode(
-                self._message_body, ct.parameters.get('charset', 'utf-8'))
-        return self._maybe_invoke_serialization(value, 'load', key)
-
-    def _maybe_import(self, module):
-        if not hasattr(sys.modules[__name__], module):
-            self.logger.debug('Importing %s', module)
-            setattr(sys.modules[__name__], module,
-                    importlib.import_module(module))
-        return sys.modules[module]
-
-    def _maybe_invoke_serialization(self, value, method_type, key):
-        if self._SERIALIZATION_MAP[key].get('common', True):
-            self.logger.debug('Invoking %s %s using %s', method_type, key,
-                              self._SERIALIZATION_MAP[key]['module'])
-            method = getattr(
-                self._maybe_import(self._SERIALIZATION_MAP[key]['module']),
-                self._SERIALIZATION_MAP[key][method_type])
-        else:
-            method = getattr(self, self._SERIALIZATION_MAP[key][method_type])
-        self.logger.debug('Invoking %r for %s %s', method, method_type, key)
-        try:
-            return method(value)
-        except Exception as err:
-            self.logger.exception('Error %sing body: %s', method_type, err)
-            raise MessageException(
-                str(err), 'serialization-{}'.format(method_type))
-
-    def _serialize(self, value, ct):
-        """Auto-serialization of the value based upon the content-type value.
-
-        :param any value: The value to serialize
-        :param ietfparse.: The content type to serialize
-        :rtype: str
-        :raises: ValueError
-
-        """
-        key = '{}/{}'.format(ct.content_type, ct.content_subtype)
-        if key not in self._SERIALIZATION_MAP:
-            raise ValueError('Unsupported content-type: {}'.format(key))
-        elif not self._SERIALIZATION_MAP[key].get('enabled', True):
-            self.logger.debug('%s is not enabled in the serialization map',
-                              key)
-            raise ValueError('Disabled content-type: {}'.format(key))
-        return self._maybe_invoke_serialization(
-            self._maybe_decode(value, ct.parameters.get('charset', 'utf-8')),
-            'dump', key)
-
-
-class ConfigurationException(errors.RejectedException):
-    """Raised when :py:meth:`~rejected.consumer.Consumer.require_setting` is
-    invoked and the specified setting was not configured. When raised, the
-    consumer will shutdown.
-
-    .. versionadded:: 4.0.0
-
-    """
-
-
-class ConsumerException(errors.RejectedException):
-    """May be called when processing a message to indicate a problem that the
-    Consumer may be experiencing that should cause it to stop.
-
-    .. versionchanged:: 3.19.0
-
-    :param str value: An optional value used in string representation
-    :param str metric: An optional value for auto-instrumentation of exceptions
-
-    """
-
-
-class MessageException(errors.RejectedException):
-    """Invoke when a message should be rejected and not re-queued, but not due
-    to a processing error that should cause the consumer to stop.
-
-    .. versionchanged:: 3.19.0
-
-    :param str value: An optional value used in string representation
-    :param str metric: An optional value for auto-instrumentation of exceptions
-
-    """
-
-
-class ProcessingException(errors.RejectedException):
-    """Invoke when a message should be rejected and not re-queued, but not due
-    to a processing error that should cause the consumer to stop. This should
-    be used for when you want to reject a message which will be republished to
-    a retry queue, without anything being stated about the exception.
-
-    .. versionchanged:: 3.19.0
-
-    :param str value: An optional value used in string representation
-    :param str metric: An optional value for auto-instrumentation of exceptions
-
-    """
+        if self._unsupported_message_type():
+            self.logger.warning(
+                'Received unsupported message type: %s', self.message_type)
+            if self._drop_invalid:
+                if self._drop_exchange:
+                    self._republish_dropped_message('invalid type')
+                raise DropMessage
+            raise MessageException

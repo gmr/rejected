@@ -89,7 +89,7 @@ class ConsumerLifecycleTests(testing.AsyncTestCase):
             warning.assert_called_once()
 
 
-class TestFinishedConsumer(consumer.Consumer):
+class TestFinishedConsumer(common.TestConsumer):
     def __init__(self, *args, **kwargs):
         self.called_prepare = False
         self.called_process = False
@@ -101,12 +101,6 @@ class TestFinishedConsumer(consumer.Consumer):
         self.called_prepare = True
         self.finish()
         return super(TestFinishedConsumer, self).prepare()
-
-    def process(self):
-        self.called_process = True
-
-    def on_finish(self):
-        self.called_on_finish = True
 
 
 class FinishedInPrepareTestCase(testing.AsyncTestCase):
@@ -123,9 +117,8 @@ class FinishedInPrepareTestCase(testing.AsyncTestCase):
         self.assertTrue(self.consumer.called_on_finish)
 
 
-class TestOnFinishConsumer(consumer.Consumer):
+class TestOnFinishConsumer(common.TestConsumer):
     def __init__(self, *args, **kwargs):
-        self.called_on_finish = False
         self.raise_in_prepare = None
         self.raise_in_process = None
         super(TestOnFinishConsumer, self).__init__(*args, **kwargs)
@@ -138,10 +131,7 @@ class TestOnFinishConsumer(consumer.Consumer):
     def process(self):
         if self.raise_in_process:
             raise self.raise_in_process
-        pass
-
-    def on_finish(self):
-        self.called_on_finish = True
+        super(TestOnFinishConsumer, self).process()
 
 
 class OnFinishAfterExceptionTests(testing.AsyncTestCase):
@@ -154,6 +144,7 @@ class OnFinishAfterExceptionTests(testing.AsyncTestCase):
         with self.assertRaises(consumer.ConsumerException):
             yield self.process_message(str(uuid.uuid4()))
         self.assertTrue(self.consumer.called_on_finish)
+        self.assertIsInstance(self.consumer.exc, consumer.ConsumerException)
 
     @testing.gen_test
     def test_on_finished_called_case_02(self):
@@ -161,6 +152,8 @@ class OnFinishAfterExceptionTests(testing.AsyncTestCase):
         with self.assertRaises(consumer.ConfigurationException):
             yield self.process_message(str(uuid.uuid4()))
         self.assertTrue(self.consumer.called_on_finish)
+        self.assertIsInstance(self.consumer.exc,
+                              consumer.ConfigurationException)
 
     @testing.gen_test
     def test_on_finished_called_case_03(self):
@@ -168,6 +161,7 @@ class OnFinishAfterExceptionTests(testing.AsyncTestCase):
         with self.assertRaises(consumer.MessageException):
             yield self.process_message(str(uuid.uuid4()))
         self.assertTrue(self.consumer.called_on_finish)
+        self.assertIsInstance(self.consumer.exc, consumer.MessageException)
 
     @testing.gen_test
     def test_on_finished_called_case_04(self):
@@ -175,6 +169,7 @@ class OnFinishAfterExceptionTests(testing.AsyncTestCase):
         with self.assertRaises(consumer.ProcessingException):
             yield self.process_message(str(uuid.uuid4()))
         self.assertTrue(self.consumer.called_on_finish)
+        self.assertIsInstance(self.consumer.exc, consumer.ProcessingException)
 
     @testing.gen_test
     def test_on_finished_called_case_05(self):
@@ -182,6 +177,7 @@ class OnFinishAfterExceptionTests(testing.AsyncTestCase):
         with self.assertRaises(AssertionError):
             yield self.process_message(str(uuid.uuid4()))
         self.assertTrue(self.consumer.called_on_finish)
+        self.assertIsInstance(self.consumer.exc, ValueError)
 
     @testing.gen_test
     def test_on_finished_called_case_06(self):
@@ -189,6 +185,7 @@ class OnFinishAfterExceptionTests(testing.AsyncTestCase):
         with self.assertRaises(consumer.ConsumerException):
             yield self.process_message(str(uuid.uuid4()))
         self.assertTrue(self.consumer.called_on_finish)
+        self.assertIsInstance(self.consumer.exc, consumer.ConsumerException)
 
     @testing.gen_test
     def test_on_finished_called_case_07(self):
@@ -196,6 +193,8 @@ class OnFinishAfterExceptionTests(testing.AsyncTestCase):
         with self.assertRaises(consumer.ConfigurationException):
             yield self.process_message(str(uuid.uuid4()))
         self.assertTrue(self.consumer.called_on_finish)
+        self.assertIsInstance(self.consumer.exc,
+                              consumer.ConfigurationException)
 
     @testing.gen_test
     def test_on_finished_called_case_08(self):
@@ -203,6 +202,7 @@ class OnFinishAfterExceptionTests(testing.AsyncTestCase):
         with self.assertRaises(consumer.MessageException):
             yield self.process_message(str(uuid.uuid4()))
         self.assertTrue(self.consumer.called_on_finish)
+        self.assertIsInstance(self.consumer.exc, consumer.MessageException)
 
     @testing.gen_test
     def test_on_finished_called_case_09(self):
@@ -210,6 +210,7 @@ class OnFinishAfterExceptionTests(testing.AsyncTestCase):
         with self.assertRaises(consumer.ProcessingException):
             yield self.process_message(str(uuid.uuid4()))
         self.assertTrue(self.consumer.called_on_finish)
+        self.assertIsInstance(self.consumer.exc, consumer.ProcessingException)
 
     @testing.gen_test
     def test_on_finished_called_case_10(self):
@@ -217,6 +218,7 @@ class OnFinishAfterExceptionTests(testing.AsyncTestCase):
         with self.assertRaises(AssertionError):
             yield self.process_message(str(uuid.uuid4()))
         self.assertTrue(self.consumer.called_on_finish)
+        self.assertIsInstance(self.consumer.exc, ValueError)
 
     @testing.gen_test
     def test_on_finished_called_case_11(self):
@@ -225,9 +227,10 @@ class OnFinishAfterExceptionTests(testing.AsyncTestCase):
         with self.assertRaises(errors.RabbitMQException):
             yield self.process_message(str(uuid.uuid4()))
         self.assertTrue(self.consumer.called_on_finish)
+        self.assertIsInstance(self.consumer.exc, errors.RabbitMQException)
 
 
-class TestPublisher(consumer.Consumer):
+class TestPublisher(common.TestConsumer):
 
     errors = []
 
@@ -531,17 +534,13 @@ class ConsumerPropertyTestCase(testing.AsyncTestCase):
         self.assertEqual(self.consumer.user_id, value)
 
 
-class RequireSettingsConsumer(consumer.Consumer):
+class RequireSettingsConsumer(common.TestConsumer):
     def __init__(self, *args, **kwargs):
         super(RequireSettingsConsumer, self).__init__(*args, **kwargs)
         self.setting_key = None
-        self.processed = False
 
     def prepare(self):
         self.require_setting(self.setting_key)
-
-    def process(self):
-        self.processed = True
 
 
 class RequireSettingTestCase(testing.AsyncTestCase):
@@ -559,11 +558,12 @@ class RequireSettingTestCase(testing.AsyncTestCase):
     def test_no_exception_raised(self):
         self.consumer.setting_key = self.KEY
         yield self.process_message(mocks.BODY)
-        self.assertTrue(self.consumer.processed)
+        self.assertTrue(self.consumer.called_process)
 
     @testing.gen_test
     def test_exception_raised(self):
         self.consumer.setting_key = str(uuid.uuid4())
         with self.assertRaises(consumer.ConfigurationException):
             yield self.process_message(mocks.BODY)
-        self.assertFalse(self.consumer.processed)
+        print(self.consumer.called_process)
+        self.assertFalse(self.consumer.called_process)

@@ -115,8 +115,6 @@ class AsyncTestCase(testing.AsyncTestCase):
 
         """
         super(AsyncTestCase, self).tearDown()
-        if not self.consumer.is_finished:
-            self.consumer.finish()
         self.consumer.shutdown()
 
     def get_consumer(self):
@@ -244,13 +242,13 @@ class AsyncTestCase(testing.AsyncTestCase):
             measurement)
         self.logger.info('execute returned %r', result)
         if result == data.CONSUMER_EXCEPTION:
-            raise consumer.ConsumerException()
+            raise errors.ConsumerException
         elif result == data.MESSAGE_EXCEPTION:
-            raise consumer.MessageException()
+            raise consumer.MessageException
         elif result == data.PROCESSING_EXCEPTION:
-            raise consumer.ProcessingException()
+            raise consumer.ProcessingException
         elif result == data.CONFIGURATION_EXCEPTION:
-            raise consumer.ConfigurationException()
+            raise consumer.ConfigurationException
         elif result == data.RABBITMQ_EXCEPTION:
             raise errors.RabbitMQException(
                 self.process.connections['mock'],

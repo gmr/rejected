@@ -74,20 +74,3 @@ def percentile(values, k):
     values.sort()
     index = (len(values) * (float(k) / 100)) - 1
     return values[int(math.ceil(index))]
-
-
-class MessageProperty(object):
-    """A decorator that is used in rejected.consumer.Consumer to only return
-    property values if the message is set.
-
-    """
-    def __init__(self, getter, setter=None):
-        self.__get = getter
-        self.__set = setter
-
-    def __get__(self, inst, _type=None):
-        if getattr(inst, '_message'):
-            return self.__get(inst)
-
-    def __set__(self, inst, value):
-        raise AttributeError('this attribute is read-only')

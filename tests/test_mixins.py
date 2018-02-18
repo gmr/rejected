@@ -6,12 +6,11 @@ from rejected import mixins, testing
 from . import common
 
 
-class TestConsumer(mixins.GarbageCollectorMixin,
-                   common.TestConsumer):
+class TestConsumer(mixins.GarbageCollector, common.TestConsumer):
     pass
 
 
-class GarbageCollectorMixinTestCase(testing.AsyncTestCase):
+class GarbageCollectorTestCase(testing.AsyncTestCase):
 
     def get_consumer(self):
         return TestConsumer

@@ -4,7 +4,7 @@ import logging
 LOGGER = logging.getLogger(__name__)
 
 
-class GarbageCollectorMixin(object):
+class GarbageCollector(object):
     """Consumer mixin to periodically call ``gc.collect`` periodically in the
     :meth:`on_finish` method.
 
@@ -20,7 +20,7 @@ class GarbageCollectorMixin(object):
         self._collection_cycle = \
             kwargs.get('settings', {}).get('gc_collection_frequency',
                                            self.DEFAULT_GC_FREQUENCY)
-        super(GarbageCollectorMixin, self).__init__(*args, **kwargs)
+        super(GarbageCollector, self).__init__(*args, **kwargs)
         self._cycles_left = self.collection_cycle
 
     @property
@@ -39,9 +39,9 @@ class GarbageCollectorMixin(object):
             self._collection_cycle = value
             self._cycles_left = min(self._cycles_left, self._collection_cycle)
 
-    def on_finish(self):
+    def on_finish(self, exc=None):
         """Used to initiate the garbage collection"""
-        super(GarbageCollectorMixin, self).on_finish()
+        super(GarbageCollector, self).on_finish(exc)
         self._cycles_left -= 1
         if self._cycles_left <= 0:
             num_collected = gc.collect()

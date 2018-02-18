@@ -15,6 +15,7 @@ Breaking Changes
 - MOVED ``rejected.consumer.SmartConsumer`` to :class:`rejected.smart_consumer.SmartConsumer`
 - RENAMED ``rejected.mixins.GarbargeCollector`` to :class:`rejected.mixins.GarbageCollector`
 - REMOVED the ``channel`` argument from :meth:`rejected.consumer.Consumer.publish_message`
+- REMOVED imports of :class:`rejected.consumer.Consumer`, :class:`rejected.smart_consumer.SmartConsumer` and the exceptions into the top-level `rejected` namespace.
 
 High-Level Changes
 ^^^^^^^^^^^^^^^^^^

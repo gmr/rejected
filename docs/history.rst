@@ -10,39 +10,43 @@ Breaking Changes
 - REMOVED ``rejected.consumer.Consumer.statsd_*`` functions that were deprecated in v3.13.0
 - REMOVED ``rejected.consumer.PublishingConsumer`` class that was deprecated in v3.17.0
 - REMOVED ``rejected.consumer.SmartPublishingConsumer`` class that was deprecated in v3.17.0
-- CHANGED when a message is returned from RabbitMQ so that it will no longer invoke ``rejected.consumer.Consumer.process``
+- CHANGED when a message is returned from RabbitMQ so that it will no longer invoke :meth:`rejected.consumer.Consumer.process`
+- CHANGED :meth:`rejected.consumer.Consumer.on_finish` to pass in the instance of an exception if one is raised during the processing of a message. (`#24 <https://github.com/gmr/rejected/issues/24>`_, `#27 <https://github.com/gmr/rejected/issues/27>`_)
+- MOVED ``rejected.consumer.SmartConsumer`` to :class:`rejected.smart_consumer.SmartConsumer`
+- RENAMED ``rejected.mixins.GarbargeCollector`` to :class:`rejected.mixins.GarbageCollector`
+- REMOVED the ``channel`` argument from :meth:`rejected.consumer.Consumer.publish_message`
 
 High-Level Changes
 ^^^^^^^^^^^^^^^^^^
-- Refactored publishing with publisher confirmations enabled to return a ``tornado.concurrent.Future`` that can be yielded on to wait for confirmations to be returned
+- Refactored publishing with publisher confirmations enabled to return a :class:`tornado.concurrent.Future` that can be yielded on to wait for confirmations to be returned
 - When publisher confirmations are enabled, all publishing is done with the ``mandatory`` flag set
 - Documentation cleaned up and rewritten in parts
 
 Other Changes
 ^^^^^^^^^^^^^
-- ADDED ``rejected.consumer.Consumer.rpc_reply`` as a replacement of ``rejected.consumer.Consumer.reply``
-- ADDED ability to ``rejected.data.Properties`` to allow for keyword arguments
-- ADDED ``rejected.consumer.Consumer.IGNORE_OOB_STATS_CALLS`` to not log when ``rejected.consumer.Consumer.stats_*`` calls are made when no message is currently being processed
-- ADDED ``rejected.log.CorrelationID`` and ``rejected.log.NoCorrelationID`` as a replacement of ``rejected.log.CorrelationFilter``
-- ADDED When a ``rejected.consumer.ConfigurationException`` is raised in ``prepare`` or ``process`` it's not longer treated as an unhandled exception and will cause the consumer to shutdown
-- ADDED When a ``rejected.consumer.ConfigurationException`` is raised when initializing a consumer, it will now explicitly shutdown the consumer process
-- REMOVED code duplication when dealing with ``rejected.consumer.Consumer`` property methods
-- ADDED additional exception handling support in ``rejected.testing.AsyncTestCase``
-- REMOVED catching of KeyboardInterrupt in ``rejected.consumer.Consumer.execute`` favoring catching higher up in the processing flow
-- ADDED call to ``Consumer.shutdown`` in ``rejected.testing.AsyncTestCase.tearDown`` (#25 `nvllsvm <https://github.com/nvllsvm>`_)
-- CHANGED ``rejected.consumer.SmartConsumer`` to load libraries for serialization and compression on demand, reducing the overall memory footprint
-- CHANGED ``rejected.consumer.SmartConsumer`` parsing of ``content-type`` to use `ietfparse <https://pypi.python.org/pypi/ietfparse>`_, including charset for use in decoding in Python 3
-- CHANGED In ``rejected.consumer.SmartConsumer`` attempting to auto-encode or auto-serialize a non-string or non-bytes object with an invalid content encoding or content type will now raise a :exc:`ValueError`
-- CHANGED ``rejected.consumer.SmartConsumer`` auto-serialization of CSV to use csv.DictWriter and it now expects a list of dict rows
-- ADDED the raising of a ``rejected.consumer.MessageException`` in ``rejected.consumer.SmartConsumer`` when attempting to decode a message body and a decoding error is raised
-- CHANGED ``rejected.consumer.SmartConsumer`` auto-serialization to JSON to no longer ensure ASCII=True
-- ADDED type-hinting to bs4 parsing based upon the ``content-type`` in ``rejected.consumer.SmartConsumer``
+- ADDED :attr:`rejected.consumer.Consumer.rpc_reply` as a replacement of ``rejected.consumer.Consumer.reply``
+- ADDED ability to :class:`rejected.data.Properties` to allow for keyword arguments
+- ADDED :const:`rejected.consumer.Consumer.IGNORE_OOB_STATS` to not log when ``rejected.consumer.Consumer.stats_*`` calls are made when no message is currently being processed
+- ADDED :class:`rejected.log.CorrelationID`` and :class:`rejected.log.NoCorrelationID` as a replacement of :class:`rejected.log.CorrelationFilter`
+- ADDED When a :exc:`rejected.errors.ConfigurationException` is raised in :meth:`~rejected.consumer.Consumer.prepare` or :meth:`~rejected.consumer.Consumer.process` it's not longer treated as an unhandled exception and will cause the consumer to shutdown
+- ADDED When a :exc:`rejected.errors.ConfigurationException` is raised when initializing a consumer, it will now explicitly shutdown the consumer process
+- REMOVED code duplication when dealing with :class:`rejected.consumer.Consumer` property methods
+- ADDED additional exception handling support in :class:`rejected.testing.AsyncTestCase`
+- REMOVED catching of KeyboardInterrupt in :meth:`rejected.consumer.Consumer.execute` favoring catching higher up in the processing flow
+- ADDED call to :meth:`rejected.consumer.Consumer.shutdown` in :meth:`rejected.testing.AsyncTestCase.tearDown` (#25 `nvllsvm <https://github.com/nvllsvm>`_)
+- CHANGED :class:`rejected.smart_consumer.SmartConsumer` to load libraries for serialization and compression on demand, reducing the overall memory footprint
+- CHANGED :class:`rejected.smart_consumer.SmartConsumer` parsing of ``content-type`` to use `ietfparse <https://pypi.python.org/pypi/ietfparse>`_, including charset for use in decoding in Python 3
+- CHANGED In :class:`rejected.smart_consumer.SmartConsumer` attempting to auto-encode or auto-serialize a non-string or non-bytes object with an invalid content encoding or content type will now raise a :exc:`ValueError`
+- CHANGED :class:`rejected.smart_consumer.SmartConsumer` auto-serialization of CSV to use :class:`csv.DictWriter` and it now expects a list of dict rows
+- ADDED the raising of a `rejected.errors.MessageException` in :class:`rejected.smart_consumer.SmartConsumer` when attempting to decode a message body and a decoding error is raised
+- CHANGED :class:`rejected.smart_consumer.SmartConsumer` auto-serialization to JSON to no longer ensure ``ASCII=True``
+- ADDED type-hinting to bs4 parsing based upon the ``content-type`` in :class:`rejected.smart_consumer.SmartConsumer`
+- MOVED all exceptions to ``rejected.errors``
 
 Bug Fixes
 ^^^^^^^^^
-- REMOVED extra call to ``rejected.consumer.Consumer.initialize`` in ``rejected.testing.AsyncTestCase._create_consumer`` `#21 <https://github.com/gmr/rejected/pull/21>`_ - `dave-shawley <https://github.com/dave-shawley>`_
-- CHANGED ``rejected.consumer.Consumer`` to invoke ``on_finish`` even when an exception is raised during processing (#24)
-- CHANGED ``rejected.consumer.Consumer.io_loop`` to correctly return the proper loop
+- REMOVED extra call to :meth:`rejected.consumer.Consumer.initialize` in :meth:`rejected.testing.AsyncTestCase._create_consumer` `#21 <https://github.com/gmr/rejected/pull/21>`_ - `dave-shawley <https://github.com/dave-shawley>`_
+- CHANGED :attr:`rejected.consumer.Consumer.io_loop` to correctly return the proper loop
 
 3.19.5
 ------

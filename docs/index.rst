@@ -48,6 +48,8 @@ Class Documentation
 
    api_consumers
    api_data
+   api_mixins
+   api_exceptions
    api_testing
    api_internal
 

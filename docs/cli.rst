@@ -1,9 +1,9 @@
 Command-Line Options
 ====================
-The :command:`rejected` command line application allows you to spawn the rejected process
-as a daemon. Additionally it has options for running interactively (``-f``), which
-along with the ``-o`` switch for specifying a single consumer to run and ``-q``
-to specify quantity, makes for easier debugging.
+The :command:`consumerd` command line application allows you to spawn the
+rejected consumer daemon. Additionally it has options for running interactively
+(``-f``), which along with the ``-o`` switch for specifying a single consumer
+to run and ``-q`` to specify quantity, makes for easier debugging.
 
 If you specify ``-P /path/to/write/data/to``, rejected will automatically enable
 :py:mod:`cProfile`, writing the profiling data to the path specified. This can
@@ -15,10 +15,10 @@ Usage
 
 .. code-block:: none
 
-   usage: rejected [-h] [-c CONFIG] [-f] [-P PROFILE] [-o CONSUMER]
-                   [-p PREPEND_PATH] [-q QUANTITY] [--version]
+   usage: consumerd [-h] [-c CONFIG] [-f] [-P PROFILE] [-o CONSUMER]
+                    [-p PREPEND_PATH] [-q QUANTITY] [--version]
 
-   RabbitMQ consumer framework
+   Rejected AMQP consumer supervisor
 
    optional arguments:
      -h, --help            show this help message and exit

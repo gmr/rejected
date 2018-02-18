@@ -20,7 +20,12 @@ need to use the ``@testing.gen_test`` decorator.
 
        from rejected import testing
 
+       import my_consumer
+
        class ConsumerTestCase(testing.AsyncTestCase):
+
+          def get_consumer(self):
+              return my_consumer.Consumer
 
           @testing.gen_test
           def test_consumer_raises_message_exception(self):

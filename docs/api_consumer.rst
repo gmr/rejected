@@ -1,11 +1,10 @@
-rejected.consumer.Consumer
-==========================
+Consumer
+========
 A basic consumer class to extend that is not opinionated about message bodies
 or properties.
 
-.. autoclass:: rejected.consumer.Consumer
 
-   .. rubric:: Extendable Per-Message Methods
+.. autoclass:: rejected.consumer.Consumer
 
    The :py:meth:`~rejected.consumer.Consumer.prepare`,
    :py:meth:`~rejected.consumer.Consumer.process`, and
@@ -13,48 +12,9 @@ or properties.
    order, once per message that is delivered from RabbitMQ. Extend these methods
    to implement the primary behaviors for your consumer application.
 
-   .. note:: If :py:meth:`~rejected.consumer.Consumer.finish` is called in the
-      :py:meth:`~rejected.consumer.Consumer.prepare` method,
-      :py:meth:`~rejected.consumer.Consumer.process` will **not** be called.
-
-   The following example consumer demonstrates the use of the three methods
-   that a generally invoked for every message that is delivered. While
-   you do not have to implement the :py:meth:`~rejected.consumer.Consumer.prepare`
-   or :py:meth:`~rejected.consumer.Consumer.on_finish` methods, you must
-   implement the :py:meth:`~rejected.consumer.Consumer.process` method for your
-   consumer to properly function.
-
-   .. code-block:: python
-      :caption: Message Lifecycle Example
-
-      class Consumer(consumer.Consumer):
-          """
-
-          """
-
-          def __init__(self, *args, **kwargs):
-              super(Consumer, self).__init__(*args, **kwargs)
-              self.current_id, self.previous_id = None, None
-
-          def prepare(self):
-              try:
-                 self.current_id = self.body['id']
-              except KeyError:
-                  raise consumer.MessageException('Missing ID in body',
-                                                  metric='missing-id')
-              return super(Consumer, self).prepare()
-
-          def process(self):
-              self.logger.info('Current ID: %s, Previous ID: %s',
-                               self.current_id, self.previous_id)
-
-          def on_finish(self):
-              self.previous_id = self.current_id
-              self.current_id = None
-
    .. automethod:: rejected.consumer.Consumer.prepare(self)
    .. automethod:: rejected.consumer.Consumer.process(self)
-   .. automethod:: rejected.consumer.Consumer.on_finish(self)
+   .. automethod:: rejected.consumer.Consumer.on_finish(self, exc=None)
 
    .. rubric:: Class Constants
 
@@ -78,6 +38,7 @@ or properties.
    configuration.
 
    .. autoattribute:: rejected.consumer.Consumer.io_loop
+
    .. autoattribute:: rejected.consumer.Consumer.name
    .. autoattribute:: rejected.consumer.Consumer.settings
 
@@ -104,7 +65,8 @@ or properties.
    .. rubric:: Stats Methods
 
    The following methods are used to collect statistical information that is
-   submitted to InfluxDB or StatsD if configured.
+   submitted to `InfluxDB <https://www.influxdata.com/time-series-platform/influxdb/>`_
+   or `StatsD <https://github.com/etsy/statsd>`_ if configured.
 
    .. Note:: All data collected by invoking these methods is not submitted until
       after the message has been fully processed.

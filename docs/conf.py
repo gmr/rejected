@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
+import datetime
 import os
 import sys
+
 sys.path.insert(0, os.path.abspath('..'))
 
 extensions = ['sphinx.ext.autodoc',
@@ -13,8 +15,9 @@ templates_path = ['_templates']
 source_suffix = '.rst'
 master_doc = 'index'
 
-project = u'rejected'
-copyright = u'2009-2017, Gavin M. Roy'
+project = 'rejected'
+copyright = '2009-{}, Gavin M. Roy'.format(
+    datetime.date.today().strftime('%Y'))
 
 import rejected
 release = rejected.__version__

@@ -60,6 +60,7 @@ class MasterControlProgram(state.State):
         self.set_process_name()
         LOGGER.info('rejected v%s initializing', __version__)
         super(MasterControlProgram, self).__init__()
+        self.pid = os.getpid()
 
         # Default values
         self._active_cache = None
@@ -96,18 +97,19 @@ class MasterControlProgram(state.State):
 
         """
         LOGGER.debug('Checking active processes (cache: %s)', use_cache)
-        if use_cache and self._active_cache and \
-                self._active_cache[0] > time.time() - self.poll_interval:
+        if self.can_use_process_cache(use_cache):
             return self._active_cache[1]
         active_processes, dead_processes = list(), list()
         for consumer in self.consumers:
             processes = list(self.consumers[consumer].processes)
             for name in processes:
                 child = self.get_consumer_process(consumer, name)
-                if child.pid is None:
+                if child is None:
+                    dead_processes.append((consumer, name))
+                elif child.pid is None:
                     dead_processes.append((consumer, name))
                     continue
-                elif int(child.pid) == os.getpid():
+                elif child.pid == self.pid:
                     continue
                 try:
                     proc = psutil.Process(child.pid)
@@ -166,6 +168,17 @@ class MasterControlProgram(state.State):
             'process_data': data,
             'counts': stats
         }
+
+    def can_use_process_cache(self, use_cache):
+        """Returns True if the process cache can be used
+
+        :param bool use_cache: Override the logic to force non-cached values
+        :rtype: bool
+
+        """
+        return (use_cache and
+                self._active_cache and
+                self._active_cache[0] > (time.time() - self.poll_interval))
 
     def check_process_counts(self):
         """Check for the minimum consumer process levels and start up new

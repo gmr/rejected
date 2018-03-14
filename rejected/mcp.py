@@ -28,12 +28,13 @@ class Consumer(object):
     the MCP
 
     """
+    __slots__ = ['last_proc_num', 'processes', 'qty', 'queue']
 
-    def __init__(self, last_proc_num, processes, qty, queue):
+    def __init__(self, last_proc_num, processes, qty, queue_name):
         self.last_proc_num = last_proc_num
         self.processes = processes
         self.qty = qty
-        self.queue = queue
+        self.queue = queue_name
 
 
 class MasterControlProgram(state.State):
@@ -100,7 +101,8 @@ class MasterControlProgram(state.State):
             return self._active_cache[1]
         active_processes, dead_processes = list(), list()
         for consumer in self.consumers:
-            for name in self.consumers[consumer].processes:
+            processes = list(self.consumers[consumer].processes)
+            for name in processes:
                 child = self.get_consumer_process(consumer, name)
                 if child.pid is None:
                     dead_processes.append((consumer, name))
@@ -246,7 +248,7 @@ class MasterControlProgram(state.State):
         :rtype: dict
 
         """
-        consumers = dict(config.application.Consumers)
+        consumers = dict(config.application.Consumers or {})
         if only:
             for key in list(consumers.keys()):
                 if key != only:
@@ -315,7 +317,8 @@ class MasterControlProgram(state.State):
     def log_stats(self):
         """Output the stats to the LOGGER."""
         if not self.stats.get('counts'):
-            LOGGER.info('Did not receive any stats data from children')
+            if self.consumers:
+                LOGGER.info('Did not receive any stats data from children')
             return
 
         if self.poll_data['processes']:
@@ -467,6 +470,10 @@ class MasterControlProgram(state.State):
         call ourselves in _POLL_RESULTS_INTERVAL.
 
         """
+        if not self.consumers:
+            LOGGER.debug('Skipping poll results check, no consumers')
+            return
+
         LOGGER.debug('Checking for poll results')
         while True:
             try:
@@ -598,6 +605,8 @@ class MasterControlProgram(state.State):
         minimal amount of processes, setting up the runtime data as well.
 
         """
+        if not self.consumer_cfg:
+            LOGGER.warning('No consumers are configured')
         for name in self.consumer_cfg.keys():
             self.consumers[name] = self.new_consumer(
                 self.consumer_cfg[name], name)

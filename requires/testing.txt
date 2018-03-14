@@ -1,5 +1,6 @@
 beautifulsoup4
 coverage
+cython
 lxml
 mock
 nose

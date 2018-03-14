@@ -13,7 +13,7 @@ Breaking Changes
 - CHANGED when a message is returned from RabbitMQ so that it will no longer invoke :meth:`rejected.consumer.Consumer.process`
 - CHANGED :meth:`rejected.consumer.Consumer.on_finish` to pass in the instance of an exception if one is raised during the processing of a message. (`#24 <https://github.com/gmr/rejected/issues/24>`_, `#27 <https://github.com/gmr/rejected/issues/27>`_)
 - MOVED ``rejected.consumer.SmartConsumer`` to :class:`rejected.smart_consumer.SmartConsumer`
-- RENAMED ``rejected.mixins.GarbargeCollector`` to :class:`rejected.mixins.GarbageCollector`
+- RENAMED ``rejected.mixins.GarbargeCollectorMixin`` to :class:`rejected.mixins.GarbageCollector`
 - REMOVED the ``channel`` argument from :meth:`rejected.consumer.Consumer.publish_message`
 - REMOVED imports of :class:`rejected.consumer.Consumer`, :class:`rejected.smart_consumer.SmartConsumer` and the exceptions into the top-level `rejected` namespace.
 
@@ -43,6 +43,7 @@ Other Changes
 - CHANGED :class:`rejected.smart_consumer.SmartConsumer` auto-serialization to JSON to no longer ensure ``ASCII=True``
 - ADDED type-hinting to bs4 parsing based upon the ``content-type`` in :class:`rejected.smart_consumer.SmartConsumer`
 - MOVED all exceptions to ``rejected.errors``
+- ADDED ability to disable including the hostname when submitting stats to statsd
 
 Bug Fixes
 ^^^^^^^^^

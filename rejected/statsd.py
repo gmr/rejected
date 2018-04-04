@@ -16,7 +16,7 @@ import socket
 LOGGER = logging.getLogger(__name__)
 
 
-class Client(object):
+class StatsdClient(object):
     """A simple statsd client that buffers counters to emit fewer UDP packets
     than once per incr.
 
@@ -97,6 +97,7 @@ class Client(object):
 
         :param str key: The key name to send
         :param int or float value: The value for the key
+        :param str metric_type: The metric type (c,g,ms)
 
         """
         try:
@@ -107,11 +108,16 @@ class Client(object):
             LOGGER.exception('Error sending statsd metric')
 
     def _build_payload(self, key, value, metric_type):
-        """Return the """
+        """Return the payload for the key.
+
+        :param str key: The key name to send
+        :param int or float value: The value for the key
+        :param str metric_type: The metric type (c,g,ms)
+
+        """
         if self._setting('include_hostname', True):
             return self.PAYLOAD_HOSTNAME.format(
                 self._prefix, self._hostname, self._consumer_name, key, value,
                 metric_type)
         return self.PAYLOAD_NO_HOSTNAME.format(
-            self._prefix, self._consumer_name, key, value,
-            metric_type)
+            self._prefix, self._consumer_name, key, value, metric_type)

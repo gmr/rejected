@@ -1,6 +1,11 @@
 Changelog
 =========
 
+3.19.6
+------
+
+- ADDED ability to disable including the hostname when submitting stats to statsd
+
 3.19.5
 ------
 

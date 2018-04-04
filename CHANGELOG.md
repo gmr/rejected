@@ -1,5 +1,9 @@
 # ChangeLog
 
+## 3.19.6
+
+- ADDED ability to disable including the hostname when submitting stats to statsd
+
 ## 3.19.5
 
 - Add SSL connection flag support to configuration (#20) - code-fabriek
@@ -29,8 +33,8 @@
 - Sentry client changes:
   - Do not assign version, let the client figure that out
   - Do not specify the versions of loaded modules, let the client figure that out
-- Add `rejected.data.Measurement.add_duration`, changing the behavior of 
-  recorded durations, creating a stack of timings instead of a single timing 
+- Add `rejected.data.Measurement.add_duration`, changing the behavior of
+  recorded durations, creating a stack of timings instead of a single timing
   for the key. For InfluxDB submissions, if there is a only a single value,
   that metric will continue to submit as previous versions. If there are multiple,
   the average, min, max, median, and 95th percentile values will be submitted.
@@ -59,7 +63,7 @@
 - Refactor how the version of the consumer module or package is determined
 - Add `ProcessingException` as a top-level package export
 - Fix misc docstrings
-- Fix the use of SIGABRT being used from child processes to notify the MCP when 
+- Fix the use of SIGABRT being used from child processes to notify the MCP when
   processes exit, instead register for SIGCHLD in the MCP.
 
 ## 3.18.9
@@ -223,8 +227,8 @@
 - Remove Python 2.6 support
 - Documentation Updates
 - consumer.Consumer: Accept multiple MESSAGE_TYPEs.
-- PublishingConsumer: Remove routing key from metric. 
-- Add per-consumer sentry configuration 
+- PublishingConsumer: Remove routing key from metric.
+- Add per-consumer sentry configuration
 - Refactor Consumer stats and statsd support
 - Update to use the per-message measurement
     - Changes how we submit measurements to statsd

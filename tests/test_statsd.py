@@ -16,7 +16,7 @@ class TestCase(unittest.TestCase):
         super(TestCase, self).setUp()
         self.name = str(uuid.uuid4())
         self.settings = self.get_settings()
-        self.statsd = statsd.Client(self.name, self.settings)
+        self.statsd = statsd.StatsdClient(self.name, self.settings)
 
     @staticmethod
     def get_settings():

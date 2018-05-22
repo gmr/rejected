@@ -26,7 +26,8 @@ class TestCase(unittest.TestCase):
         }
 
     def payload_format(self, key, value, metric_type):
-        return self.statsd._build_payload(key, value, metric_type)
+        return self.statsd._build_payload(
+            key, value, metric_type).encode('utf-8')
 
 
 class UDPTestCase(TestCase):
@@ -57,24 +58,24 @@ class UDPSendTestCase(TestCase):
     def test_hostname_in_metric(self):
         self.statsd.add_timing('foo', 2.5)
         value = self.payload_format('foo', 2500.0, 'ms')
-        self.assertIn(socket.gethostname().split('.')[0], value)
+        self.assertIn(socket.gethostname().split('.')[0].encode('utf-8'), value)
 
     def test_add_timing(self):
         self.statsd.add_timing('foo', 2.5)
         expectation = self.payload_format('foo', 2500.0, 'ms')
-        self.socket.sendto.assert_called_once_with(expectation.encode('utf-8'),
+        self.socket.sendto.assert_called_once_with(expectation,
                                                    self.statsd._address)
 
     def test_incr(self):
         self.statsd.incr('bar', 2)
         expectation = self.payload_format('bar', 2, 'c')
-        self.socket.sendto.assert_called_once_with(expectation.encode('utf-8'),
+        self.socket.sendto.assert_called_once_with(expectation,
                                                    self.statsd._address)
 
     def test_set_gauge(self):
         self.statsd.set_gauge('baz', 98.5)
         expectation = self.payload_format('baz', 98.5, 'g')
-        self.socket.sendto.assert_called_once_with(expectation.encode('utf-8'),
+        self.socket.sendto.assert_called_once_with(expectation,
                                                    self.statsd._address)
 
 
@@ -92,12 +93,13 @@ class NoHostnameTestCase(TestCase):
     def test_hostname_in_metric(self):
         self.statsd.add_timing('foo', 2.5)
         value = self.payload_format('foo', 2500.0, 'ms')
-        self.assertNotIn(socket.gethostname().split('.')[0], value)
+        self.assertNotIn(socket.gethostname().split('.')[0].encode('utf-8'),
+                         value)
 
 
 class StatsdServer(tcpserver.TCPServer):
 
-    PATTERN = b'[a-z0-9._-]+:[0-9.]+\|(?:g|c|ms)'
+    PATTERN = br'[a-z0-9._-]+:[0-9.]+\|(?:g|c|ms)'
 
     def __init__(self, ssl_options=None, max_buffer_size=None,
                  read_chunk_size=None):
@@ -111,7 +113,7 @@ class StatsdServer(tcpserver.TCPServer):
         def read_callback(future):
             result = future.result()
             self.packets.append(result)
-            if 'reconnect' in result:
+            if b'reconnect' in result:
                 self.reconnect_receive = True
                 stream.close()
                 return
@@ -127,7 +129,6 @@ class TCPTestCase(testing.AsyncTestCase):
     def setUp(self):
         super(TCPTestCase, self).setUp()
         self.sock, self.statsd_port = testing.bind_unused_port()
-        print(self.sock, self.statsd_port)
         self.name = str(uuid.uuid4())
         self.settings = self.get_settings()
         self.statsd = statsd.Client(self.name, self.settings)
@@ -143,7 +144,7 @@ class TCPTestCase(testing.AsyncTestCase):
         }
 
     def payload_format(self, key, value, metric_type):
-        return self.statsd._build_payload(key, value, metric_type)
+        return self.statsd._build_payload(key, value, metric_type).encode('utf-8')
 
     @testing.gen_test
     def test_add_timing(self):

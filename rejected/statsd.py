@@ -129,7 +129,6 @@ class Client(object):
     def _tcp_on_closed(self):
         """Invoked when the socket is closed."""
         LOGGER.warning('Disconnected from statsd, reconnecting')
-        self._ready = False
         self._tcp_sock = self._tcp_socket()
 
     def _tcp_on_connected(self):

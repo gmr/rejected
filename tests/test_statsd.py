@@ -97,7 +97,7 @@ class NoHostnameTestCase(TestCase):
 
 class StatsdServer(tcpserver.TCPServer):
 
-    PATTERN = '[a-z0-9._-]+:[0-9.]+\|(?:g|c|ms)'
+    PATTERN = b'[a-z0-9._-]+:[0-9.]+\|(?:g|c|ms)'
 
     def __init__(self, ssl_options=None, max_buffer_size=None,
                  read_chunk_size=None):
@@ -127,6 +127,7 @@ class TCPTestCase(testing.AsyncTestCase):
     def setUp(self):
         super(TCPTestCase, self).setUp()
         self.sock, self.statsd_port = testing.bind_unused_port()
+        print(self.sock, self.statsd_port)
         self.name = str(uuid.uuid4())
         self.settings = self.get_settings()
         self.statsd = statsd.Client(self.name, self.settings)
@@ -135,7 +136,7 @@ class TCPTestCase(testing.AsyncTestCase):
 
     def get_settings(self):
         return {
-            'host': 'localhost',
+            'host': '127.0.0.1',
             'port': self.statsd_port,
             'prefix': str(uuid.uuid4()),
             'tcp': 'true'

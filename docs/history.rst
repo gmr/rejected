@@ -1,6 +1,11 @@
 Changelog
 =========
 
+3.19.7
+------
+
+- ADDED ability to connect to statsd via TCP for submitting metrics
+
 3.19.6
 ------
 

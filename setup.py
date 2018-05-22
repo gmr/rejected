@@ -1,7 +1,7 @@
 from setuptools import setup
 
 setup(name='rejected',
-      version='3.19.6',
+      version='3.19.7',
       description='Rejected is a Python RabbitMQ Consumer Framework and '
                   'Controller Daemon',
       long_description=open('README.rst').read(),
@@ -13,6 +13,7 @@ setup(name='rejected',
           'Programming Language :: Python :: 3',
           'Programming Language :: Python :: 3.4',
           'Programming Language :: Python :: 3.5',
+          'Programming Language :: Python :: 3.6',
           'Programming Language :: Python :: Implementation :: CPython',
           'Programming Language :: Python :: Implementation :: PyPy',
           'License :: OSI Approved :: BSD License'

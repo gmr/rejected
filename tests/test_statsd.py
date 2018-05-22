@@ -5,7 +5,7 @@ import uuid
 
 import mock
 import random
-from tornado import gen, iostream, tcpserver, testing
+from tornado import gen, locks, tcpserver, testing
 
 from rejected import statsd
 
@@ -103,6 +103,7 @@ class StatsdServer(tcpserver.TCPServer):
 
     def __init__(self, ssl_options=None, max_buffer_size=None,
                  read_chunk_size=None):
+        self.event = locks.Event()
         self.packets = []
         self.reconnect_receive = False
         super(StatsdServer, self).__init__(
@@ -111,14 +112,18 @@ class StatsdServer(tcpserver.TCPServer):
     def handle_stream(self, stream, address):
 
         def read_callback(future):
+            self.event.clear()
             result = future.result()
+            print(b'Received', result)
             self.packets.append(result)
             if b'reconnect' in result:
                 self.reconnect_receive = True
                 stream.close()
+                self.event.set()
                 return
             inner_future = stream.read_until_regex(self.PATTERN)
             self.io_loop.add_future(inner_future, read_callback)
+            self.event.set()
 
         future = stream.read_until_regex(self.PATTERN)
         self.io_loop.add_future(future, read_callback)
@@ -149,29 +154,35 @@ class TCPTestCase(testing.AsyncTestCase):
     @testing.gen_test
     def test_add_timing(self):
         self.statsd.add_timing('foo', 2.5)
-        yield gen.sleep(0.1)
+        yield self.server.event.wait()
         self.assertIn(self.payload_format('foo', 2500.0, 'ms'), self.server.packets)
 
     @testing.gen_test
     def test_incr(self):
         self.statsd.incr('bar', 2)
-        yield gen.sleep(0.1)
+        yield self.server.event.wait()
         self.assertIn(self.payload_format('bar', 2, 'c'), self.server.packets)
 
     @testing.gen_test
     def test_set_gauge(self):
         self.statsd.set_gauge('baz', 98.5)
-        yield gen.sleep(0.1)
+        yield self.server.event.wait()
         self.assertIn(self.payload_format('baz', 98.5, 'g'), self.server.packets)
 
     @testing.gen_test
     def test_reconnect(self):
         self.statsd.set_gauge('baz', 98.5)
-        yield gen.sleep(0.1)
+        yield gen.sleep(1)
         self.statsd.set_gauge('reconnect', 100)
-        yield gen.sleep(0.1)
+        yield gen.sleep(1)
+        self.assertTrue(self.server.reconnect_receive)
         self.statsd.set_gauge('bar', 10)
-        yield gen.sleep(0.1)
+
+        while len(self.server.packets) < 3:
+            yield gen.moment
+
+        self.assertTrue(self.server.reconnect_receive)
+
         self.assertIn(self.payload_format('baz', 98.5, 'g'), self.server.packets)
         self.assertIn(self.payload_format('reconnect', 100, 'g'), self.server.packets)
         self.assertIn(self.payload_format('bar', 10, 'g'), self.server.packets)

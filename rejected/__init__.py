@@ -18,7 +18,7 @@ from rejected.consumer import ProcessingException
 
 __author__ = 'Gavin M. Roy <gavinmroy@gmail.com>'
 __since__ = '2009-09-10'
-__version__ = '3.19.7'
+__version__ = '3.19.8'
 
 __all__ = [
     'Consumer',

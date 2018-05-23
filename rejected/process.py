@@ -775,7 +775,8 @@ class Process(multiprocessing.Process, state.State):
 
         try:
             self.setup()
-        except (AttributeError, ImportError):
+        except (AttributeError, ImportError) as error:
+            LOGGER.exception('Setup failure: %s', error)
             return self.on_startup_error(
                 'Failed to import the Python module for {}'.format(
                     self.consumer_name))

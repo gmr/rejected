@@ -1,4 +1,3 @@
-import re
 import socket
 import unittest
 import uuid
@@ -7,6 +6,7 @@ import mock
 from tornado import gen, iostream, locks, tcpserver, testing
 
 from rejected import statsd
+
 
 class TestCase(unittest.TestCase):
 
@@ -21,7 +21,7 @@ class TestCase(unittest.TestCase):
             'host': '10.1.1.1',
             'port': 8124,
             'prefix': str(uuid.uuid4()),
-            'tcp': 'false'
+            'tcp': False
         }
 
     def payload_format(self, key, value, metric_type):
@@ -143,7 +143,7 @@ class TCPTestCase(testing.AsyncTestCase):
             'host': self.sock.getsockname()[0],
             'port': self.port,
             'prefix': str(uuid.uuid4()),
-            'tcp': 'true'
+            'tcp': True
         }
 
     def payload_format(self, key, value, metric_type):

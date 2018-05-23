@@ -1,5 +1,10 @@
 # ChangeLog
 
+## 3.19.8
+
+- FIXED statsd TCP configuration setting bug (str vs bool)
+- Log setup exceptions
+
 ## 3.19.7
 
 - ADDED ability to connect to statsd via TCP for submitting metrics

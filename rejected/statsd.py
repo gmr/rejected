@@ -45,7 +45,7 @@ class Client(object):
                          int(self._setting('port', self.DEFAULT_PORT)))
         self._prefix = self._setting('prefix', self.DEFAULT_PREFIX)
         self._tcp_sock, self._udp_sock = None, None
-        if self._setting('tcp', 'false').lower() == 'true':
+        if self._setting('tcp', False):
             self._tcp_sock = self._tcp_socket()
         else:
             self._udp_sock = self._udp_socket()

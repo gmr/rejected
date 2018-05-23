@@ -110,20 +110,20 @@ class StatsdServer(tcpserver.TCPServer):
             ssl_options, max_buffer_size, read_chunk_size)
 
     def handle_stream(self, stream, address):
+        print('Connection from %s', address)
 
         def read_callback(future):
             self.event.clear()
             result = future.result()
             print(b'Received', result)
+            self.event.set()
             self.packets.append(result)
             if b'reconnect' in result:
                 self.reconnect_receive = True
                 stream.close()
-                self.event.set()
                 return
             inner_future = stream.read_until_regex(self.PATTERN)
             self.io_loop.add_future(inner_future, read_callback)
-            self.event.set()
 
         future = stream.read_until_regex(self.PATTERN)
         self.io_loop.add_future(future, read_callback)
@@ -133,17 +133,18 @@ class TCPTestCase(testing.AsyncTestCase):
 
     def setUp(self):
         super(TCPTestCase, self).setUp()
-        self.sock, self.statsd_port = testing.bind_unused_port()
+        self.sock, self.port = testing.bind_unused_port()
         self.name = str(uuid.uuid4())
         self.settings = self.get_settings()
+        print(self.settings)
         self.statsd = statsd.Client(self.name, self.settings)
         self.server = StatsdServer()
         self.server.add_socket(self.sock)
 
     def get_settings(self):
         return {
-            'host': '127.0.0.1',
-            'port': self.statsd_port,
+            'host': self.sock.getsockname()[0],
+            'port': self.port,
             'prefix': str(uuid.uuid4()),
             'tcp': 'true'
         }
@@ -155,7 +156,8 @@ class TCPTestCase(testing.AsyncTestCase):
     def test_add_timing(self):
         self.statsd.add_timing('foo', 2.5)
         yield self.server.event.wait()
-        self.assertIn(self.payload_format('foo', 2500.0, 'ms'), self.server.packets)
+        self.assertIn(self.payload_format('foo', 2500.0, 'ms'),
+                      self.server.packets)
 
     @testing.gen_test
     def test_incr(self):
@@ -172,7 +174,7 @@ class TCPTestCase(testing.AsyncTestCase):
     @testing.gen_test
     def test_reconnect(self):
         self.statsd.set_gauge('baz', 98.5)
-        yield gen.sleep(1)
+        yield self.server.event.wait()
         self.statsd.set_gauge('reconnect', 100)
         yield gen.sleep(1)
         self.assertTrue(self.server.reconnect_receive)

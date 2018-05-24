@@ -98,7 +98,7 @@ class NoHostnameTestCase(TestCase):
 
 class StatsdServer(tcpserver.TCPServer):
 
-    PATTERN = br'[a-z0-9._-]+:[0-9.]+\|(?:g|c|ms)'
+    PATTERN = br'[a-z0-9._-]+:[0-9.]+\|(?:g|c|ms)\n'
 
     def __init__(self, ssl_options=None, max_buffer_size=None,
                  read_chunk_size=None):

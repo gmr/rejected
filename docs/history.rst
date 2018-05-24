@@ -1,6 +1,18 @@
 Changelog
 =========
 
+3.19.9
+------
+
+- TCP statsd wants a linefeed
+
+3.19.8
+------
+
+- FIXED statsd TCP configuration setting bug (str vs bool)
+- Log setup exceptions
+
+
 3.19.7
 ------
 

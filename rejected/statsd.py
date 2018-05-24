@@ -26,8 +26,8 @@ class Client(object):
     DEFAULT_HOST = 'localhost'
     DEFAULT_PORT = 8125
     DEFAULT_PREFIX = 'rejected'
-    PAYLOAD_HOSTNAME = '{}.{}.{}.{}:{}|{}'
-    PAYLOAD_NO_HOSTNAME = '{}.{}.{}:{}|{}'
+    PAYLOAD_HOSTNAME = '{}.{}.{}.{}:{}|{}\n'
+    PAYLOAD_NO_HOSTNAME = '{}.{}.{}:{}|{}\n'
 
     def __init__(self, consumer_name, settings):
         """

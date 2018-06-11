@@ -1,6 +1,11 @@
 Changelog
 =========
 
+3.19.10
+-------
+
+- Address shutdown and dead process bugs
+
 3.19.9
 ------
 

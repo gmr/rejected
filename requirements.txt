@@ -1,5 +1,5 @@
 helper
-pika>=0.10.0
+pika==0.10.0
 psutil
 pyyaml
-tornado>=4.2,<4.3
+tornado>=4.2,<5

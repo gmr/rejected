@@ -1,5 +1,9 @@
 # ChangeLog
 
+## 3.19.10
+
+- Address shutdown and dead process bugs
+
 ## 3.19.9
 
 - TCP statsd wants a linefeed

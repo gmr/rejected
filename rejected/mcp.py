@@ -100,8 +100,10 @@ class MasterControlProgram(state.State):
             return self._active_cache[1]
         active_processes, dead_processes = list(), list()
         for consumer in self.consumers:
-            for name in self.consumers[consumer].processes:
+            for name in list(self.consumers[consumer].processes.keys()):
                 child = self.get_consumer_process(consumer, name)
+                if child is None:
+                    continue
                 if child.pid is None:
                     dead_processes.append((consumer, name))
                     continue
@@ -521,7 +523,10 @@ class MasterControlProgram(state.State):
         """
         my_pid = os.getpid()
         if name in self.consumers[consumer].processes.keys():
-            child = self.consumers[consumer].processes[name]
+            try:
+                child = self.consumers[consumer].processes[name]
+            except KeyError:
+                return
             try:
                 alive = child.is_alive()
             except AssertionError:

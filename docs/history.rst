@@ -1,6 +1,11 @@
 Changelog
 =========
 
+3.19.11
+-------
+
+- Fix consumer cancellation handling to shutdown the connection
+
 3.19.10
 -------
 

@@ -191,10 +191,9 @@ class Connection(state.State):
 
         """
         LOGGER.debug('Connection %s consumer has been cancelled', self.name)
-        if self.is_shutting_down:
-            self.channel.close()
-        else:
-            self.set_state(self.STATE_IDLE)
+        if not self.is_shutting_down:
+            self.set_state(self.STATE_SHUTTING_DOWN)
+        self.channel.close()
 
     def on_confirmation(self, frame):
         """Invoked by pika when RabbitMQ responds to a Basic.Publish RPC

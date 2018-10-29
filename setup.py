@@ -1,7 +1,7 @@
 from setuptools import setup
 
 setup(name='rejected',
-      version='3.19.11',
+      version='3.19.12',
       description='Rejected is a Python RabbitMQ Consumer Framework and '
                   'Controller Daemon',
       long_description=open('README.rst').read(),
@@ -28,7 +28,7 @@ setup(name='rejected',
       include_package_data=True,
       install_requires=[
           'helper',
-          'pika==0.10.0',
+          'pika<1',
           'psutil',
           'pyyaml',
           'tornado>=4.2,<5'

@@ -2,4 +2,4 @@ helper
 pika<1
 psutil
 pyyaml
-tornado>=4.2,<5
+tornado

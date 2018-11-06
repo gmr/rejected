@@ -1,8 +1,8 @@
 beautifulsoup4
 helper
 msgpack-python
-pika>=0.10.0
+pika
 psutil
 pyyaml
 raven
-tornado>=4.2.0
+tornado

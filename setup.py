@@ -32,7 +32,7 @@ setup(name='rejected',
           'pika<1',
           'psutil',
           'pyyaml',
-          'tornado>=4.2,<5'
+          'tornado>=4.2,<4.5'
       ],
       extras_require={
           'html': ['beautifulsoup4'],

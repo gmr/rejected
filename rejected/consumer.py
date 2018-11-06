@@ -154,6 +154,12 @@ class Consumer(object):
         :class:`~rejected.consumer.PublishingConsumer` have been combined
         into the same class.
 
+    As of 3.19.13, the ``ACK_PROCESSING_EXCEPTIONS`` class level attribute
+    allows you to ack messages that raise a
+    :exc:`~rejected.consumer.ProcessingException` instead of rejecting them,
+    allowing for dead-lettered messages to be constrained to
+    :exc:`~rejected.consumer.MessageException`s only. Defaults to `False`.
+
     """
     DROP_EXCHANGE = None
     DROP_INVALID_MESSAGES = False
@@ -161,6 +167,7 @@ class Consumer(object):
     ERROR_EXCHANGE = 'errors'
     ERROR_MAX_RETRY = None
     MESSAGE_AGE_KEY = 'message_age'
+    ACK_PROCESSING_EXCEPTIONS = False
 
     def __init__(self, settings, process,
                  drop_invalid_messages=None,
@@ -1611,11 +1618,11 @@ class RejectedException(Exception):
     """
     METRIC_NAME = 'rejected-exception'
 
-    def __init__(self, value=None, metric=None, *args, **kwargs):
+    def __init__(self, *args, **kwargs):
         self.args = args
         self.kwargs = kwargs
-        self.metric = metric
-        self.value = value or ''
+        self.metric = kwargs.get('metric')
+        self.value = kwargs.get('value', '{!r} {!r}')
 
     def __str__(self):
         return self.value.format(*self.args, **self.kwargs)

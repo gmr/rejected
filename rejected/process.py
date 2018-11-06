@@ -597,7 +597,10 @@ class Process(multiprocessing.Process, state.State):
 
         elif result == data.PROCESSING_EXCEPTION:
             LOGGER.debug('Rejecting message due to ProcessingException')
-            self.reject(message, False)
+            if self.consumer.ACK_PROCESSING_EXCEPTION:
+                self.ack_message(message)
+            else:
+                self.reject(message, False)
             self.counters[self.PROCESSING_EXCEPTION] += 1
 
         elif result == data.CONSUMER_EXCEPTION:

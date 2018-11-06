@@ -1,10 +1,27 @@
 Changelog
 =========
 
+3.19.13
+-------
+
+- FIXED :exc:`rejected.consumer.RejectedException` to pull the metric and value
+  args from the kwargs instead of explicitly defining them. This allows for
+  consumers prior to 3.19 to experience the same metric style behavior as
+  before.
+- ADDED ``ACK_PROCESSING_EXCEPTIONS`` class level attribute to :class:`rejected.consumer.Consumer`
+  that allows a consumer to ack a :exc:`~rejected.consumer.ProcessingException`
+  instead of rejecting it, constraining the use of dead-lettering in RbbitMQ
+  to :exc:`~rejected.consumer.MessageException`s.
+
+3.19.12
+-------
+
+- Loosen the pika pin to work with Python 3.7
+
 3.19.11
 -------
 
-- Fix consumer cancellation handling to shutdown the connection
+- FIXED consumer cancellation handling to shutdown the connection
 
 3.19.10
 -------

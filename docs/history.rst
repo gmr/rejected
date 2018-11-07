@@ -1,6 +1,11 @@
 Changelog
 =========
 
+3.19.14
+-------
+
+- Fix misnamed ACK_PROCESSING_EXCEPTIONS constant in processing logic.
+
 3.19.13
 -------
 

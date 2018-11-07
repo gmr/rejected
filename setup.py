@@ -29,7 +29,7 @@ setup(name='rejected',
       include_package_data=True,
       install_requires=[
           'helper',
-          'pika<1',
+          'pika==0.12.0',
           'psutil',
           'pyyaml',
           'tornado'

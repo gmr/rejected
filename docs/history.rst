@@ -4,7 +4,8 @@ Changelog
 3.19.14
 -------
 
-- Fix misnamed ACK_PROCESSING_EXCEPTIONS constant in processing logic.
+- Fix misnamed ACK_PROCESSING_EXCEPTIONS constant in processing logic
+- Hard pin to pika 0.12.0 due to breaking changes in 0.13
 
 3.19.13
 -------

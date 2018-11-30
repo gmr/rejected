@@ -25,13 +25,13 @@ except ImportError:
     influxdb = None
 from tornado import gen, ioloop, locks
 import pika
+from pika import exceptions, spec
 try:
     import raven
     from raven import breadcrumbs
     from raven.contrib.tornado import AsyncSentryClient
 except ImportError:
     breadcrumbs, raven, AsyncSentryClient = None, None, None
-from pika import spec
 
 from rejected import __version__, data, state, statsd, utils
 
@@ -162,7 +162,12 @@ class Connection(state.State):
         del self.channel
         if self.is_running:
             self.set_state(self.STATE_CONNECTING)
-            self.handle.channel(self.on_channel_open)
+            try:
+                self.handle.channel(self.on_channel_open)
+            except exceptions.ConnectionClosed as error:
+                LOGGER.warning('Connection was lost, setting state to closed')
+                self.set_state(self.STATE_CLOSED)
+                self.callbacks.on_closed(self.name)
         elif self.is_shutting_down:
             LOGGER.debug('Connection %s closing', self.name)
             self.handle.close()

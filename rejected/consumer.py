@@ -1619,10 +1619,13 @@ class RejectedException(Exception):
     METRIC_NAME = 'rejected-exception'
 
     def __init__(self, *args, **kwargs):
-        self.args = args
+        if len(args) > 1:
+            self.args = args[1:] if 'value' not in kwargs else args
+        else:
+            self.args = tuple()
+        self.metric = kwargs.pop('metric', None)
+        self.value = kwargs.pop('value', '{!r} {!r}' if not args else args[0])
         self.kwargs = kwargs
-        self.metric = kwargs.get('metric')
-        self.value = kwargs.get('value', '{!r} {!r}')
 
     def __str__(self):
         return self.value.format(*self.args, **self.kwargs)
@@ -1639,8 +1642,8 @@ class ConsumerException(RejectedException):
     :param str metric: An optional value for auto-instrumentation of exceptions
 
     """
-    def __init__(self, value=None, metric=None, *args, **kwargs):
-        super(ConsumerException, self).__init__(value, metric, *args, **kwargs)
+    def __init__(self, *args, **kwargs):
+        super(ConsumerException, self).__init__(*args, **kwargs)
 
 
 class MessageException(RejectedException):
@@ -1651,8 +1654,8 @@ class MessageException(RejectedException):
     :param str metric: An optional value for auto-instrumentation of exceptions
 
     """
-    def __init__(self, value=None, metric=None, *args, **kwargs):
-        super(MessageException, self).__init__(value, metric, *args, **kwargs)
+    def __init__(self, *args, **kwargs):
+        super(MessageException, self).__init__(*args, **kwargs)
 
 
 class ProcessingException(RejectedException):
@@ -1665,6 +1668,5 @@ class ProcessingException(RejectedException):
     :param str metric: An optional value for auto-instrumentation of exceptions
 
     """
-    def __init__(self, value=None, metric=None, *args, **kwargs):
-        super(ProcessingException, self).__init__(
-            value, metric, *args, **kwargs)
+    def __init__(self, *args, **kwargs):
+        super(ProcessingException, self).__init__(*args, **kwargs)

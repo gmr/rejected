@@ -1,6 +1,12 @@
 Changelog
 =========
 
+3.19.18
+-------
+
+- FIXED :exc:`rejected.consumer.RejectedException` log message formatting when
+  using format strings in the passed in value.
+
 3.19.17
 -------
 

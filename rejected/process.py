@@ -102,7 +102,13 @@ class Connection(state.State):
 
         """
         LOGGER.debug('Connection %s is open', self.name)
-        self.handle.channel(self.on_channel_open)
+        try:
+            self.handle.channel(self.on_channel_open)
+        except exceptions.ConnectionClosed:
+            LOGGER.warning('Channel open on closed connection')
+            self.set_state(self.STATE_CLOSED)
+            self.callbacks.on_closed(self.name)
+            return
         self.handle.add_on_connection_blocked_callback(self.on_blocked)
         self.handle.add_on_connection_unblocked_callback(self.on_unblocked)
 
@@ -164,7 +170,7 @@ class Connection(state.State):
             self.set_state(self.STATE_CONNECTING)
             try:
                 self.handle.channel(self.on_channel_open)
-            except exceptions.ConnectionClosed as error:
+            except exceptions.ConnectionClosed:
                 LOGGER.warning('Connection was lost, setting state to closed')
                 self.set_state(self.STATE_CLOSED)
                 self.callbacks.on_closed(self.name)

@@ -1,6 +1,12 @@
 Changelog
 =========
 
+3.19.16
+-------
+
+- FIXED :meth:`~rejected.process.Connection.on_open` when pika raises
+  :exc:`pika.exceptions.ConnectionClosed` when trying to create a new channel.
+
 3.19.15
 -------
 

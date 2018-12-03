@@ -1622,15 +1622,19 @@ class RejectedException(Exception):
         if len(args) > 1:
             self.args = args[1:] if 'value' not in kwargs else args
         else:
-            self.args = tuple()
+            self.args = args
         self.metric = kwargs.pop('metric', None)
         self.value = kwargs.pop('value', '{!r} {!r}' if not args else args[0])
         self.kwargs = kwargs
 
     def __str__(self):
+        if not self.args and not self.kwargs:
+            return repr(self)
         return self.value.format(*self.args, **self.kwargs)
 
     def __repr__(self):
+        if not self.args and not self.kwargs:
+            return '{}()'.format(self.__class__.__name__)
         return '{}({})'.format(self.__class__.__name__, str(self))
 
 

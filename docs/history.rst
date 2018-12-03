@@ -1,6 +1,12 @@
 Changelog
 =========
 
+3.19.19
+-------
+
+- FIXED :exc:`rejected.consumer.RejectedException` to not blow up when an exception
+  was created with no args or kwargs.
+
 3.19.18
 -------
 

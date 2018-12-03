@@ -921,13 +921,13 @@ class Consumer(object):
 
         except exceptions.ConnectionClosed as error:
             self.logger.critical('Connection closed while processing %s: %s',
-                                 message_in.delivery_tag, error)
+                                 message_in.delivery_tag, str(error))
             self._measurement.set_tag('exception', error.__class__.__name__)
             raise gen.Return(None)
 
         except ConsumerException as error:
             self.logger.error('ConsumerException processing delivery %s: %s',
-                              message_in.delivery_tag, error)
+                              message_in.delivery_tag, str(error))
             self._measurement.set_tag('exception', error.__class__.__name__)
             if error.metric:
                 self._measurement.set_tag('error', error.metric)
@@ -935,7 +935,7 @@ class Consumer(object):
 
         except MessageException as error:
             self.logger.info('MessageException processing delivery %s: %s',
-                             message_in.delivery_tag, error)
+                             message_in.delivery_tag, str(error))
             self._measurement.set_tag('exception', error.__class__.__name__)
             if error.metric:
                 self._measurement.set_tag('error', error.metric)
@@ -944,7 +944,7 @@ class Consumer(object):
         except ProcessingException as error:
             self.logger.warning(
                 'ProcessingException processing delivery %s: %s',
-                message_in.delivery_tag, error)
+                message_in.delivery_tag, str(error))
             self._measurement.set_tag('exception', error.__class__.__name__)
             if error.metric:
                 self._measurement.set_tag('error', error.metric)
@@ -964,7 +964,7 @@ class Consumer(object):
                 error = result.exception()
                 exc_info = result.exc_info()
             self.log_exception('Exception processing delivery %s: %s',
-                               message_in.delivery_tag, error,
+                               message_in.delivery_tag, str(error),
                                exc_info=exc_info)
             self._measurement.set_tag('exception', 'UnhandledException')
             raise gen.Return(data.UNHANDLED_EXCEPTION)

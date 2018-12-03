@@ -1,6 +1,11 @@
 Changelog
 =========
 
+3.19.17
+-------
+
+- Ensure exceptions are cast to strings when logging in :class:`rejected.consumer.Consumer`
+
 3.19.16
 -------
 

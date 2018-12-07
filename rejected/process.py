@@ -37,9 +37,9 @@ from rejected import __version__, data, state, statsd, utils
 LOGGER = logging.getLogger(__name__)
 
 Callbacks = collections.namedtuple(
-    'callbacks', ['on_ready', 'on_open_error', 'on_closed', 'on_blocked',
-                  'on_unblocked', 'on_confirmation', 'on_delivery',
-                  'on_return'])
+    'callbacks', ['on_ready', 'on_connection_failure', 'on_closed',
+                  'on_blocked', 'on_unblocked', 'on_confirmation',
+                  'on_delivery', 'on_return'])
 Delivery = collections.namedtuple('Delivery', ['connection', 'message'])
 
 
@@ -71,13 +71,14 @@ class Connection(state.State):
 
     def connect(self):
         self.set_state(self.STATE_CONNECTING)
-        return pika.TornadoConnection(
+        connection = pika.TornadoConnection(
             self._connection_parameters,
-            on_open_callback=self.on_open,
-            on_open_error_callback=self.on_open_error,
-            on_close_callback=self.on_closed,
             stop_ioloop_on_close=False,
             custom_ioloop=self.io_loop)
+        connection.add_on_close_callback(self.on_closed)
+        connection.add_on_open_callback(self.on_open)
+        connection.add_on_open_error_callback(self.on_open_error)
+        return connection
 
     def shutdown(self):
         if self.is_shutting_down:
@@ -94,13 +95,14 @@ class Connection(state.State):
         else:
             self.channel.close()
 
-    def on_open(self, _handle):
+    def on_open(self, handle):
         """Invoked when the connection is opened
 
-        :type _handle: pika.adapters.tornado_connection.TornadoConnection
+        :type handle: pika.adapters.tornado_connection.TornadoConnection
 
         """
-        LOGGER.debug('Connection %s is open', self.name)
+        LOGGER.debug('Connection %s is open (%r)', self.name, handle)
+        self.handle = handle
         try:
             self.handle.channel(self.on_channel_open)
         except exceptions.ConnectionClosed:
@@ -113,20 +115,18 @@ class Connection(state.State):
 
     def on_open_error(self, *args, **kwargs):
         LOGGER.error('Connection %s failure %r %r', self.name, args, kwargs)
-        self.set_state(self.STATE_CLOSED)
-        self.callbacks.on_open_error(self.name)
+        self.on_failure()
 
     def on_closed(self, _connection, status_code, status_text):
         if self.is_connecting:
             LOGGER.error('Connection %s failure while connecting (%s): %s',
                          self.name, status_code, status_text)
+            self.on_failure()
+        elif not self.is_closed:
             self.set_state(self.STATE_CLOSED)
-            del self.handle
-            return self.callbacks.on_open_error(self.name)
-        self.set_state(self.STATE_CLOSED)
-        LOGGER.info('Connection %s closed (%s) %s',
-                    self.name, status_code, status_text)
-        self.callbacks.on_closed(self.name)
+            LOGGER.info('Connection %s closed (%s) %s',
+                        self.name, status_code, status_text)
+            self.callbacks.on_closed(self.name)
 
     def on_blocked(self, frame):
         LOGGER.warning('Connection %s is blocked: %r', frame)
@@ -168,22 +168,32 @@ class Connection(state.State):
         :param str reply_text: The AMQP reply text
 
         """
-        LOGGER.debug('Connection %s channel was closed: (%s) %s',
-                     self.name, reply_code, reply_text)
         del self.channel
-        if self.is_running:
-            self.set_state(self.STATE_CONNECTING)
-            try:
-                self.handle.channel(self.on_channel_open)
-            except exceptions.ConnectionClosed:
-                LOGGER.warning('ConnectionClosed raised in on_channel_open')
-                self.set_state(self.STATE_CLOSED)
-                self.handle.close()
-                del self.handle
-                self.callbacks.on_open_error(self.name)
+        if reply_code <= 0 or reply_code == 404:
+            LOGGER.error('Channel Error (%r): %s',
+                         reply_code, reply_text or 'unknown')
+            self.on_failure()
         elif self.is_shutting_down:
             LOGGER.debug('Connection %s closing', self.name)
             self.handle.close()
+        elif self.is_running:
+            LOGGER.warning('Connection %s channel was closed: (%s) %s',
+                           self.name, reply_code, reply_text)
+            try:
+                self.handle.channel(self.on_channel_open)
+            except exceptions.ConnectionClosed as error:
+                LOGGER.warning('Error raised while creating new channel: %s',
+                               error)
+                self.on_failure()
+            else:
+                self.set_state(self.STATE_CONNECTING)
+
+    def on_failure(self):
+        LOGGER.info('Connection failure, terminating connection')
+        self.set_state(self.STATE_CLOSED)
+        self.handle.close()
+        del self.handle
+        self.callbacks.on_connection_failure(self.name)
 
     def consume(self, queue_name, no_ack, prefetch_count):
         self.set_state(self.STATE_ACTIVE)
@@ -524,10 +534,9 @@ class Process(multiprocessing.Process, state.State):
             self.on_ready_to_stop()
 
     def on_connection_failure(self, *args, **kwargs):
-        LOGGER.warning('Connection failure %r %r', args, kwargs)
+        LOGGER.warning('Connection failure while %s', self.state_description)
         ready = all([c.is_closed for c in self.connections.values()])
-        if (self.is_connecting or
-                self.is_shutting_down or
+        if (self.is_connecting or self.is_idle or self.is_shutting_down or
                 self.is_waiting_to_shutdown) and ready:
             self.on_ready_to_stop()
 
@@ -665,6 +674,7 @@ class Process(multiprocessing.Process, state.State):
 
     def on_ready_to_stop(self):
         """Invoked when the consumer is ready to stop."""
+        LOGGER.debug('Ready to stop')
 
         # Set the state to shutting down if it wasn't set as that during loop
         self.set_state(self.STATE_SHUTTING_DOWN)

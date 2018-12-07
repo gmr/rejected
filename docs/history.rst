@@ -1,6 +1,11 @@
 Changelog
 =========
 
+3.19.21
+-------
+
+- Better handle RabbitMQ connection failures, forced connection close, broker shutdowns, etc
+
 3.19.20
 -------
 

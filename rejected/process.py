@@ -15,7 +15,6 @@ try:
 except ImportError:
     import profile
 import signal
-import sys
 import time
 import warnings
 
@@ -118,9 +117,15 @@ class Connection(state.State):
         self.callbacks.on_open_error(self.name)
 
     def on_closed(self, _connection, status_code, status_text):
+        if self.is_connecting:
+            LOGGER.error('Connection %s failure while connecting (%s): %s',
+                         self.name, status_code, status_text)
+            self.set_state(self.STATE_CLOSED)
+            del self.handle
+            return self.callbacks.on_open_error(self.name)
         self.set_state(self.STATE_CLOSED)
-        LOGGER.debug('Connection %s closed (%s) %s',
-                     self.name, status_code, status_text)
+        LOGGER.info('Connection %s closed (%s) %s',
+                    self.name, status_code, status_text)
         self.callbacks.on_closed(self.name)
 
     def on_blocked(self, frame):
@@ -171,9 +176,11 @@ class Connection(state.State):
             try:
                 self.handle.channel(self.on_channel_open)
             except exceptions.ConnectionClosed:
-                LOGGER.warning('Connection was lost, setting state to closed')
+                LOGGER.warning('ConnectionClosed raised in on_channel_open')
                 self.set_state(self.STATE_CLOSED)
-                self.callbacks.on_closed(self.name)
+                self.handle.close()
+                del self.handle
+                self.callbacks.on_open_error(self.name)
         elif self.is_shutting_down:
             LOGGER.debug('Connection %s closing', self.name)
             self.handle.close()
@@ -201,7 +208,7 @@ class Connection(state.State):
         :param pika.frame.Frame frame: The QoS Frame
 
         """
-        LOGGER.debug('Connection %s consumer has been cancelled', self.name)
+        LOGGER.info('Connection %s consumer has been cancelled', self.name)
         if not self.is_shutting_down:
             self.set_state(self.STATE_SHUTTING_DOWN)
         self.channel.close()

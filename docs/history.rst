@@ -1,6 +1,13 @@
 Changelog
 =========
 
+3.19.20
+-------
+
+- Address odd :meth:`~rejected.process.Connection.on_channel_closed` behavior with
+  spinning connection creation when :exc:`pika.exceptions.ConnectionClosed`
+  while trying to create a new channel.
+
 3.19.19
 -------
 

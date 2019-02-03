@@ -10,6 +10,7 @@ import os
 
 import pika
 from pika import spec
+from pika.adapters import tornado_connection
 
 from rejected import errors, log, state, utils
 
@@ -108,11 +109,11 @@ class Connection(state.State):
     def connect(self):
         """Create the low-level AMQP connection to RabbitMQ.
 
-        :rtype: pika.TornadoConnection
+        :rtype: pika.adapters.tornado_connection.TornadoConnection
 
         """
         self.set_state(self.STATE_CONNECTING)
-        self.handle = pika.TornadoConnection(
+        self.handle = tornado_connection.TornadoConnection(
             self._connection_parameters,
             on_open_callback=self.on_open,
             on_open_error_callback=self.on_open_error,

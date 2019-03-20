@@ -1,27 +1,17 @@
 """Tests for rejected.process"""
 import copy
-import mock
-from mock import patch
-try:
-    import unittest2 as unittest
-except ImportError:
-    import unittest
-
-import pika
-from pika import channel
-from pika import connection
-from pika import credentials
 import signal
+try:
+    from unittest import mock
+except ImportError:
+    import mock
+
 
 from helper import config as helper_config
 
-from rejected import consumer
-from rejected import process
-from rejected import __version__
+from rejected import __version__, consumer, process
 
-from . import test_state
-from . import mocks
-
+from . import mocks, test_state
 
 
 class TestProcess(test_state.TestState):
@@ -92,7 +82,7 @@ class TestProcess(test_state.TestState):
         return copy.deepcopy(kwargs)
 
     def new_process(self, kwargs=None):
-        with patch('multiprocessing.Process'):
+        with mock.patch('multiprocessing.Process'):
             return process.Process(
                 group=None,
                 name='MockProcess',
@@ -108,7 +98,7 @@ class TestProcess(test_state.TestState):
 
     def test_startup_time(self):
         mock_time = 123456789.012345
-        with patch('time.time', return_value=mock_time):
+        with mock.patch('time.time', return_value=mock_time):
             new_process = self.new_process()
             self.assertEqual(new_process.state_start, mock_time)
 
@@ -126,7 +116,7 @@ class TestProcess(test_state.TestState):
             'consumer_name': name,
             'process_name': '%s_%i_tag_%i' % (name, pid, number)
         }
-        with patch('os.getpid', return_value=pid):
+        with mock.patch('os.getpid', return_value=pid):
             self.assertEqual(self._obj.get_config(self.config, number, name,
                                                   conn), expectation)
 
@@ -136,7 +126,7 @@ class TestProcess(test_state.TestState):
 
     def test_get_consumer_version_output(self):
         config = {'consumer': 'tests.mocks.MockConsumer'}
-        with patch('logging.Logger.info') as info:
+        with mock.patch('logging.Logger.info') as info:
             self._obj.get_consumer(config)
             info.assert_called_with('Creating consumer %s v%s',
                                     config['consumer'],
@@ -144,12 +134,11 @@ class TestProcess(test_state.TestState):
 
     def test_get_consumer_no_version_output(self):
         config = {'consumer': 'rejected.consumer.Consumer'}
-        with patch('logging.Logger.info') as info:
+        with mock.patch('logging.Logger.info') as info:
             self._obj.get_consumer(config)
-            info.assert_called_with('Creating consumer %s v%s',
-                                    config['consumer'], __version__)
+            info.assert_called_with('Creating consumer %s', config['consumer'])
 
-    @patch.object(consumer.Consumer, '__init__', side_effect=ImportError)
+    @mock.patch.object(consumer.Consumer, '__init__', side_effect=ImportError)
     def test_get_consumer_with_config_is_none(self, mock_method):
         config = {
             'consumer': 'rejected.consumer.Consumer',
@@ -160,7 +149,7 @@ class TestProcess(test_state.TestState):
         new_process.get_consumer(config)
         self.assertIsNone(new_process.get_consumer(config))
 
-    @patch.object(consumer.Consumer, '__init__', side_effect=ImportError)
+    @mock.patch.object(consumer.Consumer, '__init__', side_effect=ImportError)
     def test_get_consumer_with_no_config_is_none(self, mock_method):
         config = {'consumer': 'rejected.consumer.Consumer'}
         new_process = self.new_process()
@@ -169,14 +158,14 @@ class TestProcess(test_state.TestState):
     def test_setup_signal_handlers(self):
         signals = [mock.call(signal.SIGPROF, self._obj.on_sigprof),
                    mock.call(signal.SIGABRT, self._obj.stop)]
-        with patch('signal.signal') as signal_signal:
+        with mock.patch('signal.signal') as signal_signal:
             self._obj.setup_sighandlers()
             signal_signal.assert_has_calls(signals, any_order=True)
 
     def mock_setup(self, new_process=None, side_effect=None):
-        with patch('signal.signal', side_effect=side_effect):
-            with patch('rejected.utils.import_consumer',
-                       return_value=(mock.Mock, None)):
+        with mock.patch('signal.signal', side_effect=side_effect):
+            with mock.patch('rejected.utils.import_consumer',
+                            return_value=(mock.Mock, None)):
                 if not new_process:
                     new_process = self.new_process(self.mock_args)
                     new_process.setup()
@@ -209,8 +198,9 @@ class TestProcess(test_state.TestState):
 
     def test_setup_max_error_count(self):
         mock_process = self.mock_setup()
-        self.assertEqual(mock_process.max_error_count,
-                         self.config['Consumers']['MockConsumer']['max_errors'])
+        self.assertEqual(
+            mock_process.max_error_count,
+            self.config['Consumers']['MockConsumer']['max_errors'])
 
     def test_setup_prefetch_count_no_config(self):
         args = copy.deepcopy(self.mock_args)

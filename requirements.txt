@@ -1,5 +1,0 @@
-helper
-pika==0.12.0
-psutil
-pyyaml
-tornado

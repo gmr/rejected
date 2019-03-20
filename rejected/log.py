@@ -12,6 +12,13 @@ class CorrelationFilter(logging.Formatter):
         self.exists = exists
 
     def filter(self, record):
+        """Filter returns based upon the combination of self.exists and
+        the presence of the correlation_id record attribute.
+
+        :param logging.LogRecord record: The logging record
+        :rtype: bool
+
+        """
         if self.exists:
             return hasattr(record, 'correlation_id')
         return not hasattr(record, 'correlation_id')
@@ -22,9 +29,10 @@ class CorrelationAdapter(logging.LoggerAdapter):
     record properties.
 
     """
-    def __init__(self, logger, consumer):
+    def __init__(self, logger, consumer, **extra):
         self.logger = logger
         self.consumer = consumer
+        super(CorrelationAdapter, self).__init__(logger, extra)
 
     def process(self, msg, kwargs):
         """Process the logging message and keyword arguments passed in to

@@ -1,10 +1,15 @@
 """Tests for the MCP"""
-import mock
 import multiprocessing
-from mock import patch
+
+try:
+    from unittest import mock
+except ImportError:
+    import mock
 
 from helper import config
+
 from rejected import mcp
+
 from . import test_state
 
 
@@ -12,7 +17,7 @@ class TestMCP(test_state.TestState):
 
     CONFIG = {'poll_interval': 30.0, 'log_stats': True, 'Consumers': {}}
 
-    @patch.object(multiprocessing, 'Queue')
+    @mock.patch.object(multiprocessing, 'Queue')
     def setUp(self, _mock_queue_unused):
         self.cfg = config.Config()
         self.cfg.application.update(self.CONFIG)

@@ -1,11 +1,14 @@
 import socket
 import unittest
 import uuid
-
-import mock
-from tornado import gen, iostream, locks, tcpserver, testing
+try:
+    from unittest import mock
+except ImportError:
+    import mock
 
 from rejected import statsd
+
+from tornado import gen, iostream, locks, tcpserver, testing
 
 
 class TestCase(unittest.TestCase):
@@ -57,7 +60,8 @@ class UDPSendTestCase(TestCase):
     def test_hostname_in_metric(self):
         self.statsd.add_timing('foo', 2.5)
         value = self.payload_format('foo', 2500.0, 'ms')
-        self.assertIn(socket.gethostname().split('.')[0].encode('utf-8'), value)
+        self.assertIn(socket.gethostname().split('.')[0].encode('utf-8'),
+                      value)
 
     def test_add_timing(self):
         self.statsd.add_timing('foo', 2.5)
@@ -184,6 +188,9 @@ class TCPTestCase(testing.AsyncTestCase):
         yield self.server.event.wait()
         self.assertTrue(self.server.reconnect_receive)
 
-        self.assertIn(self.payload_format('baz', 98.5, 'g'), self.server.packets)
-        self.assertIn(self.payload_format('reconnect', 100, 'g'), self.server.packets)
-        self.assertIn(self.payload_format('bar', 10, 'g'), self.server.packets)
+        self.assertIn(self.payload_format('baz', 98.5, 'g'),
+                      self.server.packets)
+        self.assertIn(self.payload_format('reconnect', 100, 'g'),
+                      self.server.packets)
+        self.assertIn(self.payload_format('bar', 10, 'g'),
+                      self.server.packets)

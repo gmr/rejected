@@ -1,10 +1,8 @@
 """Tests for rejected.data"""
-try:
-    import unittest2 as unittest
-except ImportError:
-    import unittest
+import unittest
 
 from rejected import data
+
 from . import mocks
 
 
@@ -53,7 +51,6 @@ class TestProperties(unittest.TestCase):
         self.assertEqual(self._obj.user_id, mocks.PROPERTIES.user_id)
 
 
-
 class TestMessage(unittest.TestCase):
 
     def setUp(self):
@@ -61,7 +58,7 @@ class TestMessage(unittest.TestCase):
             'mock', mocks.CHANNEL, mocks.METHOD, mocks.PROPERTIES, mocks.BODY,
             False)
 
-    def test_method(self):
+    def test_body(self):
         self.assertEqual(self._obj.body, mocks.BODY)
 
     def test_channel(self):
@@ -69,7 +66,6 @@ class TestMessage(unittest.TestCase):
 
     def test_consumer_tag(self):
         self.assertEqual(self._obj.consumer_tag, mocks.METHOD.consumer_tag)
-
 
     def test_delivery_tag(self):
         self.assertEqual(self._obj.delivery_tag, mocks.METHOD.delivery_tag)

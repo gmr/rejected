@@ -47,11 +47,16 @@ consumer, the consumer will raise a :exc:`~rejected.consumer.MessageException`.
 import json
 import time
 import uuid
+try:
+    from unittest import mock
+except ImportError:
+    import mock
 
 from helper import config
-import mock
+
 from pika import channel, spec
 from pika.adapters import tornado_connection
+
 from tornado import gen, ioloop, testing
 
 try:
@@ -59,7 +64,7 @@ try:
 except ImportError:
     raven = None
 
-from rejected import consumer, data, process
+from . import consumer, data, process
 
 gen_test = testing.gen_test
 """Testing equivalent of :func:`tornado.gen.coroutine`, to be applied to test

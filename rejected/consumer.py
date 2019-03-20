@@ -45,10 +45,12 @@ import zlib
 
 import pika
 from pika import exceptions
+
 from tornado import concurrent, gen, locks
+
 import yaml
 
-from rejected import data, log
+from . import data, log
 
 LOGGER = logging.getLogger(__name__)
 
@@ -662,7 +664,7 @@ class Consumer(object):
         """
         if not self._message:
             return None
-        return self._message.properties.headers or dict()
+        return self._message.properties.headers or {}
 
     @property
     def io_loop(self):
@@ -854,8 +856,8 @@ class Consumer(object):
         # If timestamp is set, record age of the message coming in
         if message_in.properties.timestamp:
             message_age = float(
-                    max(message_in.properties.timestamp, time.time()) -
-                    message_in.properties.timestamp)
+                max(message_in.properties.timestamp, time.time()) -
+                message_in.properties.timestamp)
             if message_age > 0:
                 measurement.add_duration(self.message_age_key(), message_age)
 
@@ -1024,8 +1026,8 @@ class Consumer(object):
 
         """
         if name not in self.settings:
-            raise Exception("You must define the '%s' setting in your "
-                            "application to use %s" % (name, feature))
+            raise Exception('You must define the "{}" setting in your '
+                            'application to use %s'.format(name, feature))
 
     def set_channel(self, name, channel):
         """Assign the _channel attribute to the channel that was passed in.

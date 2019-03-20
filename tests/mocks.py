@@ -1,6 +1,12 @@
-import mock
-from pika import spec
+# coding=utf-8
+"""Common mocks for testing"""
 import time
+try:
+    from unittest import mock
+except ImportError:
+    import mock
+
+from pika import spec
 
 __version__ = '99.99.99'
 

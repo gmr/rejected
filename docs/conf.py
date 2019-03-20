@@ -3,19 +3,22 @@ import os
 import sys
 sys.path.insert(0, os.path.abspath('..'))
 
-extensions = ['sphinx.ext.autodoc', 'sphinx.ext.doctest', 'sphinx.ext.viewcode',
-              'sphinx.ext.autosummary', 'sphinx.ext.intersphinx']
+import rejected  # noqa E402
+
+release = rejected.__version__
+version = '.'.join(release.split('.')[0:1])
+
+extensions = [
+    'sphinx.ext.autodoc', 'sphinx.ext.doctest', 'sphinx.ext.viewcode',
+    'sphinx.ext.autosummary', 'sphinx.ext.intersphinx'
+]
 
 templates_path = ['_templates']
 source_suffix = '.rst'
 master_doc = 'index'
 
-project = u'rejected'
-copyright = u'2009-2017, Gavin M. Roy'
-
-import rejected
-release = rejected.__version__
-version = '.'.join(release.split('.')[0:1])
+project = 'rejected'
+copyright = '2009-2019, Gavin M. Roy'
 
 exclude_patterns = ['_build']
 pygments_style = 'sphinx'
@@ -31,21 +34,17 @@ html_theme = 'default'
 html_static_path = ['_static']
 htmlhelp_basename = 'rejecteddoc'
 
-latex_elements = {
-}
+latex_elements = {}
 
 latex_documents = [
-  ('index', 'rejected.tex', u'rejected Documentation',
-   u'Gavin M. Roy', 'manual'),
+    ('index', 'rejected.tex', u'rejected Documentation', u'Gavin M. Roy',
+     'manual'),
 ]
 
-man_pages = [
-    ('index', 'rejected', u'rejected Documentation',
-     [u'Gavin M. Roy'], 1)
-]
+man_pages = [('index', 'rejected', u'rejected Documentation',
+              [u'Gavin M. Roy'], 1)]
 
 texinfo_documents = [
-  ('index', 'rejected', u'rejected Documentation',
-   u'Gavin M. Roy', 'rejected', 'One line description of project.',
-   'Miscellaneous'),
+    ('index', 'rejected', u'rejected Documentation', u'Gavin M. Roy',
+     'rejected', 'One line description of project.', 'Miscellaneous'),
 ]

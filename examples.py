@@ -2,6 +2,7 @@
 import random
 
 from rejected import consumer
+
 from tornado import gen, httpclient
 
 __version__ = '1.0.0'

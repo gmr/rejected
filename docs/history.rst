@@ -1,6 +1,12 @@
 Changelog
 =========
 
+3.20.0
+------
+
+- flake8 cleanup
+- Update pins and minor fixes allowing support for Tornado 6, pika 0.13
+
 3.19.21
 -------
 

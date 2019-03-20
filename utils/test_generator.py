@@ -3,16 +3,16 @@ import random
 import time
 import uuid
 
+from pika import BasicProperties
 from pika.adapters import BlockingConnection
 from pika.connection import ConnectionParameters
-from pika import BasicProperties
 
 MESSAGE_COUNT = 100
 
 HTML_VALUE = '<html><head><title>Hi</title></head><body>Hello %i</body></html>'
 JSON_VALUE = '{"json_encoded": true, "value": "here", "random": %i}'
-XML_VALUE = '<?xml version="1.0"><document><node><item>True</item><other attr' \
-            '="foo">Bar</other><value>%i</value></node></document>'
+XML_VALUE = '<?xml version="1.0"><document><node><item>True</item>' \
+            '<other attr="foo">Bar</other><value>%i</value></node></document>'
 YAML_VALUE = """%%YAML 1.2
 ---
 Application:
@@ -44,7 +44,7 @@ if __name__ == '__main__':
                        routing_key='rejected_reply')
 
     # Initialize our timers and loop until external influence stops us
-    for iteration in xrange(0, MESSAGE_COUNT):
+    for iteration in range(0, MESSAGE_COUNT):
         msg_type = random.randint(1, 4)
         if msg_type == 1:
             body = HTML_VALUE % random.randint(1, 32768)
@@ -72,9 +72,8 @@ if __name__ == '__main__':
                                      delivery_mode=1)
 
         # Send the message
-        channel.basic_publish(exchange='example',
-                              routing_key="rejected_example",
-                              body=body,
-                              properties=properties)
+        channel.basic_publish(
+            exchange='example', routing_key='rejected_example',
+            body=body, properties=properties)
 
     connection.close()

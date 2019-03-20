@@ -6,7 +6,6 @@ import collections
 import logging
 import multiprocessing
 import os
-import psutil
 try:
     import Queue as queue
 except ImportError:
@@ -15,7 +14,9 @@ import signal
 import sys
 import time
 
-from rejected import state, process, __version__
+import psutil
+
+from rejected import __version__, process, state
 
 LOGGER = logging.getLogger(__name__)
 
@@ -63,14 +64,14 @@ class MasterControlProgram(state.State):
         # Default values
         self._active_cache = None
         self.consumer_cfg = self.get_consumer_cfg(config, consumer, quantity)
-        self.consumers = dict()
+        self.consumers = {}
         self.config = config
-        self.last_poll_results = dict()
+        self.last_poll_results = {}
         self.poll_data = {'time': 0, 'processes': []}
         self.poll_timer = None
         self.profile = profile
         self.results_timer = None
-        self.stats = dict()
+        self.stats = {}
         self.stats_queue = multiprocessing.Queue()
         self.polled = False
         self.unresponsive = collections.Counter()
@@ -98,7 +99,7 @@ class MasterControlProgram(state.State):
         if use_cache and self._active_cache and \
                 self._active_cache[0] > time.time() - self.poll_interval:
             return self._active_cache[1]
-        active_processes, dead_processes = list(), list()
+        active_processes, dead_processes = [], []
         for consumer in self.consumers:
             for name in list(self.consumers[consumer].processes.keys()):
                 child = self.get_consumer_process(consumer, name)
@@ -116,9 +117,9 @@ class MasterControlProgram(state.State):
                     continue
 
                 if self.unresponsive[name] >= self.MAX_UNRESPONSIVE_COUNT:
-                    LOGGER.info('Killing unresponsive consumer %s (%i): '
-                                '%i misses',
-                                name, proc.pid, self.unresponsive[name])
+                    LOGGER.info(
+                        'Killing unresponsive consumer %s (%i): '
+                        '%i misses', name, proc.pid, self.unresponsive[name])
                     try:
                         os.kill(child.pid, signal.SIGABRT)
                     except OSError:
@@ -148,7 +149,7 @@ class MasterControlProgram(state.State):
 
         # Iterate through the last poll results
         stats = self.consumer_stats_counter()
-        consumer_stats = dict()
+        consumer_stats = {}
         for name in data.keys():
             consumer_stats[name] = self.consumer_stats_counter()
             consumer_stats[name]['processes'] = self.process_count(name)
@@ -197,7 +198,7 @@ class MasterControlProgram(state.State):
 
         # Add it to our last poll global data
         if consumer_name not in self.last_poll_results:
-            self.last_poll_results[consumer_name] = dict()
+            self.last_poll_results[consumer_name] = {}
         self.last_poll_results[consumer_name][process_name] = data_values
 
         # Calculate the stats
@@ -346,9 +347,7 @@ class MasterControlProgram(state.State):
         :rtype: dict
 
         """
-        return Consumer(0,
-                        dict(),
-                        config.get('qty', self.DEFAULT_CONSUMER_QTY),
+        return Consumer(0, {}, config.get('qty', self.DEFAULT_CONSUMER_QTY),
                         config.get('queue', consumer_name))
 
     def new_process(self, consumer_name):
@@ -440,7 +439,7 @@ class MasterControlProgram(state.State):
             return self.check_process_counts()
 
         # Start our data collection dict
-        self.poll_data = {'timestamp': time.time(), 'processes': list()}
+        self.poll_data = {'timestamp': time.time(), 'processes': []}
 
         # Iterate through all of the consumers
         for proc in list(self.active_processes()):
@@ -604,8 +603,8 @@ class MasterControlProgram(state.State):
 
         """
         for name in self.consumer_cfg.keys():
-            self.consumers[name] = self.new_consumer(
-                self.consumer_cfg[name], name)
+            self.consumers[name] = self.new_consumer(self.consumer_cfg[name],
+                                                     name)
             self.start_processes(name, self.consumers[name].qty)
 
     def start_process(self, name):

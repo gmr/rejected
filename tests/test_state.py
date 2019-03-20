@@ -1,9 +1,9 @@
 """Tests for the State Class"""
-import mock
+import unittest
 try:
-    import unittest2 as unittest
+    from unittest import mock
 except ImportError:
-    import unittest
+    import mock
 
 from rejected import state
 

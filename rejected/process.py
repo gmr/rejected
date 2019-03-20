@@ -4,27 +4,28 @@ connection state and collects stats about the consuming process.
 
 """
 import collections
-import importlib
 import logging
 import math
 import multiprocessing
 import os
+import signal
+import time
+import warnings
 from os import path
 try:
     import cProfile as profile
 except ImportError:
     import profile
-import signal
-import time
-import warnings
 
 try:
     import sprockets_influxdb as influxdb
 except ImportError:
     influxdb = None
-from tornado import gen, ioloop, locks
+
 import pika
 from pika import exceptions, spec
+from pika.adapters import tornado_connection
+
 try:
     import raven
     from raven import breadcrumbs
@@ -32,7 +33,9 @@ try:
 except ImportError:
     breadcrumbs, raven, AsyncSentryClient = None, None, None
 
-from rejected import __version__, data, state, statsd, utils
+from tornado import gen, ioloop, locks
+
+from . import __version__, data, state, statsd, utils
 
 LOGGER = logging.getLogger(__name__)
 
@@ -71,7 +74,7 @@ class Connection(state.State):
 
     def connect(self):
         self.set_state(self.STATE_CONNECTING)
-        connection = pika.TornadoConnection(
+        connection = tornado_connection.TornadoConnection(
             self._connection_parameters,
             stop_ioloop_on_close=False,
             custom_ioloop=self.io_loop)
@@ -209,7 +212,7 @@ class Connection(state.State):
         :param pika.frame.Frame frame: The QoS Frame
 
         """
-        LOGGER.debug("Connection %s QoS was set: %r", self.name, frame)
+        LOGGER.debug('Connection %s QoS was set: %r', self.name, frame)
 
     def on_consumer_cancelled(self, frame):
         """Invoked by pika when a ``Basic.Cancel`` or ``Basic.CancelOk``
@@ -438,7 +441,7 @@ class Process(multiprocessing.Process, state.State):
         else:
             LOGGER.info('Creating consumer %s', cfg['consumer'])
 
-        settings = cfg.get('config', dict())
+        settings = cfg.get('config', {})
         settings['_import_module'] = '.'.join(cfg['consumer'].split('.')[0:-1])
 
         kwargs = {
@@ -457,7 +460,7 @@ class Process(multiprocessing.Process, state.State):
             LOGGER.exception('Error creating the consumer "%s": %s',
                              cfg['consumer'], error)
 
-    @gen.engine
+    @gen.coroutine
     def invoke_consumer(self, message):
         """Wrap the actual processor processing bits
 
@@ -529,13 +532,13 @@ class Process(multiprocessing.Process, state.State):
             LOGGER.warning('Connection %s was closed, reconnecting', name)
             return self.connections[name].connect()
 
-        ready = all([c.is_closed for c in self.connections.values()])
+        ready = all(c.is_closed for c in self.connections.values())
         if (self.is_shutting_down or self.is_waiting_to_shutdown) and ready:
             self.on_ready_to_stop()
 
     def on_connection_failure(self, *args, **kwargs):
         LOGGER.warning('Connection failure while %s', self.state_description)
-        ready = all([c.is_closed for c in self.connections.values()])
+        ready = all(c.is_closed for c in self.connections.values())
         if (self.is_connecting or self.is_idle or self.is_shutting_down or
                 self.is_waiting_to_shutdown) and ready:
             self.on_ready_to_stop()
@@ -543,7 +546,7 @@ class Process(multiprocessing.Process, state.State):
     def on_connection_ready(self, name):
         LOGGER.debug('Connection %s indicated it is ready', name)
         self.consumer.set_channel(name, self.connections[name].channel)
-        if all([c.is_idle for c in self.connections.values()]):
+        if all(c.is_idle for c in self.connections.values()):
             for key in self.connections.keys():
                 if self.connections[key].should_consume:
                     self.connections[key].consume(
@@ -562,6 +565,13 @@ class Process(multiprocessing.Process, state.State):
             self.consumer.on_blocked(name)
 
     def on_confirmation(self, name, delivered, delivery_tag):
+        """Invoked on delivery confirmation
+
+        :param str name: The RabbitMQ connection that confirmed the delivery
+        :param bool delivered: Was the message was successfully delivered
+        :param str delivery_tag: The delivery tag for the message
+
+        """
         if self.is_processing:
             self.consumer.on_confirmation(name, delivered, delivery_tag)
 
@@ -747,7 +757,7 @@ class Process(multiprocessing.Process, state.State):
     def report_stats(self):
         """Create the dict of stats data for the MCP stats queue"""
         if not self.previous:
-            self.previous = dict()
+            self.previous = {}
             for key in self.counters:
                 self.previous[key] = 0
         values = {
@@ -833,11 +843,12 @@ class Process(multiprocessing.Process, state.State):
             duration = math.ceil(time.time() - self.delivery_time) * 1000
         except TypeError:
             duration = 0
-        kwargs = {'extra': {
-                      'consumer_name': self.consumer_name,
-                      'env': dict(os.environ),
-                      'message': message},
-                  'time_spent': duration}
+        kwargs = {
+            'extra': {
+                'consumer_name': self.consumer_name,
+                'env': dict(os.environ),
+                'message': message},
+            'time_spent': duration}
         LOGGER.debug('Sending exception to sentry: %r', kwargs)
         self.sentry_client.captureException(exc_info, **kwargs)
 

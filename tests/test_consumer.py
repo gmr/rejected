@@ -1,18 +1,17 @@
 # coding=utf-8
 """Tests for rejected.consumer"""
-import collections
 import json
-
-from tornado import gen, testing
-import mock
+import unittest
 try:
-    import unittest2 as unittest
+    from unittest import mock
 except ImportError:
-    import unittest
-
-from . import mocks
+    import mock
 
 from rejected import consumer, data
+
+from tornado import gen, testing
+
+from . import mocks
 
 
 class ConsumerInitializationTests(unittest.TestCase):

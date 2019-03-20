@@ -132,12 +132,6 @@ class TestProcess(test_state.TestState):
                                     config['consumer'],
                                     mocks.__version__)
 
-    def test_get_consumer_no_version_output(self):
-        config = {'consumer': 'rejected.consumer.Consumer'}
-        with mock.patch('logging.Logger.info') as info:
-            self._obj.get_consumer(config)
-            info.assert_called_with('Creating consumer %s', config['consumer'])
-
     @mock.patch.object(consumer.Consumer, '__init__', side_effect=ImportError)
     def test_get_consumer_with_config_is_none(self, mock_method):
         config = {

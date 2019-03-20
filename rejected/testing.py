@@ -53,10 +53,8 @@ except ImportError:
     import mock
 
 from helper import config
-
 from pika import channel, spec
 from pika.adapters import tornado_connection
-
 from tornado import gen, ioloop, testing
 
 try:

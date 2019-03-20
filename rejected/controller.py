@@ -14,7 +14,7 @@ try:
 except ImportError:
     raven = None
 
-from rejected import __version__, mcp
+from . import __version__, mcp
 
 LOGGER = logging.getLogger(__name__)
 

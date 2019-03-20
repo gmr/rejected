@@ -6,9 +6,7 @@ try:
 except ImportError:
     import mock
 
-
 from helper import config as helper_config
-
 from rejected import __version__, consumer, process
 
 from . import mocks, test_state

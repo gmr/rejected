@@ -8,7 +8,6 @@ except ImportError:
     import mock
 
 from rejected import consumer, data
-
 from tornado import gen, testing
 
 from . import mocks

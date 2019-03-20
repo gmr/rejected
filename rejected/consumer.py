@@ -45,9 +45,7 @@ import zlib
 
 import pika
 from pika import exceptions
-
 from tornado import concurrent, gen, locks
-
 import yaml
 
 from . import data, log

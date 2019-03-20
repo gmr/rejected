@@ -8,10 +8,10 @@ import logging
 import math
 import multiprocessing
 import os
+from os import path
 import signal
 import time
 import warnings
-from os import path
 try:
     import cProfile as profile
 except ImportError:
@@ -21,18 +21,15 @@ try:
     import sprockets_influxdb as influxdb
 except ImportError:
     influxdb = None
-
 import pika
 from pika import exceptions, spec
 from pika.adapters import tornado_connection
-
 try:
     import raven
     from raven import breadcrumbs
     from raven.contrib.tornado import AsyncSentryClient
 except ImportError:
     breadcrumbs, raven, AsyncSentryClient = None, None, None
-
 from tornado import gen, ioloop, locks
 
 from . import __version__, data, state, statsd, utils

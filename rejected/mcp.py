@@ -16,7 +16,7 @@ import time
 
 import psutil
 
-from rejected import __version__, process, state
+from . import __version__, process, state
 
 LOGGER = logging.getLogger(__name__)
 

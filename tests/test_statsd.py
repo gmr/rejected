@@ -7,7 +7,6 @@ except ImportError:
     import mock
 
 from rejected import statsd
-
 from tornado import gen, iostream, locks, tcpserver, testing
 
 

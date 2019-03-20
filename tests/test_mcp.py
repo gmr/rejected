@@ -7,7 +7,6 @@ except ImportError:
     import mock
 
 from helper import config
-
 from rejected import mcp
 
 from . import test_state

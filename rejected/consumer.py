@@ -962,7 +962,10 @@ class Consumer(object):
             exc_info = sys.exc_info()
             if concurrent.is_future(result):
                 error = result.exception()
-                exc_info = result.exc_info()
+                try:
+                    exc_info = result.exc_info()
+                except AttributeError:
+                    pass
             self.log_exception('Exception processing delivery %s: %s',
                                message_in.delivery_tag, str(error),
                                exc_info=exc_info)

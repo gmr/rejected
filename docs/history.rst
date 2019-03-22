@@ -1,6 +1,11 @@
 Changelog
 =========
 
+3.21.0
+------
+
+- Don't expect asyncio's Futures to have `exc_info()`.
+
 3.20.0
 ------
 

@@ -23,6 +23,9 @@ LOGGER = logging.getLogger(__name__)
 _PROCESS_RUNNING = [psutil.STATUS_RUNNING, psutil.STATUS_SLEEPING]
 _PROCESS_STOPPED_OR_DEAD = [psutil.STATUS_STOPPED, psutil.STATUS_DEAD]
 
+if sys.version_info < (3, 0, 0):
+    ProcessLookupError = OSError
+
 
 class Consumer(object):
     """Class used for keeping track of each consumer type being managed by

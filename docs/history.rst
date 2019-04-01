@@ -1,7 +1,12 @@
 Changelog
 =========
 
-3.21.0
+3.21.2
+------
+
+- Catch a few operational exceptions when starting a consumer process
+
+3.20.1
 ------
 
 - Don't expect asyncio's Futures to have `exc_info()`.

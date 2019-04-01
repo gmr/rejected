@@ -447,8 +447,13 @@ class MasterControlProgram(state.State):
                 continue
 
             # Send the profile signal
-            os.kill(int(proc.pid), signal.SIGPROF)
-            self.poll_data['processes'].append(proc.name)
+            try:
+                os.kill(int(proc.pid), signal.SIGPROF)
+            except ProcessLookupError as error:
+                LOGGER.warning('Error sending SIGPROF to %s: %s',
+                               proc.pid, error)
+            else:
+                self.poll_data['processes'].append(proc.name)
 
         # Check if we need to start more processes
         self.check_process_counts()
@@ -622,10 +627,13 @@ class MasterControlProgram(state.State):
         # Start the process
         try:
             proc.start()
-        except IOError as error:
+        except (OSError, IOError) as error:
             LOGGER.critical('Failed to start %s for %s: %r',
                             process_name, name, error)
-            del self.consumers[name].process[process_name]
+            try:
+                del self.consumers[name].process[process_name]
+            except AttributeError as error:
+                LOGGER.warning('Could not cleanup consumer process: %s', error)
 
     def start_processes(self, name, quantity):
         """Start the specified quantity of consumer processes for the given

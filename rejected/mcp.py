@@ -24,6 +24,7 @@ _PROCESS_RUNNING = [psutil.STATUS_RUNNING, psutil.STATUS_SLEEPING]
 _PROCESS_STOPPED_OR_DEAD = [psutil.STATUS_STOPPED, psutil.STATUS_DEAD]
 
 if sys.version_info < (3, 0, 0):
+    FileNotFoundError = psutil.NoSuchProcess
     ProcessLookupError = OSError
 
 
@@ -115,7 +116,7 @@ class MasterControlProgram(state.State):
                     continue
                 try:
                     proc = psutil.Process(child.pid)
-                except psutil.NoSuchProcess:
+                except (FileNotFoundError, psutil.NoSuchProcess):
                     dead_processes.append((consumer, name))
                     continue
 
@@ -646,7 +647,7 @@ class MasterControlProgram(state.State):
         :param int quantity: The quantity of processes to start
 
         """
-        [self.start_process(name) for i in range(0, quantity or 0)]
+        [self.start_process(name) for _i in range(0, quantity or 0)]
 
     def stop_processes(self):
         """Iterate through all of the consumer processes shutting them down."""

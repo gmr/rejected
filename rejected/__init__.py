@@ -18,7 +18,7 @@ from rejected.consumer import (
 
 __author__ = 'Gavin M. Roy <gavinmroy@gmail.com>'
 __since__ = '2009-09-10'
-__version__ = '3.20.2'
+__version__ = '3.20.3'
 
 __all__ = [
     '__author__',

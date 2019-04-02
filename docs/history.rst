@@ -1,7 +1,12 @@
 Changelog
 =========
 
-3.21.2
+3.20.3
+------
+
+- Catch an operational exceptions when checking if a process is still alive
+
+3.20.2
 ------
 
 - Catch a few operational exceptions when starting a consumer process

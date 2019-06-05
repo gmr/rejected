@@ -1,6 +1,11 @@
 Changelog
 =========
 
+3.20.4
+------
+
+- FIXED :meth:`~rejected.consumer.Consumer.initialize` getting called twice in `rejected.testing`
+
 3.20.3
 ------
 

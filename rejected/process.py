@@ -534,8 +534,9 @@ class Process(multiprocessing.Process, state.State):
             self.on_ready_to_stop()
 
     def on_connection_failure(self, *args, **kwargs):
-        LOGGER.warning('Connection failure while %s', self.state_description)
         ready = all(c.is_closed for c in self.connections.values())
+        LOGGER.warning('Connection failure while %s - Ready to stop: %r',
+                       self.state_description, ready)
         if (self.is_connecting or self.is_idle or self.is_shutting_down or
                 self.is_waiting_to_shutdown) and ready:
             self.on_ready_to_stop()

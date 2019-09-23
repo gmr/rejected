@@ -6,6 +6,7 @@ Changelog
 
 - When TCP statsd is enabled and the statsd client can not connect, shutdown `rejected.process.Process`
 - Only log TCP statsd send_metric failures when the client believes it is connected
+   - If send_metric failure occurs and it believes it's connected, shutdown `rejected.process.Process`
 - Log state on AMQP connection failure
 
 3.20.4

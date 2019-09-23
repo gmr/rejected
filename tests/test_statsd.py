@@ -13,9 +13,11 @@ from tornado import gen, iostream, locks, tcpserver, testing
 class TestCase(unittest.TestCase):
 
     def setUp(self):
+        self.failure_callback = mock.Mock()
         self.name = str(uuid.uuid4())
         self.settings = self.get_settings()
-        self.statsd = statsd.Client(self.name, self.settings)
+        self.statsd = statsd.Client(
+            self.name, self.settings, self.failure_callback)
 
     @staticmethod
     def get_settings():
@@ -133,11 +135,13 @@ class TCPTestCase(testing.AsyncTestCase):
 
     def setUp(self):
         super(TCPTestCase, self).setUp()
+        self.failure_callback = mock.Mock()
         self.sock, self.port = testing.bind_unused_port()
         self.name = str(uuid.uuid4())
         self.settings = self.get_settings()
         print(self.settings)
-        self.statsd = statsd.Client(self.name, self.settings)
+        self.statsd = statsd.Client(
+            self.name, self.settings, self.failure_callback)
         self.server = StatsdServer()
         self.server.add_socket(self.sock)
 

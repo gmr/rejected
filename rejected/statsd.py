@@ -112,6 +112,8 @@ class Client(object):
         except (OSError, socket.error) as error:  # pragma: nocover
             if self._connected:
                 LOGGER.exception('Error sending statsd metric: %s', error)
+                self._connected = False
+                self._failure_callback()
 
     def _setting(self, key, default):
         """Return the setting, checking config, then the appropriate

@@ -924,7 +924,8 @@ class Process(multiprocessing.Process, state.State):
         if self.config['stats'].get('statsd'):
             if self.config['stats']['statsd'].get('enabled', True):
                 self.statsd = statsd.Client(self.consumer_name,
-                                            self.config['stats']['statsd'])
+                                            self.config['stats']['statsd'],
+                                            self.stop)
             LOGGER.debug('statsd measurements configured')
 
         # InfluxDB support

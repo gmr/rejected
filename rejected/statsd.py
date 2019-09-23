@@ -29,14 +29,16 @@ class Client(object):
     PAYLOAD_HOSTNAME = '{}.{}.{}.{}:{}|{}\n'
     PAYLOAD_NO_HOSTNAME = '{}.{}.{}:{}|{}\n'
 
-    def __init__(self, consumer_name, settings):
+    def __init__(self, consumer_name, settings, failure_callback):
         """
 
         :param str consumer_name: The name of the consumer for this client
         :param dict settings: statsd Settings
 
         """
+        self._connected = False
         self._consumer_name = consumer_name
+        self._failure_callback = failure_callback
         self._hostname = socket.gethostname().split('.')[0]
         self._settings_in = settings
         self._settings = {}
@@ -108,7 +110,8 @@ class Client(object):
             else:
                 self._udp_sock.sendto(payload.encode('utf-8'), self._address)
         except (OSError, socket.error) as error:  # pragma: nocover
-            LOGGER.exception('Error sending statsd metric: %s', error)
+            if self._connected:
+                LOGGER.exception('Error sending statsd metric: %s', error)
 
     def _setting(self, key, default):
         """Return the setting, checking config, then the appropriate
@@ -129,11 +132,13 @@ class Client(object):
     def _tcp_on_closed(self):
         """Invoked when the socket is closed."""
         LOGGER.warning('Disconnected from statsd, reconnecting')
+        self._connected = False
         self._tcp_sock = self._tcp_socket()
 
     def _tcp_on_connected(self):
         """Invoked when the IOStream is connected"""
         LOGGER.debug('Connected to statsd at %s via TCP', self._address)
+        self._connected = True
 
     def _tcp_socket(self):
         """Connect to statsd via TCP and return the IOStream handle.
@@ -146,9 +151,13 @@ class Client(object):
         try:
             sock.connect(self._address, self._tcp_on_connected)
         except (OSError, socket.error) as error:
-            LOGGER.error('Failed to connect via TCP: %s', error)
-        sock.set_close_callback(self._tcp_on_closed)
-        return sock
+            LOGGER.error('Failed to connect via TCP, triggering shutdown: %s',
+                         error)
+            self._failure_callback()
+        else:
+            self._connected = True
+            sock.set_close_callback(self._tcp_on_closed)
+            return sock
 
     @staticmethod
     def _udp_socket():

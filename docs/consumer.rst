@@ -25,7 +25,7 @@ received, checking for string equality against the ``MESSAGE_TYPE`` attribute.
 If they are not matched, the consumer will not process the message and will drop the
 message without an exception if the ``DROP_INVALID_MESSAGES`` attribute is set to
 ``True``. If it is ``False``, a
-:py:class:`ConsumerException <rejected.consumer.MessageException>` is raised.
+:py:class:`~rejected.consumer.MessageException` is raised.
 
 Republishing of Dropped Messages
 --------------------------------

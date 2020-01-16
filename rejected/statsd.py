@@ -150,6 +150,7 @@ class Client(object):
         """
         sock = iostream.IOStream(socket.socket(
             socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP))
+        sock.set_close_callback(self._tcp_on_closed)
         try:
             sock.connect(self._address, self._tcp_on_connected)
         except (OSError, socket.error) as error:
@@ -158,7 +159,6 @@ class Client(object):
             self._failure_callback()
         else:
             self._connected = True
-            sock.set_close_callback(self._tcp_on_closed)
             return sock
 
     @staticmethod

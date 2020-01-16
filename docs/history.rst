@@ -1,6 +1,11 @@
 Changelog
 =========
 
+3.20.6
+------
+
+- FIXED an issue when TCP statsd fails to connect not calling the tcp on close callback
+
 3.20.5
 ------
 

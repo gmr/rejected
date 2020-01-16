@@ -24,8 +24,7 @@ the ``type`` property of incoming messages will be validated against when a mess
 received, checking for string equality against the ``MESSAGE_TYPE`` attribute.
 If they are not matched, the consumer will not process the message and will drop the
 message without an exception if the ``DROP_INVALID_MESSAGES`` attribute is set to
-``True``. If it is ``False``, a
-:py:class:`~rejected.consumer.MessageException` is raised.
+``True``. If it is ``False``, a :py:class:`~rejected.consumer.MessageException` is raised.
 
 Republishing of Dropped Messages
 --------------------------------

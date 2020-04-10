@@ -1,6 +1,10 @@
 Changelog
 =========
 
+3.20.7
+------
+- Loosen the pin on pyyaml due to security issue
+
 3.20.6
 ------
 

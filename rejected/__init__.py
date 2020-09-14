@@ -7,18 +7,18 @@ import logging
 # Add NullHandler to prevent logging warnings
 logging.getLogger(__name__).addHandler(logging.NullHandler())
 
-from rejected.consumer import (
+from rejected.consumer import (  # noqa: E402
     Consumer,
     ConsumerException,
     MessageException,
     ProcessingException,
     PublishingConsumer,
     SmartConsumer,
-    SmartPublishingConsumer)  # noqa E402
+    SmartPublishingConsumer)
 
 __author__ = 'Gavin M. Roy <gavinmroy@gmail.com>'
 __since__ = '2009-09-10'
-__version__ = '3.20.7'
+__version__ = '3.20.8'
 
 __all__ = [
     '__author__',

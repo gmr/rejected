@@ -1,6 +1,11 @@
 Changelog
 =========
 
+3.20.8
+------
+- FIXED a bug in rejected.testing when using only positional arguments `#36 <https://github.com/gmr/rejected/pull/36>`_ - `nvllsvm <https://github.com/nvllsvm>`_
+- FIXED a defect in string formatting when raising an exception due to a missing setting
+
 3.20.7
 ------
 - Loosen the pin on pyyaml due to security issue

@@ -1027,8 +1027,9 @@ class Consumer(object):
 
         """
         if name not in self.settings:
-            raise Exception('You must define the "{}" setting in your '
-                            'application to use %s'.format(name, feature))
+            raise Exception(
+                'You must define the "{}" setting in to use {}'.format(
+                    name, feature))
 
     def set_channel(self, name, channel):
         """Assign the _channel attribute to the channel that was passed in.

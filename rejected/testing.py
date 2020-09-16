@@ -104,7 +104,7 @@ class AsyncTestCase(testing.AsyncTestCase):
         :returns: list([:class:`~rejected.testing.PublishedMessage`])
 
         """
-        return [PublishedMessage(*c.args, **c.kwargs)
+        return [PublishedMessage(*c[1], **c[2])
                 for c in self.channel.basic_publish.mock_calls]
 
     def get_consumer(self):

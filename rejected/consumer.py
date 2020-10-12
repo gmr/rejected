@@ -1531,7 +1531,7 @@ class SmartConsumer(Consumer):
         if isinstance(value, bytes):
             value = value.decode('utf-8')
         try:
-            return json.loads(value, encoding='utf-8')
+            return json.loads(value)
         except ValueError as error:
             self.logger.exception('Could not decode message body: %s', error)
             raise MessageException(error)

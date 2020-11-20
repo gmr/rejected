@@ -104,8 +104,14 @@ class AsyncTestCase(testing.AsyncTestCase):
         :returns: list([:class:`~rejected.testing.PublishedMessage`])
 
         """
-        return [PublishedMessage(*c[1], **c[2])
-                for c in self.channel.basic_publish.mock_calls]
+        return [
+            PublishedMessage(
+                body=c[2]['body'],
+                exchange=c[2]['exchange'],
+                properties=c[2]['properties'],
+                routing_key=c[2]['routing_key'])
+            for c in self.channel.basic_publish.mock_calls
+        ]
 
     def get_consumer(self):
         """Override to return the consumer class for testing.

@@ -1110,10 +1110,10 @@ class Consumer(object):
         properties['headers']['X-Original-Exchange'] = self._message.exchange
 
         self._message.channel.basic_publish(
-            self._drop_exchange,
-            self._message.routing_key,
-            self._message.body,
-            pika.BasicProperties(**properties))
+            exchange=self._drop_exchange,
+            routing_key=self._message.routing_key,
+            body=self._message.body,
+            properties=pika.BasicProperties(**properties))
 
     def _republish_processing_error(self, error):
         """Republish the original message that was received because a
@@ -1144,10 +1144,10 @@ class Consumer(object):
                 properties['headers'][_PROCESSING_EXCEPTIONS] = 1
 
         self._message.channel.basic_publish(
-            self._error_exchange,
-            self._message.routing_key,
-            self._message.body,
-            pika.BasicProperties(**properties))
+            exchange=self._error_exchange,
+            routing_key=self._message.routing_key,
+            body=self._message.body,
+            properties=pika.BasicProperties(**properties))
 
 
 class PublishingConsumer(Consumer):

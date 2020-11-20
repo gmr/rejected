@@ -1,5 +1,10 @@
 Changelog
 =========
+
+3.20.10
+-------
+- FIXED a bug in rejected.testing PublishedMessage body and properties being swapped for republished messages  `#41 <https://github.com/gmr/rejected/pull/41>`_ - `nvllsvm <https://github.com/nvllsvm>`_
+
 3.20.9
 ------
 - FIXED a bug in rejected.testing that was introduced in 3.20.8  `#37 <https://github.com/gmr/rejected/pull/37>`_ - `nvllsvm <https://github.com/nvllsvm>`_

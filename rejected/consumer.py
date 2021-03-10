@@ -1108,6 +1108,7 @@ class Consumer(object):
         properties['headers']['X-Dropped-Timestamp'] = \
             datetime.datetime.utcnow().isoformat()
         properties['headers']['X-Original-Exchange'] = self._message.exchange
+        properties['headers']['X-Original-Queue'] = self._process.queue_name
 
         self._message.channel.basic_publish(
             exchange=self._drop_exchange,
@@ -1131,6 +1132,9 @@ class Consumer(object):
         properties = dict(self._message.properties) or {}
         if 'headers' not in properties or not properties['headers']:
             properties['headers'] = {}
+
+        properties['headers']['X-Original-Exchange'] = self._message.exchange
+        properties['headers']['X-Original-Queue'] = self._process.queue_name
 
         if error:
             properties['headers']['X-Processing-Exception'] = error

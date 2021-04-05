@@ -67,7 +67,8 @@ class TestProcess(test_state.TestState):
     mock_args = {
         'config': config,
         'consumer_name': 'MockConsumer',
-        'stats_queue': 'StatsQueue'
+        'stats_queue': 'StatsQueue',
+        'logging_config': helper_config.Config.LOGGING
     }
 
     def setUp(self):

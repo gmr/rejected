@@ -57,7 +57,9 @@ class TestProcessingException(testing.AsyncTestCase):
         for (attr, value) in self.consumer._message.properties:
             if attr == 'headers':
                 self.assertEqual(
-                    {'X-Processing-Exception': 'ProcessingException',
+                    {'X-Original-Exchange': 'rejected',
+                     'X-Original-Queue': self.process.queue_name,
+                     'X-Processing-Exception': 'ProcessingException',
                      'X-Processing-Exceptions': 1},
                     published_message.properties.headers)
             else:
@@ -99,7 +101,8 @@ class TestMessageException(testing.AsyncTestCase):
                 self.assertEqual(
                     {'X-Dropped-By': 'Consumer',
                      'X-Dropped-Reason': 'invalid type',
-                     'X-Original-Exchange': 'rejected'},
+                     'X-Original-Exchange': 'rejected',
+                     'X-Original-Queue': self.process.queue_name},
                     headers)
             else:
                 self.assertEqual(

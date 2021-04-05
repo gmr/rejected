@@ -13,3 +13,4 @@ docs/_build
 coverage.xml
 reports
 env*
+venv

@@ -8,15 +8,13 @@ import logging
 import math
 import multiprocessing
 import os
-from os import path
+import profile
 import signal
 import time
 import warnings
-try:
-    import cProfile as profile
-except ImportError:
-    import profile
+from os import path
 
+from helper import config as helper_config
 try:
     import sprockets_influxdb as influxdb
 except ImportError:
@@ -36,11 +34,22 @@ from . import __version__, data, state, statsd, utils
 
 LOGGER = logging.getLogger(__name__)
 
-Callbacks = collections.namedtuple(
-    'callbacks', ['on_ready', 'on_connection_failure', 'on_closed',
-                  'on_blocked', 'on_unblocked', 'on_confirmation',
-                  'on_delivery', 'on_return'])
-Delivery = collections.namedtuple('Delivery', ['connection', 'message'])
+
+class Callbacks:
+    """Slotted callback classes to fix namedtuple issue in 3.9"""
+    __slots__ = ['on_ready', 'on_connection_failure', 'on_closed',
+                 'on_blocked', 'on_unblocked', 'on_confirmation',
+                 'on_delivery', 'on_return']
+    def __init__(self, on_ready, on_connection_failure, on_closed, on_blocked,
+                 on_unblocked, on_confirmation, on_delivery, on_return):
+        self.on_ready = on_ready
+        self.on_connection_failure = on_connection_failure
+        self.on_closed = on_closed
+        self.on_blocked = on_blocked
+        self.on_unblocked = on_unblocked
+        self.on_confirmation = on_confirmation
+        self.on_delivery = on_delivery
+        self.on_return = on_return
 
 
 class Connection(state.State):
@@ -855,8 +864,8 @@ class Process(multiprocessing.Process, state.State):
         to RabbitMQ.
 
         """
+        helper_config.LoggingConfig(self.logging_config).configure()
         LOGGER.info('Initializing for %s', self.name)
-
         if 'consumer' not in self.consumer_config:
             return self.on_startup_error(
                 '"consumer" not specified in configuration')

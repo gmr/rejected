@@ -1,6 +1,15 @@
 Changelog
 =========
 
+3.21.0
+------
+- FIXED multiple Python 3.9 issues
+  - Require helper >= 2.5.0, <3
+  - Fix helper.controller.Controller import path in rejected.controller
+  - Change from using a namedtuple to using a slotted Class due to issues pickling rejected.process.Callbacks
+  - Just use profile instead of switching between cProfile and profile
+  - Have helper fix log configuration after multiprocess popens the child process
+
 3.20.10
 -------
 - FIXED a bug in rejected.testing PublishedMessage body and properties being swapped for republished messages  `#41 <https://github.com/gmr/rejected/pull/41>`_ - `nvllsvm <https://github.com/nvllsvm>`_

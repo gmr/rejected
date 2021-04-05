@@ -8,11 +8,11 @@ import logging
 import math
 import multiprocessing
 import os
+from os import path
 import profile
 import signal
 import time
 import warnings
-from os import path
 
 from helper import config as helper_config
 try:

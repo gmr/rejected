@@ -261,7 +261,7 @@ class MasterControlProgram(state.State):
         :rtype: dict
 
         """
-        consumers = dict(config.application.Consumers or {})
+        consumers = dict(config.application['Consumers'] or {})
         if only:
             for key in list(consumers.keys()):
                 if key != only:

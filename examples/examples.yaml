@@ -100,12 +100,10 @@ Logging:
     console:
       class: logging.StreamHandler
       formatter: verbose
-      debug_only: false
       filters: [no_correlation]
     console_correlation:
       class: logging.StreamHandler
       formatter: verbose_correlation
-      debug_only: false
       filters: [correlation]
     syslog:
       class: logging.handlers.SysLogHandler

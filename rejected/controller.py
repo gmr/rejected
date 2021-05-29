@@ -8,7 +8,7 @@ import signal
 import sys
 
 import helper
-from helper import parser
+from helper import controller, parser
 try:
     import raven
 except ImportError:
@@ -19,7 +19,7 @@ from rejected import mcp, __version__
 LOGGER = logging.getLogger(__name__)
 
 
-class Controller(helper.Controller):
+class Controller(controller.Controller):
     """Rejected Controller application that invokes the MCP and handles all
     of the OS level concerns.
 
@@ -91,7 +91,7 @@ class Controller(helper.Controller):
             LOGGER.info('MCP exited cleanly')
 
         # Change our state
-        self._stopped()
+        self.set_state(self.STATE_STOPPED)
         LOGGER.info('Shutdown complete')
 
     def run(self):

@@ -1,6 +1,10 @@
 Changelog
 =========
 
+3.21.1
+------
+- FIXED an issue with a uncaught exception raised when connecting or reconnecting and can't a socket can not be connected.
+
 3.21.0
 ------
 - FIXED multiple Python 3.9 issues

@@ -200,7 +200,10 @@ class Connection(state.State):
     def on_failure(self):
         LOGGER.info('Connection failure, terminating connection')
         self.set_state(self.STATE_CLOSED)
-        self.handle.close()
+        try:
+            self.handle.close()
+        except AttributeError:
+            pass
         del self.handle
         self.callbacks.on_connection_failure(self.name)
 

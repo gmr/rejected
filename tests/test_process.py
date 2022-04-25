@@ -37,6 +37,16 @@ class TestProcess(test_state.TestState):
                 'user': 'guest',
                 'pass': 'guest',
                 'vhost': '/'
+            },
+            'MockRemoteSSLConnection': {
+                'host': 'remotehost',
+                'port': 5672,
+                'user': 'guest',
+                'pass': 'guest',
+                'vhost': '/',
+                'ssl_options': {
+                    'prototcol': 2,
+                }
             }
         },
         'Consumers': {
@@ -59,6 +69,14 @@ class TestProcess(test_state.TestState):
                 'min': 1,
                 'max': 2,
                 'queue': 'mock_you'
+            },
+            'MockConsumer3': {
+                'consumer': 'mock_consumer.MockConsumer',
+                'connections': ['MockRemoteSSLConnection'],
+                'config': {'num_value': 50},
+                'min': 1,
+                'max': 2,
+                'queue': 'mock_you2'
             }
         }
     }
@@ -208,6 +226,20 @@ class TestProcess(test_state.TestState):
         self.assertEqual(
             mock_process.qos_prefetch,
             self.config['Consumers']['MockConsumer']['qos_prefetch'])
+
+    def test_setup_with_ssl_connection(self):
+        self.mock_args['consumer_name'] = 'MockConsumer3'
+        mock_process = self.mock_setup()
+
+        conn = mock_process.connections['MockRemoteSSLConnection'].connection
+        self.assertTrue(bool(conn.params.ssl_options))
+
+    def test_setup_with_non_ssl_connection(self):
+        self.mock_args['consumer_name'] = 'MockConsumer2'
+        mock_process = self.mock_setup()
+
+        conn = mock_process.connections['MockRemoteConnection'].connection
+        self.assertFalse(bool(conn.params.ssl_options))
 
     def test_is_idle_state_processing(self):
         self._obj.state = self._obj.STATE_PROCESSING

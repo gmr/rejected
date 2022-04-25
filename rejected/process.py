@@ -11,6 +11,7 @@ import os
 from os import path
 import profile
 import signal
+import ssl
 import time
 import warnings
 
@@ -69,7 +70,7 @@ class Connection(state.State):
         self.io_loop = io_loop
         self.name = name
         self.publisher_confirm = publisher_confirmations
-        self.handle = self.connect()
+        self.connection = self.connect()
 
         # Override STOPPED with CLOSED
         self.STATES[0x08] = 'CLOSED'
@@ -79,15 +80,19 @@ class Connection(state.State):
         return self.is_stopped
 
     def connect(self):
+        """Setup the TornadoConnection which connects to RabbitMQ
+        automatically with connection callbacks for when the connection is
+        opened, when there is an error opening a connection or when a
+        previously opened connection is closed.
+
+        """
         self.set_state(self.STATE_CONNECTING)
-        connection = tornado_connection.TornadoConnection(
+        return tornado_connection.TornadoConnection(
             self._connection_parameters,
-            stop_ioloop_on_close=False,
+            on_open_callback=self.on_open,
+            on_open_error_callback=self.on_open_error,
+            on_close_callback=self.on_closed,
             custom_ioloop=self.io_loop)
-        connection.add_on_close_callback(self.on_closed)
-        connection.add_on_open_callback(self.on_open)
-        connection.add_on_open_error_callback(self.on_open_error)
-        return connection
 
     def shutdown(self):
         if self.is_shutting_down:
@@ -104,23 +109,23 @@ class Connection(state.State):
         else:
             self.channel.close()
 
-    def on_open(self, handle):
+    def on_open(self, connection):
         """Invoked when the connection is opened
 
-        :type handle: pika.adapters.tornado_connection.TornadoConnection
+        :type connection: pika.adapters.tornado_connection.TornadoConnection
 
         """
-        LOGGER.debug('Connection %s is open (%r)', self.name, handle)
-        self.handle = handle
+        LOGGER.debug('Connection %s is open (%r)', self.name, connection)
+        self.connection = connection
         try:
-            self.handle.channel(self.on_channel_open)
+            self.connection.channel(on_open_callback=self.on_channel_open)
         except exceptions.ConnectionClosed:
             LOGGER.warning('Channel open on closed connection')
             self.set_state(self.STATE_CLOSED)
             self.callbacks.on_closed(self.name)
             return
-        self.handle.add_on_connection_blocked_callback(self.on_blocked)
-        self.handle.add_on_connection_unblocked_callback(self.on_unblocked)
+        self.connection.add_on_connection_blocked_callback(self.on_blocked)
+        self.connection.add_on_connection_unblocked_callback(self.on_unblocked)
 
     def on_open_error(self, *args, **kwargs):
         LOGGER.error('Connection %s failure %r %r', self.name, args, kwargs)
@@ -162,10 +167,10 @@ class Connection(state.State):
         self.channel.add_on_cancel_callback(self.on_consumer_cancelled)
         self.channel.add_on_return_callback(self.on_return)
         if self.publisher_confirm:
-            self.channel.confirm_delivery(self.on_confirmation)
+            self.channel.confirm_delivery(callback=self.on_confirmation)
         self.callbacks.on_ready(self.name)
 
-    def on_channel_closed(self, _channel, reply_code, reply_text):
+    def on_channel_closed(self, _channel, closing_reason):
         """Invoked by pika when RabbitMQ unexpectedly closes the channel.
         Channels are usually closed if you attempt to do something that
         violates the protocol, such as re-declare an exchange or queue with
@@ -173,24 +178,29 @@ class Connection(state.State):
         to shutdown the object.
 
         :param pika.channel.Channel _channel: The AMQP Channel
-        :param int reply_code: The AMQP reply code
-        :param str reply_text: The AMQP reply text
+        :param pika.exceptions.ChannelClosed closing_reason: The channel
+            closed exception
 
         """
         del self.channel
+        reply_code = closing_reason.reply_code
+        reply_text = closing_reason.reply_text
+
         if reply_code <= 0 or reply_code == 404:
             LOGGER.error('Channel Error (%r): %s',
                          reply_code, reply_text or 'unknown')
             self.on_failure()
         elif self.is_shutting_down:
             LOGGER.debug('Connection %s closing', self.name)
-            self.handle.close()
+            self.connection.close()
         elif self.is_running:
             LOGGER.warning('Connection %s channel was closed: (%s) %s',
                            self.name, reply_code, reply_text)
+
             try:
-                self.handle.channel(self.on_channel_open)
-            except exceptions.ConnectionClosed as error:
+                self.connection.channel(on_open_callback=self.on_channel_open)
+            except (exceptions.ConnectionWrongStateError,
+                    exceptions.ConnectionClosed) as error:
                 LOGGER.warning('Error raised while creating new channel: %s',
                                error)
                 self.on_failure()
@@ -201,18 +211,33 @@ class Connection(state.State):
         LOGGER.info('Connection failure, terminating connection')
         self.set_state(self.STATE_CLOSED)
         try:
-            self.handle.close()
-        except AttributeError:
+            self.connection.close()
+        except (AttributeError, exceptions.ConnectionWrongStateError):
             pass
-        del self.handle
+        del self.connection
         self.callbacks.on_connection_failure(self.name)
 
     def consume(self, queue_name, no_ack, prefetch_count):
+        """Configure quality of service and issue Basic.Consume command
+
+        :param str queue: The queue to consume from. Use the empty string to
+            specify the most recent server-named queue for this channel
+        :param bool no_ack: if set to True, automatic acknowledgement mode
+            will be used (see http://www.rabbitmq.com/confirms.html).
+            This corresponds with the 'no_ack' parameter in the basic.consume
+            AMQP 0.9.1 method
+        :param int prefetch_count: Specifies a prefetch window in terms of whole
+            messages.
+
+        """
         self.set_state(self.STATE_ACTIVE)
-        self.channel.basic_qos(self.on_qos_set, 0, prefetch_count, False)
-        self.channel.basic_consume(consumer_callback=self.on_delivery,
-                                   queue=queue_name,
-                                   no_ack=no_ack,
+        self.channel.basic_qos(callback=self.on_qos_set,
+                               prefetch_size=0,
+                               prefetch_count=prefetch_count,
+                               global_qos=False)
+        self.channel.basic_consume(queue=queue_name,
+                                   on_message_callback=self.on_delivery,
+                                   auto_ack=no_ack,
                                    consumer_tag=self.consumer_tag)
 
     def on_qos_set(self, frame):
@@ -272,11 +297,55 @@ class Connection(state.State):
             pika.PlainCredentials(
                 self.config.get('user', 'guest'),
                 self.config.get('password', self.config.get('pass', 'guest'))),
-            ssl=self.config.get('ssl', False),
+            ssl_options=self._ssl_options,
             frame_max=self.config.get('frame_max', spec.FRAME_MAX_SIZE),
             socket_timeout=self.config.get('socket_timeout', 10),
-            heartbeat_interval=self.config.get(
+            heartbeat=self.config.get(
                 'heartbeat_interval', self.HB_INTERVAL))
+
+    @property
+    def _ssl_options(self):
+        """Return the `pika.SSLOptions` parameter for the pika connection
+
+        The expected ssl_options values in the config are:
+            * ca_certs
+            * ca_path
+            * ca_data
+            * prototcol
+            * certfile
+            * keyfile
+            * password
+            * ciphers
+
+        :rtype: `pika.SSLOptions`|None
+
+        """
+        ssl_options = self.config.get('ssl_options')
+        if not ssl_options:
+            return
+
+        context = ssl.SSLContext(
+            protocol=int(ssl_options.get('protocol', ssl.PROTOCOL_TLS)))
+
+        # Load a set of certification authority (CA) certificates
+        if any([ssl_options.get('ca_certs'), ssl_options.get('ca_path'),
+                ssl_options.get('ca_data')]):
+            context.load_verify_locations(ssl_options.get('ca_certs'),
+                                          ssl_options.get('ca_path'),
+                                          ssl_options.get('ca_data'))
+
+        # Load a private key and the corresponding certificate
+        if ssl_options.get('certfile'):
+            certfile = ssl_options['certfile']
+            keyfile = ssl_options.get('keyfile')
+            password = ssl_options.get('password')
+            context.load_cert_chain(certfile, keyfile, password)
+
+        # Set the available ciphers for sockets created with this context
+        if ssl_options.get('ciphers'):
+            context.set_ciphers(ssl_options['ciphers'])
+
+        return pika.SSLOptions(context=context)
 
 
 class Process(multiprocessing.Process, state.State):

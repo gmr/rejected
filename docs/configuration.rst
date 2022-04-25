@@ -94,10 +94,32 @@ Each RabbitMQ connection entry should be a nested object with a unique name with
 |                 +---------------------+---------------------------------------------------------------+
 |                 | pass                | The password to use (str)                                     |
 |                 +---------------------+---------------------------------------------------------------+
-|                 | ssl                 | Optional: whether to connect via SSL (boolean) default: False |
+|                 | `ssl_options`_      | Optional: the SSL options for the `SSL connection socket`_    |
 |                 +---------------------+---------------------------------------------------------------+
 |                 | heartbeat_interval  | Optional: the AMQP heartbeat interval (int) default: 300 sec  |
 +-----------------+---------------------+---------------------------------------------------------------+
+
+ssl_options
+^^^^^^^^^^^
++---------------------------+---------------------------------------------------------------------------------------------------------+
+| Connections > ssl_options |                                                                                                         |
++===========================+==============+==========================================================================================+
+|                           | ca_certs     | The file path to the concatenated list of CA certificates (str)                          |
++---------------------------+--------------+------------------------------------------------------------------------------------------+
+|                           | ca_path      | The directory path to the PEM formatted CA certificates (str)                            |
++---------------------------+--------------+------------------------------------------------------------------------------------------+
+|                           | ca_data      | The PEM encoded CA certificates (str)                                                    |
++---------------------------+--------------+------------------------------------------------------------------------------------------+
+|                           | prototcol    | The ssl `PROTOCOL_*`_ enum integer value. Default: ``2`` for enum ``PROTOCOL_TLS`` (int) |
++---------------------------+--------------+------------------------------------------------------------------------------------------+
+|                           | certfile     | The file path to the PEM formatted certificate file (str)                                |
++---------------------------+--------------+------------------------------------------------------------------------------------------+
+|                           | keyfile      | The file path to the certificate private key (str)                                       |
++---------------------------+--------------+------------------------------------------------------------------------------------------+
+|                           | password     | The password for decrypting the ``keyfile`` private key (str)                            |
++---------------------------+--------------+------------------------------------------------------------------------------------------+
+|                           | ciphers      | The set of available ciphers in the OpenSSL cipher list format (str)                     |
++---------------------------+--------------+------------------------------------------------------------------------------------------+
 
 Consumers
 ^^^^^^^^^
@@ -253,3 +275,6 @@ If the value is set to true and the application is not running in the foreground
 Troubleshooting
 ^^^^^^^^^^^^^^^
 If you find that your application is not logging anything or sending output to the terminal, ensure that you have created a logger section in your configuration for your consumer package. For example if your Consumer instance is named ``myconsumer.MyConsumer`` make sure there is a ``myconsumer`` logger in the logging configuration.
+
+.. _SSL connection socket: https://docs.python.org/3/library/ssl.html#ssl.wrap_socket
+.. _PROTOCOL_*: https://docs.python.org/3/library/ssl.html#ssl.SSLContext

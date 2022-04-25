@@ -1,6 +1,17 @@
 Changelog
 =========
 
+3.22.0
+------
+- Bump pika version from 0.13.1 to 1.2.0
+  - Update kwargs to basic_qos call since parameter names and order changed.
+  - Update kwargs to basic_consume call since parameter names and order changed.
+  - Update on_channel_closed callback to expect the closing_reason since the reply_code and reply_text were moved to attributes of the ChannelClosed exception.
+  - Set the callback as a kwarg for channel.confirm_delivery since new parameter was introduced.
+  - Renamed `self.handle` to `self.connection` in Connection class for reference to pika.tornado_connection.TornadoConnection.
+  - Add handling for new :exc:`pika.exceptions.ConnectionWrongStateError` when closing channel or connection.
+  - Add support for `ssl_options` config parameters and deprecate `ssl` since it is no longer supported.
+
 3.21.1
 ------
 - FIXED an issue with a uncaught exception raised when connecting or reconnecting and can't a socket can not be connected.

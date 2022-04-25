@@ -18,7 +18,7 @@ source_suffix = '.rst'
 master_doc = 'index'
 
 project = 'rejected'
-copyright = '2009-2019, Gavin M. Roy'
+copyright = '2009-2022, Gavin M. Roy'
 
 exclude_patterns = ['_build']
 pygments_style = 'sphinx'

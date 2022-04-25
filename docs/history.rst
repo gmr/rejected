@@ -10,6 +10,7 @@ Changelog
   - Set the callback as a kwarg for channel.confirm_delivery since new parameter was introduced.
   - Renamed `self.handle` to `self.connection` in Connection class for reference to pika.tornado_connection.TornadoConnection.
   - Add handling for new :exc:`pika.exceptions.ConnectionWrongStateError` when closing channel or connection.
+  - Add support for `ssl_options` config parameters and deprecate `ssl` since it is no longer supported.
 
 3.21.1
 ------

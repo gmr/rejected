@@ -11,6 +11,7 @@ import os
 from os import path
 import profile
 import signal
+import ssl
 import time
 import warnings
 
@@ -296,11 +297,55 @@ class Connection(state.State):
             pika.PlainCredentials(
                 self.config.get('user', 'guest'),
                 self.config.get('password', self.config.get('pass', 'guest'))),
-            ssl_options=self.config.get('ssl_options'),
+            ssl_options=self._ssl_options,
             frame_max=self.config.get('frame_max', spec.FRAME_MAX_SIZE),
             socket_timeout=self.config.get('socket_timeout', 10),
             heartbeat=self.config.get(
                 'heartbeat_interval', self.HB_INTERVAL))
+
+    @property
+    def _ssl_options(self):
+        """Return the `pika.SSLOptions` parameter for the pika connection
+
+        The expected ssl_options values in the config are:
+            * ca_certs
+            * ca_path
+            * ca_data
+            * prototcol
+            * certfile
+            * keyfile
+            * password
+            * ciphers
+
+        :rtype: `pika.SSLOptions`|None
+
+        """
+        ssl_options = self.config.get('ssl_options')
+        if not ssl_options:
+            return
+
+        context = ssl.SSLContext(
+            protocol=int(ssl_options.get('protocol', ssl.PROTOCOL_TLS)))
+
+        # Load a set of certification authority (CA) certificates
+        if any([ssl_options.get('ca_certs'), ssl_options.get('ca_path'),
+                ssl_options.get('ca_data')]):
+            context.load_verify_locations(ssl_options.get('ca_certs'),
+                                          ssl_options.get('ca_path'),
+                                          ssl_options.get('ca_data'))
+
+        # Load a private key and the corresponding certificate
+        if ssl_options.get('certfile'):
+            certfile = ssl_options['certfile']
+            keyfile = ssl_options.get('keyfile')
+            password = ssl_options.get('password')
+            context.load_cert_chain(certfile, keyfile, password)
+
+        # Set the available ciphers for sockets created with this context
+        if ssl_options.get('ciphers'):
+            context.set_ciphers(ssl_options['ciphers'])
+
+        return pika.SSLOptions(context=context)
 
 
 class Process(multiprocessing.Process, state.State):

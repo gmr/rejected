@@ -1,6 +1,10 @@
 Changelog
 =========
 
+3.22.1
+------
+- Handle AMQPHeartbeatTimeout gracefully - `#45 <https://github.com/gmr/rejected/pull/45>`_ - `joshehlinger <https://github.com/joshehlinger>`_
+
 3.22.0
 ------
 - Bump pika version from 0.13.1 to 1.2.0

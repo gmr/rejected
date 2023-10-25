@@ -183,8 +183,12 @@ class Connection(state.State):
 
         """
         del self.channel
-        reply_code = closing_reason.reply_code
-        reply_text = closing_reason.reply_text
+        try:
+            reply_code = closing_reason.reply_code
+            reply_text = closing_reason.reply_text
+        except AttributeError:
+            reply_code = 0
+            reply_text = 'unknown'
 
         if reply_code <= 0 or reply_code == 404:
             LOGGER.error('Channel Error (%r): %s',

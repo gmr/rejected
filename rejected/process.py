@@ -131,7 +131,7 @@ class Connection(state.State):
         LOGGER.error('Connection %s failure %r %r', self.name, args, kwargs)
         self.on_failure()
 
-    def on_closed(self, _connection, status_code, status_text):
+    def on_closed(self, _connection, status_code, status_text='unknown'):
         if self.is_connecting:
             LOGGER.error('Connection %s failure while connecting (%s): %s',
                          self.name, status_code, status_text)

@@ -131,15 +131,14 @@ class Connection(state.State):
         LOGGER.error('Connection %s failure %r %r', self.name, args, kwargs)
         self.on_failure()
 
-    def on_closed(self, _connection, status_code, status_text):
+    def on_closed(self, _connection, error):
         if self.is_connecting:
-            LOGGER.error('Connection %s failure while connecting (%s): %s',
-                         self.name, status_code, status_text)
+            LOGGER.error('Connection %s failure while connecting (%s)',
+                         self.name, error)
             self.on_failure()
         elif not self.is_closed:
             self.set_state(self.STATE_CLOSED)
-            LOGGER.info('Connection %s closed (%s) %s',
-                        self.name, status_code, status_text)
+            LOGGER.info('Connection %s closed (%s)', self.name, error)
             self.callbacks.on_closed(self.name)
 
     def on_blocked(self, frame):

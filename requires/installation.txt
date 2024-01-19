@@ -1,5 +1,5 @@
 helper>=2.5.0,<3
 pika>=1.2.0,<3
 psutil
-pyyaml>=5.3.1,<6
+pyyaml>=5.3.1,<7
 tornado

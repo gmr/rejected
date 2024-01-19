@@ -224,8 +224,8 @@ class Connection(state.State):
     def consume(self, queue_name, no_ack, prefetch_count):
         """Configure quality of service and issue Basic.Consume command
 
-        :param str queue: The queue to consume from. Use the empty string to
-            specify the most recent server-named queue for this channel
+        :param str queue_name: The queue to consume from. Use the empty string
+            to specify the most recent server-named queue for this channel
         :param bool no_ack: if set to True, automatic acknowledgement mode
             will be used (see http://www.rabbitmq.com/confirms.html).
             This corresponds with the 'no_ack' parameter in the basic.consume

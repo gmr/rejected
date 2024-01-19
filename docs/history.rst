@@ -1,6 +1,10 @@
 Changelog
 =========
 
+3.23.0
+------
+- Loosen pyyaml for v6+ and Python 3.12
+
 3.22.0
 ------
 - Bump pika version from 0.13.1 to 1.2.0

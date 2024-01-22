@@ -1,6 +1,14 @@
 Changelog
 =========
 
+3.22.3
+------
+- Loosen pyyaml for v6+ and Python 3.12
+
+3.22.2
+------
+- Update on closed callback to receive an exception for Pika 1.3
+
 3.22.1
 ------
 - Handle AMQPHeartbeatTimeout gracefully - `#45 <https://github.com/gmr/rejected/pull/45>`_ - `joshehlinger <https://github.com/joshehlinger>`_

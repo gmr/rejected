@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import os
 import sys
+
 sys.path.insert(0, os.path.abspath('..'))
 
 import rejected  # noqa E402
@@ -18,7 +19,7 @@ source_suffix = '.rst'
 master_doc = 'index'
 
 project = 'rejected'
-copyright = '2009-2022, Gavin M. Roy'
+copyright = '2009-2024, Gavin M. Roy'
 
 exclude_patterns = ['_build']
 pygments_style = 'sphinx'
@@ -37,14 +38,14 @@ htmlhelp_basename = 'rejecteddoc'
 latex_elements = {}
 
 latex_documents = [
-    ('index', 'rejected.tex', u'rejected Documentation', u'Gavin M. Roy',
+    ('index', 'rejected.tex', 'rejected Documentation', 'Gavin M. Roy',
      'manual'),
 ]
 
-man_pages = [('index', 'rejected', u'rejected Documentation',
-              [u'Gavin M. Roy'], 1)]
+man_pages = [('index', 'rejected', 'rejected Documentation', ['Gavin M. Roy'],
+              1)]
 
 texinfo_documents = [
-    ('index', 'rejected', u'rejected Documentation', u'Gavin M. Roy',
-     'rejected', 'One line description of project.', 'Miscellaneous'),
+    ('index', 'rejected', 'rejected Documentation', 'Gavin M. Roy', 'rejected',
+     'One line description of project.', 'Miscellaneous'),
 ]

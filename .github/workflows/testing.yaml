@@ -32,7 +32,7 @@ jobs:
         run: mkdir build
 
       - name: Run flake8 tests
-        run: flake8 --output build/flake8.txt --tee
+        run: flake8 --output build/flake8.txt --tee rejected tests
 
       - name: Run tests
         run: coverage run && coverage report && coverage xml

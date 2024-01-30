@@ -5,8 +5,9 @@ repos:
     rev: v4.5.0
     hooks:
       - id: check-toml
+        exclude: tests/data/invalid.toml
       - id: check-yaml
-        exclude: .gitlab-ci.yml
+        exclude: .gitlab-ci.yml,tests/data/invalid.yaml
       - id: debug-statements
       - id: end-of-file-fixer
       - id: mixed-line-ending

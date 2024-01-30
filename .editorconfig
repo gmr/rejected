@@ -12,10 +12,6 @@ indent_style = space
 indent_size = 4
 
 # 2 space indentation
-[*.yml]
-indent_style = space
-indent_size = 2
-
-[bootstrap]
+[{*.toml,*.yaml}]
 indent_style = space
 indent_size = 2

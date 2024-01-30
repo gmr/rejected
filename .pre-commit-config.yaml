@@ -22,6 +22,7 @@ repos:
     rev: 7.0.0
     hooks:
       - id: flake8
+        args: ["--config=.flake8", "rejected", "tests"]
         additional_dependencies:
           - flake8-comprehensions
           - flake8-deprecated

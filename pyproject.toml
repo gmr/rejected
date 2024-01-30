@@ -70,9 +70,6 @@ directory = "build/reports/coverage"
 [tool.coverage.xml]
 output = "build/reports/coverage.xml"
 
-[tool.flake8]
-application-import-names = ["rejected", "tests"]
-
 [tool.hatch.envs.default]
 python = "python3.12"
 features = []

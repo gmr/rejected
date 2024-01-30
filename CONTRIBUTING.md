@@ -6,6 +6,7 @@ To get setup in the environment and run the tests, take the following steps:
 python3 -m venv env
 source env/bin/activate
 pip install -e '.[testing]'
+pre-commit install
 
 flake8
 coverage run && coverage report

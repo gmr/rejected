@@ -22,20 +22,8 @@ jobs:
       - name: Setup environment
         run: apk --update add gcc libpq make musl-dev linux-headers alpine-conf
 
-      - name: Set the timezone
-        run: setup-timezone -z America/New_York
-
-      - name: Install testing dependencies
-        run: pip3 install -e '.[testing]'
-
-      - name: Create build directory
-        run: mkdir build
-
-      - name: Run flake8 tests
-        run: flake8 --output build/flake8.txt --tee rejected tests
-
-      - name: Run tests
-        run: coverage run && coverage report && coverage xml
+      - name: Setup and run Tests
+        run: ci/test.sh
 
       - name: Upload Coverage
         uses: codecov/codecov-action@v1.0.2

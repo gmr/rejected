@@ -1,0 +1,9 @@
+version: "3.8"
+services:
+  test:
+    image: python:3.12-alpine
+    volumes:
+      - .:/tmp/rejected
+    entrypoint: /bin/sh
+    command: ./ci/test.sh
+    working_dir: /tmp/rejected

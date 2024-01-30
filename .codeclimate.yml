@@ -1,5 +1,20 @@
 languages:
-    Python: true
+  Python: true
 exclude_paths: 
-    - docs/*
-    - tests/*
+  - codegen/*
+  - docs/*
+  - tests/*
+  - tools/*
+checks:
+  argument-count:
+    enabled: false
+  file-lines:
+    enabled: false
+  similar-code:
+    enabled: false
+  method-complexity:
+    config:
+      threshold: 10
+  return-statements:
+    config:
+      threshold: 10

@@ -1,0 +1,22 @@
+name: Deployment
+on:
+  push:
+    branches-ignore: ["*"]
+    tags: ["*"]
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags') && github.repository == 'gmr/rejected'
+    container: python:3.12-alpine
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v1
+      - name: Install build && wheel
+        run: pip3 install build wheel
+      - name: Build package
+        run: python3 -m build
+      - name: Publish package
+        uses: pypa/gh-action-pypi-publish@master
+        with:
+          user: __token__
+          password: ${{ secrets.PYPI_PASSWORD }}

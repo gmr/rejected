@@ -1,0 +1,46 @@
+name: Testing
+on:
+  push:
+    branches: ["*"]
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+    tags-ignore: ["*"]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python:
+          - "3.12"
+    container:
+      image: python:${{ matrix.python }}-alpine
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v1
+
+      - name: Setup environment
+        run: apk --update add gcc libpq make musl-dev linux-headers alpine-conf
+
+      - name: Set the timezone
+        run: setup-timezone -z America/New_York
+
+      - name: Install testing dependencies
+        run: pip3 install -e '.[testing]'
+
+      - name: Create build directory
+        run: mkdir build
+
+      - name: Run flake8 tests
+        run: flake8 --output build/flake8.txt --tee
+
+      - name: Run tests
+        run: coverage run && coverage report && coverage xml
+
+      - name: Upload Coverage
+        uses: codecov/codecov-action@v1.0.2
+        if: github.event_name == 'push' && github.repository == 'gmr/rejected'
+        with:
+          token: ${{secrets.CODECOV_TOKEN}}
+          file: build/coverage.xml
+          flags: unittests

@@ -1,0 +1,5 @@
+[flake8]
+count = True
+exclude = build,dist,docs,env
+import-order-style = pycharm
+tee = False

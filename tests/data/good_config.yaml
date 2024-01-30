@@ -30,19 +30,19 @@ application:
       qos_prefetch: 10
       definitions:
         bindings:
-          - arguments: ~
+          - arguments: {}
             destination: test
             destination_type: queue
             routing_key: test.messages
             source: test
         exchanges:
-          - arguments: ~
+          - arguments: {}
             auto_delete: false
             durable: true
             name: test
             type: topic
         queues:
-          - arguments: ~
+          - arguments: {}
             auto_delete: false
             durable: true
             name: test

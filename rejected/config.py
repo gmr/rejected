@@ -4,7 +4,9 @@ import pathlib
 import sys
 
 import pydantic
+import tomllib
 import yaml
+from yaml import scanner
 
 from rejected import models
 
@@ -33,10 +35,21 @@ def read_configuration(path: str) -> dict:
     config_file = pathlib.Path(path)
     if not config_file.exists():
         raise RuntimeError(f'ERROR: File "{path}" not found')
-    with config_file.open('r') as handle:
+    with config_file.open('rb') as handle:
         if path.endswith('.json'):
-            yield json.load(handle)
+            try:
+                yield json.load(handle)
+            except json.JSONDecodeError as error:
+                raise RuntimeError(f'ERROR: Unable to read {path}: {error}')
+        elif path.endswith('.toml'):
+            try:
+                yield tomllib.load(handle)
+            except tomllib.TOMLDecodeError as error:
+                raise RuntimeError(f'ERROR: Unable to read {path}: {error}')
         elif path.endswith('.yaml') or path.endswith('.yml'):
-            yield yaml.safe_load(handle)
+            try:
+                yield yaml.safe_load(handle)
+            except (scanner.ScannerError, yaml.YAMLError) as error:
+                raise RuntimeError(f'ERROR: Unable to read {path}: {error}')
         else:
             raise RuntimeError(f'ERROR: Invalid file extension for {path}')

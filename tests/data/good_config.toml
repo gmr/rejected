@@ -1,0 +1,243 @@
+[application]
+poll_interval = 10.0
+
+[application.connections.rabbitmq]
+heartbeat_interval = 60
+hostname = "rabbitmq.server.local"
+password = "rabbits"
+port = 5672
+qos_prefetch = 10
+ssl = false
+username = "rejected"
+virtual_host = "/"
+
+[application.connections.rabbitmq.definitions]
+exchanges = [
+    { arguments = {}, auto_delete = false, durable = true, name = "test", type = "topic" },
+]
+queues = [
+    { arguments = {}, auto_delete = false, durable = true, name = "test" },
+]
+
+[[application.connections.rabbitmq.definitions.bindings]]
+destination = "test"
+destination_type = "queue"
+routing_key = "test.messages"
+source = "test"
+
+[application.connections.rabbitmq.definitions.bindings.arguments]
+
+[application.connections.rabbitmq2]
+heartbeat_interval = 60
+hostname = "localhost"
+password = "rabbitmq"
+port = 5672
+qos_prefetch = 100
+ssl = false
+username = "rejected"
+virtual_host = "/"
+
+[application.connections.rabbitmq2.definitions]
+bindings = []
+exchanges = []
+queues = []
+
+[application.consumers.async]
+ack = true
+class = "examples.AsyncExampleConsumer"
+connections = [
+    "rabbitmq",
+    { confirm = false, consume = false, name = "rabbitmq2" },
+]
+max_errors = 100
+qty = 1
+queue = "test"
+
+[application.consumers.sync]
+ack = true
+class = "examples.ExampleConsumer"
+connections = [
+    "rabbitmq",
+    { consume = false, name = "rabbitmq2" },
+    "foo",
+]
+error_exchange = "errors"
+max_errors = 100
+qty = 1
+queue = "generated_messages"
+
+[application.consumers.sync.config]
+bar = "baz"
+foo = true
+
+[application.stats]
+log = true
+
+[application.stats.influxdb]
+database = "bar"
+enabled = false
+host = "influxdb"
+password = "foo"
+port = 8086
+scheme = "http"
+user = "influxdb"
+
+[application.stats.statsd]
+enabled = false
+host = "localhost"
+port = 8125
+prefix = "application.rejected"
+
+[daemon]
+group = "daemon"
+pidfile = "/var/run/rejected.pid"
+user = "rejected"
+
+[logging]
+disable_existing_loggers = true
+incremental = false
+version = 1
+
+[logging.filters.correlation]
+"()" = "rejected.logging.CorrelationFilter"
+exists = true
+
+[logging.filters.no_correlation]
+"()" = "rejected.logging.CorrelationFilter"
+exists = false
+
+[logging.formatters.syslog]
+format = "%(levelname)s <PID %(process)d:%(processName)s> %(name)s.%(funcName)s: %(message)s"
+
+[logging.formatters.syslog_correlation]
+format = "%(levelname)s <PID %(process)d:%(processName)s> %(name)s.%(funcName)s: %(message)s {CID %(correlation_id)s)"
+
+[logging.formatters.verbose]
+datefmt = "%Y-%m-%d %H:%M:%S"
+format = "%(levelname) -10s %(asctime)s %(process)-6d %(processName) -25s %(name) -20s %(funcName) -25s: %(message)s"
+
+[logging.formatters.verbose_correlation]
+datefmt = "%Y-%m-%d %H:%M:%S"
+format = "%(levelname) -10s %(asctime)s %(process)-6d %(processName) -25s %(name) -20s %(funcName) -25s: %(message)s {CID %(correlation_id)s}"
+
+[logging.handlers.console]
+class = "logging.StreamHandler"
+filters = [
+    "no_correlation",
+]
+formatter = "verbose"
+
+[logging.handlers.console_correlation]
+class = "logging.StreamHandler"
+filters = [
+    "correlation",
+]
+formatter = "verbose_correlation"
+
+[logging.handlers.syslog]
+address = "/var/run/syslog"
+class = "logging.handlers.SysLogHandler"
+facility = "daemon"
+filters = [
+    "no_correlation",
+]
+formatter = "syslog"
+
+[logging.handlers.syslog_correlation]
+address = "/var/run/syslog"
+class = "logging.handlers.SysLogHandler"
+facility = "daemon"
+filters = [
+    "correlation",
+]
+formatter = "syslog"
+
+[logging.loggers.helper]
+handlers = [
+    "console",
+    "console_correlation",
+    "syslog",
+    "syslog_correlation",
+]
+level = "INFO"
+propagate = true
+
+[logging.loggers.rejected]
+handlers = [
+    "console",
+    "console_correlation",
+    "syslog",
+    "syslog_correlation",
+]
+level = "INFO"
+propagate = false
+
+[logging.loggers."rejected.consumer"]
+handlers = [
+    "console",
+    "console_correlation",
+    "syslog",
+    "syslog_correlation",
+]
+level = "INFO"
+propagate = false
+
+[logging.loggers."rejected.example"]
+handlers = [
+    "console",
+    "console_correlation",
+    "syslog",
+    "syslog_correlation",
+]
+level = "INFO"
+propagate = false
+
+[logging.loggers."rejected.mcp"]
+handlers = [
+    "console",
+    "console_correlation",
+    "syslog",
+    "syslog_correlation",
+]
+level = "DEBUG"
+propagate = false
+
+[logging.loggers."rejected.process"]
+handlers = [
+    "console",
+    "console_correlation",
+    "syslog",
+    "syslog_correlation",
+]
+level = "DEBUG"
+propagate = false
+
+[logging.loggers."rejected.statsd"]
+handlers = [
+    "console",
+    "console_correlation",
+    "syslog",
+    "syslog_correlation",
+]
+level = "DEBUG"
+propagate = false
+
+[logging.loggers.sprockets_influxdb]
+handlers = [
+    "console",
+    "console_correlation",
+    "syslog",
+    "syslog_correlation",
+]
+level = "DEBUG"
+propagate = false
+
+[logging.loggers.tornado]
+handlers = [
+    "console",
+    "console_correlation",
+    "syslog",
+    "syslog_correlation",
+]
+level = "INFO"
+propagate = true

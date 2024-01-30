@@ -5,7 +5,7 @@
         "definitions": {
           "bindings": [
             {
-              "arguments": null,
+              "arguments": {},
               "destination": "test",
               "destination_type": "queue",
               "routing_key": "test.messages",
@@ -14,7 +14,7 @@
           ],
           "exchanges": [
             {
-              "arguments": null,
+              "arguments": {},
               "auto_delete": false,
               "durable": true,
               "name": "test",
@@ -23,7 +23,7 @@
           ],
           "queues": [
             {
-              "arguments": null,
+              "arguments": {},
               "auto_delete": false,
               "durable": true,
               "name": "test"

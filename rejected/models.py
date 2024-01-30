@@ -18,7 +18,7 @@ class LoggingLevel(str, enum.Enum):
 
 
 class Binding(pydantic.BaseModel):
-    arguments: typing.Optional[dict] = None
+    arguments: dict | None = None
     destination: str
     destination_type: BindingType
     routing_key: str
@@ -26,7 +26,7 @@ class Binding(pydantic.BaseModel):
 
 
 class Exchange(pydantic.BaseModel):
-    arguments: typing.Optional[dict] = None
+    arguments: dict | None = None
     auto_delete: bool = False
     durable: bool = True
     name: str
@@ -34,16 +34,16 @@ class Exchange(pydantic.BaseModel):
 
 
 class Queue(pydantic.BaseModel):
-    arguments: typing.Optional[dict] = None
+    arguments: dict | None = None
     auto_delete: bool = False
     durable: bool = True
     name: str
 
 
 class Definitions(pydantic.BaseModel):
-    bindings: typing.Optional[typing.List[Binding]] = None
-    exchanges: typing.Optional[typing.List[Exchange]] = None
-    queues: typing.Optional[typing.List[Queue]] = None
+    bindings: list[Binding] | None = None
+    exchanges: list[Exchange] | None = None
+    queues: list[Queue] | None = None
 
     class Config:
         arbitrary_types_allowed = True
@@ -51,8 +51,8 @@ class Definitions(pydantic.BaseModel):
 
 class ComplexConnection(pydantic.BaseModel):
     name: str
-    consume: typing.Optional[bool] = True
-    confirm: typing.Optional[bool] = False
+    consume: bool | None = True
+    confirm: bool | None = False
 
 
 class Connection(pydantic.BaseModel):
@@ -64,7 +64,7 @@ class Connection(pydantic.BaseModel):
     virtual_host: str = '/'
     heartbeat_interval: int = 300
     qos_prefetch: int = 1
-    definitions: typing.Optional[Definitions] = None
+    definitions: Definitions | None = None
 
     class Config:
         arbitrary_types_allowed = True
@@ -73,18 +73,18 @@ class Connection(pydantic.BaseModel):
 class Consumer(pydantic.BaseModel):
     class_path: str = pydantic.Field(
         validation_alias=pydantic.AliasPath('class'))
-    connections: typing.List[typing.Union[str, ComplexConnection]]
+    connections: list[str | ComplexConnection]
     queue: str
     qty: int = 1
     ack: bool = True
     max_errors: int = 3
-    sentry_dsn: typing.Optional[str] = None
-    drop_exchange: typing.Optional[str] = None
+    sentry_dsn: str | None = None
+    drop_exchange: str | None = None
     drop_invalid_messages: bool = True
-    error_exchange: typing.Optional[str] = None
-    message_type: typing.Optional[str] = None
-    error_max_retry: typing.Optional[int] = None
-    config: typing.Optional[dict] = None
+    error_exchange: str | None = None
+    message_type: str | None = None
+    error_max_retry: int | None = None
+    config: dict | None = None
 
     class Config:
         arbitrary_types_allowed = True
@@ -99,38 +99,38 @@ class Statsd(pydantic.BaseModel):
 
 class Stats(pydantic.BaseModel):
     log: bool = True
-    statsd: typing.Optional[Statsd] = None
+    statsd: Statsd | None = None
 
     class Config:
         arbitrary_types_allowed = True
 
 
 class Application(pydantic.BaseModel):
-    connections: typing.Dict[str, Connection]
-    consumers: typing.Dict[str, Consumer]
-    poll_interval: typing.Union[float, int, None] = 60
-    sentry_dsn: typing.Optional[str] = None
-    stats: typing.Optional[Stats] = None
+    connections: dict[str, Connection]
+    consumers: dict[str, Consumer]
+    poll_interval: float | int | None = 60
+    sentry_dsn: str | None = None
+    stats: Stats | None = None
 
     class Config:
         arbitrary_types_allowed = True
 
 
 class Daemon(pydantic.BaseModel):
-    user: typing.Optional[str] = None
-    group: typing.Optional[str] = None
-    pidfile: typing.Optional[str] = None
+    user: str | None = None
+    group: str | None = None
+    pidfile: str | None = None
 
 
 class Logging(pydantic.BaseModel):
-    version: typing.Optional[int] = 1
-    filters: typing.Optional[typing.Dict[str, dict]]
-    formatters: typing.Optional[typing.Dict[str, dict]]
-    handlers: typing.Optional[typing.Dict[str, dict]]
-    loggers: typing.Optional[typing.Dict[str, dict]]
-    root: typing.Optional[typing.Dict[str, dict]] = None
-    incremental: typing.Optional[bool] = False
-    disable_existing_loggers: typing.Optional[bool] = True
+    version: int | None = 1
+    filters: dict[str, dict] | None
+    formatters: dict[str, dict] | None
+    handlers: dict[str, dict] | None
+    loggers: dict[str, dict] | None
+    root: dict[str, dict] | None = None
+    incremental: bool | None = False
+    disable_existing_loggers: bool | None = True
 
 
 class Configuration(pydantic.BaseModel):

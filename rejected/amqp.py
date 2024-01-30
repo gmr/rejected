@@ -1,7 +1,6 @@
 import logging
 import os
 import ssl
-import typing
 
 import pika
 import pika.channel
@@ -26,7 +25,7 @@ class Connection(state.State):
         self.channel = None
         self.config = config
         self.should_consume = should_consume
-        self.consumer_tag = '{}-{}'.format(consumer_name, os.getpid())
+        self.consumer_tag = f'{consumer_name}-{os.getpid()}'
         self.name = name
         self.publisher_confirm = publisher_confirmations
         self.connection = self.connect()
@@ -80,7 +79,7 @@ class Connection(state.State):
         self.on_failure()
 
     def on_closed(self, _conn: asyncio_connection.AsyncioConnection,
-                  error: typing.Optional[BaseException]) -> None:
+                  error: BaseException | None) -> None:
         if self.is_connecting:
             LOGGER.error('Connection %s failure while connecting (%s)',
                          self.name, error)

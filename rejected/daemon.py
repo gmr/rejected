@@ -5,7 +5,6 @@ import pathlib
 import pwd
 import sys
 import types
-import typing
 
 LOGGER = logging.getLogger(__name__)
 
@@ -14,9 +13,9 @@ class Daemon:
     """Context manager for daemonizing the application using double-forking"""
 
     def __init__(self,
-                 user: typing.Optional[str] = None,
-                 group: typing.Optional[str] = None,
-                 pid_file: typing.Optional[str] = None) -> None:
+                 user: str | None = None,
+                 group: str | None = None,
+                 pid_file: str | None = None) -> None:
         """Create an instance of the Daemon class
 
         If the `user` specified does not match the current user, an attempt
@@ -39,10 +38,9 @@ class Daemon:
             sys.exit(1)
         return self
 
-    def __exit__(self, exc_type: typing.Optional[typing.Type[BaseException]],
-                 exc_val: typing.Optional[BaseException],
-                 exc_tb: typing.Optional[types.TracebackType]) \
-            -> typing.Optional[bool]:
+    def __exit__(self, exc_type: type[BaseException] | None,
+                 exc_val: BaseException | None,
+                 exc_tb: types.TracebackType | None) -> bool | None:
         """Log an error on exit if it was not clean"""
         self.pid_file.unlink(True)
         return None
@@ -72,7 +70,7 @@ class Daemon:
         return pid
 
     @staticmethod
-    def get_gid(group: typing.Optional[str]) -> int:
+    def get_gid(group: str | None) -> int:
         """Return group id of the specified group, or current group if None"""
         if group:
             try:
@@ -82,7 +80,7 @@ class Daemon:
         return os.getgid()
 
     @staticmethod
-    def get_pid_file(pid_file: typing.Optional[str]) -> pathlib.Path:
+    def get_pid_file(pid_file: str | None) -> pathlib.Path:
         """Return a pathlib.Path instance for the specified path, or
         find a valid place to write to.
 
@@ -101,7 +99,7 @@ class Daemon:
         raise RuntimeError('Could not find location for pid_file')
 
     @staticmethod
-    def get_uid(username: typing.Optional[str]) -> int:
+    def get_uid(username: str | None) -> int:
         """Return group id of the specified group, or current group if None"""
         if username:
             try:
@@ -138,7 +136,7 @@ class Daemon:
         """Ensure the child can read/write to standard streams appropriately"""
         sys.stdout.flush()
         sys.stderr.flush()
-        si = open(os.devnull, 'r')
+        si = open(os.devnull)
         so = open(os.devnull, 'a+')
         se = open(os.devnull, 'a+')
         os.dup2(si.fileno(), sys.stdin.fileno())

@@ -48,6 +48,7 @@ testing = [
   "isort",
   "pre-commit>=3.5.0,<4",
   "psycopg[binary,pool]>=3.1.16,<4",
+  "ruff",
   "sentry-sdk>=1.39.1,<2"
 ]
 
@@ -85,6 +86,23 @@ include = ["rejected"]
 
 [tool.hatch.version]
 path = "rejected/__init__.py"
+
+[tool.ruff]
+line-length = 79
+target-version = "py312"
+
+[tool.ruff.format]
+quote-style = "single"
+skip-magic-trailing-comma = false
+
+[tool.ruff.lint]
+select = [
+  "C4",       # flake8-comprehensions
+  "E", "W",   # pycodestyle
+  "F",        # pyflakes
+  "I",        # isort
+  "UP",       # pyupgrade
+]
 
 [tool.yapf]
 allow_split_before_dict_value = false

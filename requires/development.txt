@@ -1,5 +1,0 @@
-beautifulsoup4
-u-msgpack-python
-sphinx
-raven
-sprockets-influxdb

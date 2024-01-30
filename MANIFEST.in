@@ -1,5 +1,0 @@
-include LICENSE
-include README.rst
-include requires/testing.txt
-include requires/installation.txt
-include requires/development.txt

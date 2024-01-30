@@ -35,6 +35,17 @@ sentry = ["sentry-sdk>=1.5.4,<2"]
 testing = [
   "build",
   "coverage>=7.4.0,<8",
+  "flake8",
+  "flake8-comprehensions",
+  "flake8-deprecated",
+  "flake8-import-order",
+  "flake8-isort",
+  "flake8-print",
+  "flake8-pyproject",
+  "flake8-quotes",
+  "flake8-rst-docstrings",
+  "flake8-tuple",
+  "isort",
   "pre-commit>=3.5.0,<4",
   "psycopg[binary,pool]>=3.1.16,<4",
   "sentry-sdk>=1.39.1,<2"

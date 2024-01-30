@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "rejected"
 dynamic = ["version"]
-description = "Analytics Ingestion Service"
+description = "Rejected Consumer Framework"
 authors = [
   {name = "Gavin M. Roy", email="gavinmroy@gmail.com"}
 ]
@@ -22,7 +22,8 @@ classifiers = [
 ]
 dependencies = [
   "pika>=1.3.2,<1.4",
-  "pyyaml>=6.0.1,<7"
+  "pydantic>=2.6.0,<3",
+  "pyyaml>=6.0.1,<7",
 ]
 license = { text = "BSD 3-Clause" }
 readme = "README.rst"
@@ -61,7 +62,7 @@ data_file = "build/.coverage"
 
 [tool.coverage.report]
 show_missing = true
-include = ["analytics_ingestion/*"]
+include = ["rejected/*"]
 omit = ["tests/*.py"]
 
 [tool.coverage.html]

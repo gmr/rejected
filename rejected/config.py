@@ -2,9 +2,9 @@ import contextlib
 import json
 import pathlib
 import sys
+import tomllib
 
 import pydantic
-import tomllib
 import yaml
 from yaml import scanner
 

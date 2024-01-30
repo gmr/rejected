@@ -1,8 +1,8 @@
 import pathlib
+import tomllib
 import unittest
 from unittest import mock
 
-import tomllib
 import yaml
 
 from rejected import config

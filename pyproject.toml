@@ -7,7 +7,7 @@ name = "rejected"
 dynamic = ["version"]
 description = "Rejected Consumer Framework"
 authors = [
-  {name = "Gavin M. Roy", email="gavinmroy@gmail.com"}
+  {name = "Gavin M. Roy", email = "gavinmroy@gmail.com"}
 ]
 classifiers = [
   "Development Status :: 3 - Alpha",
@@ -31,7 +31,7 @@ requires-python = ">=3.12"
 
 [project.optional-dependencies]
 docs = ["sphinx>=7.2.6,<7.3"]
-postgres = [ "psycopg[binary,pool]>=3.1.9"]
+postgres = ["psycopg[binary,pool]>=3.1.9"]
 sentry = ["sentry-sdk>=1.5.4,<2"]
 testing = [
   "build",
@@ -39,7 +39,6 @@ testing = [
   "flake8",
   "flake8-comprehensions",
   "flake8-deprecated",
-  "flake8-import-order",
   "flake8-isort",
   "flake8-print",
   "flake8-pyproject",
@@ -73,9 +72,6 @@ output = "build/reports/coverage.xml"
 
 [tool.flake8]
 application-import-names = ["rejected", "tests"]
-count = true
-exclude = ["build", "env", "dist"]
-import-order-style = "pycharm"
 
 [tool.hatch.envs.default]
 python = "python3.12"

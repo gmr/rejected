@@ -21,6 +21,8 @@ repos:
     rev: 7.0.0
     hooks:
       - id: flake8
+        args:
+          - "--import-order-style=pycharm"
         additional_dependencies:
           - flake8-comprehensions
           - flake8-deprecated

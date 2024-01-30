@@ -1,0 +1,277 @@
+{
+  "Application": {
+    "connections": {
+      "rabbitmq": {
+        "definitions": {
+          "bindings": [
+            {
+              "arguments": null,
+              "destination": "test",
+              "destination_type": "queue",
+              "routing_key": "test.messages",
+              "source": "test"
+            }
+          ],
+          "exchanges": [
+            {
+              "arguments": null,
+              "auto_delete": false,
+              "durable": true,
+              "name": "test",
+              "type": "topic"
+            }
+          ],
+          "queues": [
+            {
+              "arguments": null,
+              "auto_delete": false,
+              "durable": true,
+              "name": "test"
+            }
+          ]
+        },
+        "heartbeat_interval": 60,
+        "hostname": "rabbitmq.server.local",
+        "password": "rabbits",
+        "port": 5672,
+        "qos_prefetch": 10,
+        "ssl": false,
+        "username": "rejected",
+        "virtual_host": "/"
+      },
+      "rabbitmq2": {
+        "definitions": {
+          "bindings": [],
+          "exchanges": [],
+          "queues": []
+        },
+        "heartbeat_interval": 60,
+        "hostname": "localhost",
+        "password": "rabbitmq",
+        "port": 5672,
+        "qos_prefetch": 100,
+        "ssl": false,
+        "username": "rejected",
+        "virtual_host": "/"
+      }
+    },
+    "consumers": {
+      "async": {
+        "ack": true,
+        "class": "examples.AsyncExampleConsumer",
+        "connections": [
+          "rabbitmq",
+          {
+            "confirm": false,
+            "consume": false,
+            "name": "rabbitmq2"
+          }
+        ],
+        "max_errors": 100,
+        "qty": 1,
+        "queue": "test"
+      },
+      "sync": {
+        "ack": true,
+        "class": "examples.ExampleConsumer",
+        "config": {
+          "bar": "baz",
+          "foo": true
+        },
+        "connections": [
+          "rabbitmq",
+          {
+            "consume": false,
+            "name": "rabbitmq2"
+          },
+          "foo"
+        ],
+        "error_exchange": "errors",
+        "max_errors": 100,
+        "qty": 1,
+        "queue": "generated_messages"
+      }
+    },
+    "poll_interval": 10.0,
+    "stats": {
+      "influxdb": {
+        "database": "bar",
+        "enabled": false,
+        "host": "influxdb",
+        "password": "foo",
+        "port": 8086,
+        "scheme": "http",
+        "user": "influxdb"
+      },
+      "log": true,
+      "statsd": {
+        "enabled": false,
+        "host": "localhost",
+        "port": 8125,
+        "prefix": "application.rejected"
+      }
+    }
+  },
+  "Daemon": {
+    "group": "daemon",
+    "pidfile": "/var/run/rejected.pid",
+    "user": "rejected"
+  },
+  "Logging": {
+    "disable_existing_loggers": true,
+    "filters": {
+      "correlation": {
+        "()": "rejected.logging.CorrelationFilter",
+        "exists": true
+      },
+      "no_correlation": {
+        "()": "rejected.logging.CorrelationFilter",
+        "exists": false
+      }
+    },
+    "formatters": {
+      "syslog": {
+        "format": "%(levelname)s <PID %(process)d:%(processName)s> %(name)s.%(funcName)s: %(message)s"
+      },
+      "syslog_correlation": {
+        "format": "%(levelname)s <PID %(process)d:%(processName)s> %(name)s.%(funcName)s: %(message)s {CID %(correlation_id)s)"
+      },
+      "verbose": {
+        "datefmt": "%Y-%m-%d %H:%M:%S",
+        "format": "%(levelname) -10s %(asctime)s %(process)-6d %(processName) -25s %(name) -20s %(funcName) -25s: %(message)s"
+      },
+      "verbose_correlation": {
+        "datefmt": "%Y-%m-%d %H:%M:%S",
+        "format": "%(levelname) -10s %(asctime)s %(process)-6d %(processName) -25s %(name) -20s %(funcName) -25s: %(message)s {CID %(correlation_id)s}"
+      }
+    },
+    "handlers": {
+      "console": {
+        "class": "logging.StreamHandler",
+        "filters": [
+          "no_correlation"
+        ],
+        "formatter": "verbose"
+      },
+      "console_correlation": {
+        "class": "logging.StreamHandler",
+        "filters": [
+          "correlation"
+        ],
+        "formatter": "verbose_correlation"
+      },
+      "syslog": {
+        "address": "/var/run/syslog",
+        "class": "logging.handlers.SysLogHandler",
+        "facility": "daemon",
+        "filters": [
+          "no_correlation"
+        ],
+        "formatter": "syslog"
+      },
+      "syslog_correlation": {
+        "address": "/var/run/syslog",
+        "class": "logging.handlers.SysLogHandler",
+        "facility": "daemon",
+        "filters": [
+          "correlation"
+        ],
+        "formatter": "syslog"
+      }
+    },
+    "incremental": false,
+    "loggers": {
+      "helper": {
+        "handlers": [
+          "console",
+          "console_correlation",
+          "syslog",
+          "syslog_correlation"
+        ],
+        "level": "INFO",
+        "propagate": true
+      },
+      "rejected": {
+        "handlers": [
+          "console",
+          "console_correlation",
+          "syslog",
+          "syslog_correlation"
+        ],
+        "level": "INFO",
+        "propagate": false
+      },
+      "rejected.consumer": {
+        "handlers": [
+          "console",
+          "console_correlation",
+          "syslog",
+          "syslog_correlation"
+        ],
+        "level": "INFO",
+        "propagate": false
+      },
+      "rejected.example": {
+        "handlers": [
+          "console",
+          "console_correlation",
+          "syslog",
+          "syslog_correlation"
+        ],
+        "level": "INFO",
+        "propagate": false
+      },
+      "rejected.mcp": {
+        "handlers": [
+          "console",
+          "console_correlation",
+          "syslog",
+          "syslog_correlation"
+        ],
+        "level": "DEBUG",
+        "propagate": false
+      },
+      "rejected.process": {
+        "handlers": [
+          "console",
+          "console_correlation",
+          "syslog",
+          "syslog_correlation"
+        ],
+        "level": "DEBUG",
+        "propagate": false
+      },
+      "rejected.statsd": {
+        "handlers": [
+          "console",
+          "console_correlation",
+          "syslog",
+          "syslog_correlation"
+        ],
+        "level": "DEBUG",
+        "propagate": false
+      },
+      "sprockets_influxdb": {
+        "handlers": [
+          "console",
+          "console_correlation",
+          "syslog",
+          "syslog_correlation"
+        ],
+        "level": "DEBUG",
+        "propagate": false
+      },
+      "tornado": {
+        "handlers": [
+          "console",
+          "console_correlation",
+          "syslog",
+          "syslog_correlation"
+        ],
+        "level": "INFO",
+        "propagate": true
+      }
+    },
+    "version": 1
+  }
+}

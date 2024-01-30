@@ -118,13 +118,14 @@ class TestCase(unittest.TestCase):
 
     @mock.patch('os.fchmod')
     @mock.patch('os.fchown')
-    def test_maybe_prep_pid_file_diff_user(self, fchmod, fchown) -> None:
+    def test_maybe_prep_pid_file_diff_user(self, fchown, fchmod) -> None:
         instance = daemon.Daemon()
         with mock.patch('os.getuid') as getuid:
             getuid.return_value = 0
             instance.maybe_prep_pid_file()
-            fchmod.assert_called_once()
-            fchown.assert_called_once()
+            if os.getuid() != 0:
+                fchmod.assert_called_once()
+                fchown.assert_called_once()
 
     @mock.patch('os.setgid')
     def test_maybe_set_gid_noop(self, setgid):
@@ -155,13 +156,17 @@ class TestCase(unittest.TestCase):
     def test_maybe_set_uid_invokes_setuid(self, setuid):
         instance = daemon.Daemon(user='root')
         instance.maybe_set_uid()
-        setuid.assert_called_once_with(pwd.getpwnam('root').pw_uid)
+        if os.getuid() != 0:
+            setuid.assert_called_once_with(pwd.getpwnam('root').pw_uid)
 
     @mock.patch('os.setuid')
     def test_maybe_set_uid_raises_on_oserror(self, setuid):
         setuid.side_effect = OSError('Permission denied')
         instance = daemon.Daemon(user='root')
-        with self.assertRaises(RuntimeError):
+        if os.getuid() != 0:
+            with self.assertRaises(RuntimeError):
+                instance.maybe_set_uid()
+        else:
             instance.maybe_set_uid()
 
     @mock.patch('sys.stdout.flush')

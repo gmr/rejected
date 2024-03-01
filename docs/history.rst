@@ -1,6 +1,11 @@
 Changelog
 =========
 
+3.22.4
+------
+- Update on channel and connection callback to accept any `*args, **kwargs` to accomodate Pika updates. Since arguments are not used, except logging only.
+- Update unit tests that may be broken due to asyncio / tornado updates.
+
 3.22.3
 ------
 - Loosen pyyaml for v6+ and Python 3.12

@@ -95,74 +95,114 @@ class ConsumerReceiveTests(testing.AsyncTestCase):
 
 class ConsumerPropertyTests(testing.AsyncTestCase):
 
-    @gen.coroutine
     def setUp(self):
         super(ConsumerPropertyTests, self).setUp()
         self.config = {'foo': 'bar', 'baz': 1, 'qux': True}
         self.message = data.Message('mock', mocks.CHANNEL, mocks.METHOD,
                                     mocks.PROPERTIES, mocks.BODY, False)
         self.measurement = data.Measurement()
+
+    @gen.coroutine
+    def run_consumer(self):
         self.obj = TestConsumer(self.config, None)
         yield self.obj.execute(self.message, self.measurement)
 
+    @testing.gen_test
     def test_app_id_property(self):
+        yield self.run_consumer()
         self.assertEqual(self.obj.app_id, mocks.PROPERTIES.app_id)
 
+    @testing.gen_test
     def test_body_property(self):
+        yield self.run_consumer()
         self.assertEqual(self.obj.body, mocks.BODY)
 
+    @testing.gen_test
     def test_settings_property(self):
+        yield self.run_consumer()
         self.assertDictEqual(self.obj.settings, self.config)
 
+    @testing.gen_test
     def test_content_encoding_property(self):
+        yield self.run_consumer()
         self.assertEqual(self.obj.content_encoding,
                          mocks.PROPERTIES.content_encoding)
 
+    @testing.gen_test
     def test_content_type_property(self):
+        yield self.run_consumer()
         self.assertEqual(self.obj.content_type, mocks.PROPERTIES.content_type)
 
+    @testing.gen_test
     def test_correlation_id_property(self):
+        yield self.run_consumer()
         self.assertEqual(self.obj.correlation_id,
                          mocks.PROPERTIES.correlation_id)
 
+    @testing.gen_test
     def test_exchange_property(self):
+        yield self.run_consumer()
         self.assertEqual(self.obj.exchange, mocks.METHOD.exchange)
 
+    @testing.gen_test
     def test_expiration_property(self):
+        yield self.run_consumer()
         self.assertEqual(self.obj.expiration, mocks.PROPERTIES.expiration)
 
+    @testing.gen_test
     def test_headers_property(self):
+        yield self.run_consumer()
         self.assertDictEqual(self.obj.headers, mocks.PROPERTIES.headers)
 
+    @testing.gen_test
     def test_message_id_property(self):
+        yield self.run_consumer()
         self.assertEqual(self.obj.message_id, mocks.PROPERTIES.message_id)
 
+    @testing.gen_test
     def test_name_property(self):
+        yield self.run_consumer()
         self.assertEqual(self.obj.name, self.obj.__class__.__name__)
 
+    @testing.gen_test
     def test_priority_property(self):
+        yield self.run_consumer()
         self.assertEqual(self.obj.priority, mocks.PROPERTIES.priority)
 
+    @testing.gen_test
     def test_properties_property(self):
+        yield self.run_consumer()
         self.assertDictEqual(self.obj.properties,
                              dict(data.Properties(mocks.PROPERTIES)))
 
+    @testing.gen_test
     def test_redelivered_property(self):
+        yield self.run_consumer()
         self.assertEqual(self.obj.redelivered, mocks.METHOD.redelivered)
 
+    @testing.gen_test
     def test_reply_to_property(self):
+        yield self.run_consumer()
         self.assertEqual(self.obj.reply_to, mocks.PROPERTIES.reply_to)
 
+    @testing.gen_test
     def test_routing_key_property(self):
+        yield self.run_consumer()
         self.assertEqual(self.obj.routing_key, mocks.METHOD.routing_key)
 
+    @testing.gen_test
     def test_message_type_property(self):
+        yield self.run_consumer()
         self.assertEqual(self.obj.message_type, mocks.PROPERTIES.type)
 
+    @testing.gen_test
     def test_timestamp_property(self):
+        yield self.run_consumer()
         self.assertEqual(self.obj.timestamp, mocks.PROPERTIES.timestamp)
 
+    @testing.gen_test
     def test_user_id_property(self):
+        yield self.run_consumer()
         self.assertEqual(self.obj.user_id, mocks.PROPERTIES.user_id)
 
 
@@ -171,16 +211,18 @@ class TestSmartConsumer(consumer.SmartConsumer):
         pass
 
 
-class TestSmartConsumerWithJSON(unittest.TestCase):
+class TestSmartConsumerWithJSON(testing.AsyncTestCase):
 
     def setUp(self):
+        super(TestSmartConsumerWithJSON, self).setUp()
         self.body = {'foo': 'bar', 'baz': 1, 'qux': True}
         self.message = data.Message('mock', mocks.CHANNEL, mocks.METHOD,
                                     mocks.PROPERTIES, json.dumps(self.body),
                                     False)
         self.measurement = data.Measurement()
+
+    @testing.gen_test
+    def test_message_body_property(self):
         self.obj = TestSmartConsumer({}, None)
         self.obj.execute(self.message, self.measurement)
-
-    def test_message_body_property(self):
         self.assertDictEqual(self.obj.body, self.body)

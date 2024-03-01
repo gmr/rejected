@@ -131,23 +131,23 @@ class Connection(state.State):
         LOGGER.error('Connection %s failure %r %r', self.name, args, kwargs)
         self.on_failure()
 
-    def on_closed(self, _connection, error):
+    def on_closed(self, *args, **kwargs):
         if self.is_connecting:
-            LOGGER.error('Connection %s failure while connecting (%s)',
-                         self.name, error)
+            LOGGER.error('Connection %s failure while connecting: (%r %r)',
+                         self.name, args, kwargs)
             self.on_failure()
         elif not self.is_closed:
             self.set_state(self.STATE_CLOSED)
-            LOGGER.info('Connection %s closed (%s)', self.name, error)
+            LOGGER.info('Connection %s closed (%r %r)', self.name, args, kwargs)
             self.callbacks.on_closed(self.name)
 
-    def on_blocked(self, frame):
-        LOGGER.warning('Connection %s is blocked: %r', frame)
+    def on_blocked(self, *args, **kwargs):
+        LOGGER.warning('Connection %s is blocked: (%r %r)', args, kwargs)
         self.blocked = True
         self.callbacks.on_blocked(self.name)
 
-    def on_unblocked(self, frame):
-        LOGGER.warning('Connection %s is unblocked: %r', frame)
+    def on_unblocked(self, *args, **kwargs):
+        LOGGER.warning('Connection %s is unblocked: (%r %r)', args, kwargs)
         self.blocked = False
         self.callbacks.on_unblocked(self.name)
 
@@ -252,11 +252,9 @@ class Connection(state.State):
         """
         LOGGER.debug('Connection %s QoS was set: %r', self.name, frame)
 
-    def on_consumer_cancelled(self, frame):
+    def on_consumer_cancelled(self, *args, **kwargs):
         """Invoked by pika when a ``Basic.Cancel`` or ``Basic.CancelOk``
         is received.
-
-        :param pika.frame.Frame frame: The QoS Frame
 
         """
         LOGGER.info('Connection %s consumer has been cancelled', self.name)

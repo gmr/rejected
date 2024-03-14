@@ -977,14 +977,12 @@ class Consumer(object):
         self.logger.debug('Post finish')
         raise gen.Return(data.MESSAGE_ACK)
 
-    def log_exception(self, msg_format, *args, **kwargs):
+    def log_exception(self, msg_format, *args, exc_info):
         """Customize the logging of uncaught exceptions.
 
         :param str msg_format: format of msg to log with ``self.logger.error``
         :param args: positional arguments to pass to ``self.logger.error``
-        :param kwargs: keyword args to pass into ``self.logger.error``
-        :keyword bool send_to_sentry: if omitted or *truthy*, this keyword
-            will send the captured exception to Sentry (if enabled).
+        :param exc_info: The exc_info of the exception
 
         This for internal use and should not be extended or used directly.
 
@@ -994,13 +992,7 @@ class Consumer(object):
         logged at the debug level.
 
         """
-        self.logger.error(msg_format, *args)
-        exc_info = kwargs.get('exc_info', sys.exc_info())
-        if all(exc_info):
-            exc_type, exc_value, tb = exc_info
-            exc_name = exc_type.__name__
-            self.logger.exception('Processor handled %s: %s', exc_name,
-                                  exc_value, exc_info=exc_info)
+        self.logger.exception(msg_format, exc_info=exc_info, *args)
         self._process.send_exception_to_sentry(exc_info)
 
     def on_confirmation(self, name, delivered, delivery_tag):

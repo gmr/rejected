@@ -45,6 +45,7 @@ consumer, the consumer will raise a :exc:`~rejected.consumer.MessageException`.
 
 """
 import json
+import logging
 import time
 import uuid
 try:
@@ -63,6 +64,8 @@ except ImportError:
     raven = None
 
 from . import consumer, data, process
+
+LOGGER = logging.getLogger(__name__)
 
 gen_test = testing.gen_test
 """Testing equivalent of :func:`tornado.gen.coroutine`, to be applied to test
@@ -84,6 +87,7 @@ class AsyncTestCase(testing.AsyncTestCase):
         self.process = self._create_process()
         self.consumer = self._create_consumer()
         self.channel = self.process.connections['mock'].channel
+        self.exc_info = None
 
     def tearDown(self):
         super(AsyncTestCase, self).tearDown()
@@ -169,6 +173,24 @@ class AsyncTestCase(testing.AsyncTestCase):
                 user_id=properties.get('user_id')
             ), body=message, returned=False)
 
+    def log_exception(self, msg_format, *args, exc_info):
+        """Customize the logging of uncaught exceptions.
+
+        :param str msg_format: format of msg to log with ``self.logger.error``
+        :param args: positional arguments to pass to ``self.logger.error``
+        :param exc_info: The exc_info for the exception
+
+        This for internal use and should not be extended or used directly.
+
+        By default, this method will log the message using
+        :meth:`logging.Logger.error` and send the exception to Sentry.
+        If an exception is currently active, then the traceback will be
+        logged at the debug level.
+
+        """
+        LOGGER.exception(msg_format, exc_info=exc_info, *args)
+        self.exc_info = exc_info
+
     @property
     def measurement(self):
         """Return the :py:class:`rejected.data.Measurement` for the currently
@@ -232,6 +254,7 @@ class AsyncTestCase(testing.AsyncTestCase):
 
         measurement = data.Measurement()
 
+        self.consumer.log_exception = self.log_exception
         result = yield self.consumer.execute(
             self.create_message(message_body, properties,
                                 exchange, routing_key),
@@ -243,6 +266,8 @@ class AsyncTestCase(testing.AsyncTestCase):
         elif result == data.PROCESSING_EXCEPTION:
             raise consumer.ProcessingException()
         elif result == data.UNHANDLED_EXCEPTION:
+            if self.exc_info:
+                raise self.exc_info[1]
             raise AssertionError('UNHANDLED_EXCEPTION')
         raise gen.Return(measurement)
 

@@ -1,5 +1,7 @@
 # coding=utf-8
 """Tests for rejected.testing"""
+from tornado import gen
+
 from rejected import consumer, testing
 
 
@@ -7,6 +9,8 @@ class TestPublishedMessages(testing.AsyncTestCase):
 
     def get_consumer(self):
         class Consumer(consumer.SmartConsumer):
+
+            @gen.coroutine
             def process(self):
                 for i in range(10):
                     self.publish_message(
@@ -17,10 +21,12 @@ class TestPublishedMessages(testing.AsyncTestCase):
                             'type': 'my_type',
                             'content_type': 'my_content_type'
                         })
+
         return Consumer
 
+    @testing.gen_test
     def test_order_preserved(self):
-        self.process_message()
+        yield self.process_message()
         self.assertEqual(10, len(self.published_messages))
         for i, published_message in zip(range(10), self.published_messages):
             self.assertEqual(i, published_message.body)
@@ -36,12 +42,17 @@ class TestProcessingException(testing.AsyncTestCase):
 
     def get_consumer(self):
         class Consumer(consumer.SmartConsumer):
+
+            @gen.coroutine
             def process(self):
                 raise consumer.ProcessingException
+
         return Consumer
 
+    @testing.gen_test
     def test_republished(self):
-        self.process_message()
+        with self.assertRaises(consumer.ProcessingException):
+            yield self.process_message()
         self.assertEqual(1, len(self.published_messages))
         published_message = self.published_messages[0]
 
@@ -74,14 +85,17 @@ class TestMessageException(testing.AsyncTestCase):
             MESSAGE_TYPE = 'a_type'
         return Consumer
 
+    @testing.gen_test
     def test_no_drop(self):
-        self.process_message()
+        with self.assertRaises(consumer.MessageException):
+            yield self.process_message()
         self.assertEqual(0, len(self.published_messages))
 
+    @testing.gen_test
     def test_drop(self):
         self.consumer._drop_exchange = 'drop'
         self.consumer._drop_invalid = True
-        self.process_message(message_type='bad_type')
+        yield self.process_message(message_type='bad_type')
         self.assertEqual(1, len(self.published_messages))
         published_message = self.published_messages[0]
 
@@ -107,3 +121,20 @@ class TestMessageException(testing.AsyncTestCase):
             else:
                 self.assertEqual(
                     value, getattr(published_message.properties, attr))
+
+
+class TestUnhandledException(testing.AsyncTestCase):
+
+    def get_consumer(self):
+        class Consumer(consumer.Consumer):
+
+            @gen.coroutine
+            def process(self):
+                raise ValueError('This is a test exception')
+
+        return Consumer
+
+    @testing.gen_test
+    def test_stacktrace(self):
+        with self.assertRaises(ValueError):
+            yield self.process_message({'foo': 'bar'})

@@ -26,7 +26,7 @@ def read_requirements(name):
 
 setuptools.setup(
     name='rejected',
-    version='3.22.4',
+    version='3.23.0',
     description='Rejected is a Python RabbitMQ Consumer Framework and '
                 'Controller Daemon',
     long_description=open('README.rst').read(),

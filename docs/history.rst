@@ -1,11 +1,12 @@
 Changelog
 =========
 
-3.22.4
+3.23.0
 ------
-- Update on channel and connection callback to accept any `*args, **kwargs` to accomodate Pika updates. Since arguments are not used, except logging only.
+- Update on channel and connection callback to accept any `*args, **kwargs` to accommodate Pika updates. Since arguments are not used, except logging only.
 - Update unit tests that may be broken due to asyncio / tornado updates.
 - Shutdown message connection it we detect it's not running to allow the MCP to attempt reconnect.
+- Update `rejected.testing` to not capture unhandled exceptions
 
 3.22.3
 ------

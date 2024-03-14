@@ -7,12 +7,13 @@ except ImportError:
     import mock
 
 from helper import config as helper_config
-from rejected import __version__, consumer, process
+from rejected import __version__, consumer, data, process
+from tornado import gen, locks, testing
 
 from . import mocks, test_state
 
 
-class TestProcess(test_state.TestState):
+class TestProcess(testing.AsyncTestCase, test_state.TestState):
 
     config = {
         'stats': {
@@ -90,6 +91,7 @@ class TestProcess(test_state.TestState):
     }
 
     def setUp(self):
+        super(TestProcess, self).setUp()
         self._obj = self.new_process()
 
     def tearDown(self):
@@ -99,7 +101,7 @@ class TestProcess(test_state.TestState):
         return copy.deepcopy(kwargs)
 
     def new_process(self, kwargs=None):
-        with mock.patch('multiprocessing.Process'):
+        with mock.patch('multiprocessing.Process') as p:
             return process.Process(
                 group=None,
                 name='MockProcess',
@@ -180,6 +182,8 @@ class TestProcess(test_state.TestState):
                 if not new_process:
                     new_process = self.new_process(self.mock_args)
                     new_process.setup()
+
+                new_process.measurement = mock.Mock()
                 return new_process
 
     def test_setup_stats_queue(self):
@@ -261,3 +265,99 @@ class TestProcess(test_state.TestState):
         self._obj.state = self._obj.STATE_PROCESSING
         self.assertEqual(self._obj.state_description,
                          self._obj.STATES[self._obj.STATE_PROCESSING])
+
+    @testing.gen_test
+    def test_invoke_consumer_when_amqp_conn_is_connected(self):
+        mock_process = self.mock_setup()
+        mock_process.counters[mock_process.CLOSED_ON_COMPLETE] = 5
+
+        # force unhandled exception in "execute"
+        mock_process.consumer.execute.side_effect = Exception('blow up!')
+
+        # mimic running process
+        mock_process.consumer_lock = locks.Lock()
+        mock_process.state = mock_process.STATE_IDLE
+
+        # configure mock conn
+        mock_conn = mock.Mock(spec=process.Connection)
+        mock_process.connections[mock_conn] = mock_conn
+        mock_conn.is_running = True
+
+        mocks.CHANNEL.basic_nack = mock.Mock()
+        message = data.Message(mock_conn, mocks.CHANNEL, mocks.METHOD,
+                               mocks.PROPERTIES, mocks.BODY, False)
+
+        yield mock_process.invoke_consumer(message)
+
+        self.assertEqual(mock_conn.shutdown.call_count, 0)
+        self.assertEqual(mocks.CHANNEL.basic_nack.call_count, 1)
+        self.assertEqual(
+            mock_process.counters[mock_process.CLOSED_ON_COMPLETE], 5)
+
+    @testing.gen_test
+    def test_invoke_consumer_when_amqp_conn_is_not_connected(self):
+        mock_process = self.mock_setup()
+        mock_process.counters[mock_process.CLOSED_ON_COMPLETE] = 5
+
+        # force unhandled exception in "execute"
+        mock_process.consumer.execute.side_effect = Exception('blow up!')
+
+        # mimic running process
+        mock_process.consumer_lock = locks.Lock()
+        mock_process.state = mock_process.STATE_IDLE
+
+        # configure mock conn
+        mock_conn = mock.Mock(spec=process.Connection)
+        mock_process.connections[mock_conn] = mock_conn
+        mock_conn.is_running = False
+
+        mocks.CHANNEL.basic_ack = mock.Mock()
+        message = data.Message(mock_conn, mocks.CHANNEL, mocks.METHOD,
+                               mocks.PROPERTIES, mocks.BODY, False)
+
+        yield mock_process.invoke_consumer(message)
+
+        self.assertEqual(mock_conn.shutdown.call_count, 1)
+        self.assertEqual(mocks.CHANNEL.basic_ack.call_count, 0)
+        self.assertEqual(
+            mock_process.counters[mock_process.CLOSED_ON_COMPLETE], 6)
+
+    def test_ack_message_when_amqp_conn_is_connected(self):
+        mock_process = self.mock_setup()
+        mock_process.counters[mock_process.CLOSED_ON_COMPLETE] = 5
+
+        # configure mock conn
+        mock_conn = mock.Mock(spec=process.Connection)
+        mock_process.connections[mock_conn] = mock_conn
+        mock_conn.is_running = True
+
+        mocks.CHANNEL.basic_ack = mock.Mock()
+        message = data.Message(mock_conn, mocks.CHANNEL, mocks.METHOD,
+                               mocks.PROPERTIES, mocks.BODY, False)
+
+        mock_process.ack_message(message)
+
+        self.assertEqual(mock_conn.shutdown.call_count, 0)
+        self.assertEqual(mocks.CHANNEL.basic_ack.call_count, 1)
+        self.assertEqual(
+            mock_process.counters[mock_process.CLOSED_ON_COMPLETE], 5)
+
+    def test_ack_message_when_amqp_conn_is_not_connected(self):
+        mock_process = self.mock_setup()
+        mock_process.counters[mock_process.CLOSED_ON_COMPLETE] = 5
+
+        # configure mock conn
+        mock_conn = mock.Mock(spec=process.Connection)
+        mock_process.connections[mock_conn] = mock_conn
+        mock_conn.is_running = False
+
+        mocks.CHANNEL.basic_ack = mock.Mock()
+        message = data.Message(mock_conn, mocks.CHANNEL, mocks.METHOD,
+                               mocks.PROPERTIES, mocks.BODY, False)
+
+        mock_process.ack_message(message)
+
+        self.assertEqual(mock_conn.shutdown.call_count, 1)
+        self.assertEqual(mocks.CHANNEL.basic_ack.call_count, 0)
+        self.assertEqual(
+            mock_process.counters[mock_process.CLOSED_ON_COMPLETE], 6)

@@ -435,7 +435,9 @@ class Process(multiprocessing.Process, state.State):
         if not self.connections[message.connection].is_running:
             LOGGER.warning('Can not ack message, disconnected from RabbitMQ')
             self.counters[self.CLOSED_ON_COMPLETE] += 1
+            self.connections[message.connection].shutdown()
             return
+
         LOGGER.debug('Acking %s', message.delivery_tag)
         message.channel.basic_ack(delivery_tag=message.delivery_tag)
         self.counters[self.ACKED] += 1
@@ -826,6 +828,7 @@ class Process(multiprocessing.Process, state.State):
         if not self.connections[message.connection].is_running:
             LOGGER.warning('Can not nack message, disconnected from RabbitMQ')
             self.counters[self.CLOSED_ON_COMPLETE] += 1
+            self.connections[message.connection].shutdown()
             return
 
         LOGGER.warning('Rejecting message %s %s requeue', message.delivery_tag,

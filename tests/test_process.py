@@ -8,7 +8,7 @@ except ImportError:
 
 from helper import config as helper_config
 from rejected import __version__, consumer, data, process
-from tornado import gen, locks, testing
+from tornado import locks, testing
 
 from . import mocks, test_state
 
@@ -101,7 +101,7 @@ class TestProcess(testing.AsyncTestCase, test_state.TestState):
         return copy.deepcopy(kwargs)
 
     def new_process(self, kwargs=None):
-        with mock.patch('multiprocessing.Process') as p:
+        with mock.patch('multiprocessing.Process'):
             return process.Process(
                 group=None,
                 name='MockProcess',

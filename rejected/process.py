@@ -138,7 +138,8 @@ class Connection(state.State):
             self.on_failure()
         elif not self.is_closed:
             self.set_state(self.STATE_CLOSED)
-            LOGGER.info('Connection %s closed (%r %r)', self.name, args, kwargs)
+            LOGGER.info('Connection %s closed (%r %r)',
+                        self.name, args, kwargs)
             self.callbacks.on_closed(self.name)
 
     def on_blocked(self, *args, **kwargs):
@@ -230,8 +231,8 @@ class Connection(state.State):
             will be used (see http://www.rabbitmq.com/confirms.html).
             This corresponds with the 'no_ack' parameter in the basic.consume
             AMQP 0.9.1 method
-        :param int prefetch_count: Specifies a prefetch window in terms of whole
-            messages.
+        :param int prefetch_count: Specifies a prefetch window in terms of
+            whole messages.
 
         """
         self.set_state(self.STATE_ACTIVE)

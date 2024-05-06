@@ -43,9 +43,9 @@ class Data(object):
 
 
 class Message(Data):
-    """Class for containing all the attributes about a message object creating a
-    flatter, move convenient way to access the data while supporting the legacy
-    methods that were previously in place in rejected < 2.0
+    """Class for containing all the attributes about a message object creating
+    a flatter, move convenient way to access the data while supporting the
+    legacy methods that were previously in place in rejected < 2.0
 
     +------------------------------------------------------------------+
     | Attributes                                                       |

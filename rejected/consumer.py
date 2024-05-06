@@ -954,21 +954,15 @@ class Consumer(object):
 
         except NotImplementedError as error:
             self.log_exception('NotImplementedError processing delivery'
-                               ' %s: %s', message_in.delivery_tag, error)
+                               ' %s: %s', message_in.delivery_tag, error,
+                               exc_info=self._get_exc_info(result))
             self._measurement.set_tag('exception', 'UnhandledException')
             raise gen.Return(data.UNHANDLED_EXCEPTION)
 
         except Exception as error:
-            exc_info = sys.exc_info()
-            if concurrent.is_future(result):
-                error = result.exception()
-                try:
-                    exc_info = result.exc_info()
-                except AttributeError:
-                    pass
             self.log_exception('Exception processing delivery %s: %s',
                                message_in.delivery_tag, str(error),
-                               exc_info=exc_info)
+                               exc_info=self._get_exc_info(result))
             self._measurement.set_tag('exception', 'UnhandledException')
             raise gen.Return(data.UNHANDLED_EXCEPTION)
 
@@ -1051,6 +1045,14 @@ class Consumer(object):
         self._finished = False
         self._message = None
         self._message_body = None
+
+    def _get_exc_info(self, result):
+        if concurrent.is_future(result):
+            try:
+                return result.exc_info()
+            except AttributeError:
+                pass
+        return sys.exc_info()
 
     @staticmethod
     def _get_pika_properties(properties_in):

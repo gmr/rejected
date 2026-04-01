@@ -149,27 +149,20 @@ class TCPTestCase(unittest.IsolatedAsyncioTestCase):
         self.failure_callback = mock.Mock()
         self.name = str(uuid.uuid4())
 
-        # Find a free port
-        sock = socket.socket()
-        sock.bind(('127.0.0.1', 0))
-        self.port = sock.getsockname()[1]
-        sock.close()
-
         loop = asyncio.get_running_loop()
         self._server_protocol = StatsdServer()
         self._server = await loop.create_server(
             lambda: self._server_protocol,
             '127.0.0.1',
-            self.port,
+            0,
         )
+        self.port = self._server.sockets[0].getsockname()[1]
 
         self.settings = self.get_settings()
         LOGGER.debug('Settings: %r', self.settings)
         self.statsd = statsd.Client(
             self.name, self.settings, self.failure_callback
         )
-        # Give the event loop a chance to process the connection
-        await asyncio.sleep(0.01)
 
     async def asyncTearDown(self):
         if self.statsd._tcp_writer:

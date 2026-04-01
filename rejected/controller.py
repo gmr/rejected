@@ -1,112 +1,65 @@
 """
-OS Level controlling class invokes startup, shutdown and handles signals.
-
+OS Level controlling class: CLI entry point, signal handling, MCP lifecycle.
 """
 
+import argparse
 import logging
+import logging.config
 import os
 import signal
 import sys
 
-import helper
-from helper import controller, parser
-
 try:
     import sentry_sdk
-    from sentry_sdk.integrations.logging import LoggingIntegration
+    import sentry_sdk.integrations.logging
 except ImportError:
     sentry_sdk = None
-    LoggingIntegration = None
 
 from . import __version__, mcp
+from . import config as config_module
 
 LOGGER = logging.getLogger(__name__)
 
 
-class Controller(controller.Controller):
-    """Rejected Controller application that invokes the MCP and handles all
-    of the OS level concerns.
+class Controller:
+    """Manages the MCP lifecycle and OS-level signal handling."""
 
-    """
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, args: argparse.Namespace, cfg: config_module.Config):
+        self.args = args
+        self.config = cfg
         self._mcp = None
+        self._shutdown_requested = False
         self._sentry_client = False
-        if sentry_sdk and self.config.application.get('sentry_dsn'):
-            kwargs = {
-                'dsn': self.config.application['sentry_dsn'],
+        if sentry_sdk and cfg.sentry_dsn:
+            init_kwargs = {
+                'dsn': cfg.sentry_dsn,
                 'send_default_pii': False,
                 'integrations': [
-                    LoggingIntegration(level=None, event_level=None),
+                    sentry_sdk.integrations.logging.LoggingIntegration(
+                        level=None, event_level=None
+                    )
                 ],
             }
             if os.environ.get('ENVIRONMENT'):
-                kwargs['environment'] = os.environ['ENVIRONMENT']
-            sentry_sdk.init(**kwargs)
+                init_kwargs['environment'] = os.environ['ENVIRONMENT']
+            sentry_sdk.init(**init_kwargs)
             self._sentry_client = True
 
-    def _master_control_program(self):
-        """Return an instance of the MasterControlProgram.
-
-        :rtype: rejected.mcp.MasterControlProgram
-
-        """
-        return mcp.MasterControlProgram(
+    def run(self):
+        """Run the application: set up signals, start MCP, block until done."""
+        self._setup_signals()
+        if self._shutdown_requested:
+            return
+        if self.args.prepend_path:
+            sys.path.insert(0, self.args.prepend_path)
+        self._mcp = mcp.MasterControlProgram(
             self.config,
             consumer=self.args.consumer,
             profile=self.args.profile,
             quantity=self.args.quantity,
         )
-
-    @staticmethod
-    def _prepend_python_path(path):  # pragma: no cover
-        """Add the specified value to the python path.
-
-        :param str path: The path to append
-
-        """
-        LOGGER.debug('Prepending "%s" to the python path.', path)
-        sys.path.insert(0, path)
-
-    def setup(self):
-        """Continue the run process blocking on MasterControlProgram.run"""
-        # If the app was invoked to specified to prepend the path, do so now
-        if self.args.prepend_path:
-            self._prepend_python_path(self.args.prepend_path)
-
-    def stop(self):
-        """Shutdown the MCP and child processes cleanly"""
-        LOGGER.info('Shutting down controller')
-        self.set_state(self.STATE_STOP_REQUESTED)
-
-        # Clear out the timer
-        signal.setitimer(signal.ITIMER_PROF, 0, 0)
-
-        self._mcp.stop_processes()
-
-        if self._mcp.is_running:
-            LOGGER.info('Waiting up to 3 seconds for MCP to shut things down')
-            signal.setitimer(signal.ITIMER_REAL, 3, 0)
-            signal.pause()
-            LOGGER.info('Post pause')
-
-        # Force MCP to stop
-        if self._mcp.is_running:
-            LOGGER.warning('MCP is taking too long, requesting process kills')
-            self._mcp.stop_processes()
-            del self._mcp
-        else:
-            LOGGER.info('MCP exited cleanly')
-
-        # Change our state
-        self._stopped()
-        LOGGER.info('Shutdown complete')
-
-    def run(self):
-        """Run the rejected Application"""
-        self.setup()
-        self._mcp = self._master_control_program()
+        if self._shutdown_requested:
+            return
         try:
             self._mcp.run()
         except KeyboardInterrupt:
@@ -117,59 +70,105 @@ class Controller(controller.Controller):
                 LOGGER.debug('Sending exception to sentry')
                 sentry_sdk.capture_exception(exc_info)
             raise
-        if self.is_running:
-            self.stop()
+        if self._mcp and self._mcp.is_running:
+            self._mcp.stop_processes()
+
+    def _setup_signals(self):
+        signal.signal(signal.SIGHUP, self._on_sighup)
+        signal.signal(signal.SIGTERM, self._on_sigterm)
+
+    def _on_sighup(self, _signum, _frame):
+        LOGGER.info('Received SIGHUP')
+
+    def _on_sigterm(self, _signum, _frame):
+        LOGGER.info('Received SIGTERM, initiating shutdown')
+        self._shutdown_requested = True
+        if self._mcp:
+            self._mcp.stop_processes()
 
 
-def add_parser_arguments():
-    """Add options to the parser"""
-    argparser = parser.get()
-    argparser.add_argument(
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog='rejected',
+        description='RabbitMQ consumer framework',
+    )
+    parser.add_argument(
+        '-c',
+        '--config',
+        required=True,
+        dest='config',
+        metavar='FILE',
+        help='Path to the configuration file (YAML or TOML)',
+    )
+    parser.add_argument(
         '-P',
         '--profile',
-        action='store',
         default=None,
         dest='profile',
-        help='Profile the consumer modules, specifying the output directory.',
+        metavar='DIR',
+        help='Profile consumer modules, writing output to this directory',
     )
-    argparser.add_argument(
+    parser.add_argument(
         '-o',
         '--only',
-        action='store',
         default=None,
         dest='consumer',
-        help='Only run the consumer specified',
+        metavar='CONSUMER',
+        help='Only run the named consumer',
     )
-    argparser.add_argument(
+    parser.add_argument(
         '-p',
         '--prepend-path',
-        action='store',
         default=None,
         dest='prepend_path',
-        help='Prepend the python path with the value.',
+        metavar='PATH',
+        help='Prepend PATH to sys.path before importing consumers',
     )
-    argparser.add_argument(
+    parser.add_argument(
         '-q',
         '--qty',
-        action='store',
         type=int,
         default=None,
         dest='quantity',
-        help='Run the specified quantity of consumer '
-        'processes when used in conjunction with -o',
+        metavar='N',
+        help='Override the consumer quantity (use with -o)',
     )
-    argparser.add_argument(
+    parser.add_argument(
         '--version',
         action='version',
         version=f'%(prog)s {__version__}',
     )
+    return parser
 
 
 def main():
-    """Called when invoking the command line script."""
-    add_parser_arguments()
-    parser.description('RabbitMQ consumer framework')
-    helper.start(Controller)
+    """CLI entry point."""
+    parser = _build_parser()
+    args = parser.parse_args()
+
+    try:
+        cfg = config_module.load(args.config)
+    except (FileNotFoundError, ValueError) as exc:
+        sys.exit(f'Error: {exc}')
+
+    if args.consumer is not None and args.consumer not in cfg.consumers:
+        parser.error(f'Unknown consumer: {args.consumer}')
+    if args.quantity is not None and args.consumer is None:
+        parser.error('--qty requires --only')
+
+    try:
+        if cfg.logging:
+            logging.config.dictConfig(cfg.logging)
+        else:
+            logging.basicConfig(
+                level=logging.INFO,
+                format='%(levelname)-8s %(name)s: %(message)s',
+            )
+    except (ValueError, TypeError, AttributeError, ImportError) as exc:
+        sys.exit(f'Error: invalid logging configuration: {exc}')
+
+    ctrl = Controller(args, cfg)
+    ctrl.run()
 
 
 if __name__ == '__main__':

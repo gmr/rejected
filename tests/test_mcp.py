@@ -4,8 +4,7 @@ import multiprocessing
 import typing
 from unittest import mock
 
-from helper import config
-
+from rejected import config as config_module
 from rejected import mcp
 
 from . import test_state
@@ -14,14 +13,12 @@ from . import test_state
 class TestMCP(test_state.TestState):
     CONFIG: typing.ClassVar[dict] = {
         'poll_interval': 30.0,
-        'log_stats': True,
         'Consumers': {},
     }
 
     @mock.patch.object(multiprocessing, 'Queue')
     def setUp(self, _mock_queue_unused):
-        self.cfg = config.Config()
-        self.cfg.application.update(self.CONFIG)
+        self.cfg = config_module.Config.model_validate(self.CONFIG)
         self._obj = mcp.MasterControlProgram(self.cfg)
 
     def test_mcp_init_consumers_dict(self):

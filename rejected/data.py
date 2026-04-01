@@ -203,7 +203,7 @@ class Measurement:
     """Common Measurement Object that provides common methods for collecting
     and exposes measurement data that is submitted in
     :class:`rejected.process.Process` and :class:`rejected.consumer.Consumer`
-    for submission to statsd or influxdb.
+    for submission to statsd.
 
     +-------------------------------------------------------------------+
     | Attributes                                                        |

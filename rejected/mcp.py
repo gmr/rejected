@@ -49,7 +49,7 @@ class MasterControlProgram(state.State):
         """Initialize the Master Control Program
 
         :param config: The full content from the YAML config file
-        :type config: helper.config.Config
+        :type config: config_module.Config
         :param str consumer: If specified, only run processes for this consumer
         :param str profile: Optional profile output directory to
                             enable profiling
@@ -78,15 +78,11 @@ class MasterControlProgram(state.State):
         self.child_abort = False
 
         # Carry for logging internal stats collection data
-        self.log_stats_enabled = config.application.get('stats', {}).get(
-            'log', config.application.get('log_stats', False)
-        )
+        self.log_stats_enabled = config.stats.log
         LOGGER.debug('Stats logging enabled: %s', self.log_stats_enabled)
 
         # Setup the poller related threads
-        self.poll_interval = config.application.get(
-            'poll_interval', self.POLL_INTERVAL
-        )
+        self.poll_interval = config.poll_interval
         LOGGER.debug('Set process poll interval to %.2f', self.poll_interval)
 
     def active_processes(self, use_cache=True):
@@ -249,20 +245,22 @@ class MasterControlProgram(state.State):
         """Get the consumers config, possibly filtering the config if only
         or qty is set.
 
-        :param config: The consumers config section
-        :type config: helper.config.Config
+        :param config: The full application config
+        :type config: config_module.Config
         :param str only: When set, filter to run only this consumer
         :param int qty: When set, set the consumer qty to this value
         :rtype: dict
 
         """
-        consumers = dict(config.application.Consumers)
+        consumers = dict(config.consumers)
         if only:
             for key in list(consumers.keys()):
                 if key != only:
                     del consumers[key]
-            if qty:
-                consumers[only]['qty'] = qty
+            if qty and only in consumers:
+                consumers[only] = consumers[only].model_copy(
+                    update={'qty': qty}
+                )
         return consumers
 
     def is_dead(self, proc, name):
@@ -364,7 +362,8 @@ class MasterControlProgram(state.State):
     def new_consumer(self, config, consumer_name):
         """Return a consumer dict for the given name and configuration.
 
-        :param dict config: The consumer configuration
+        :param config: The consumer configuration
+        :type config: config_module.ConsumerConfig
         :param str consumer_name: The consumer name
         :rtype: dict
 
@@ -372,8 +371,8 @@ class MasterControlProgram(state.State):
         return Consumer(
             0,
             {},
-            config.get('qty', self.DEFAULT_CONSUMER_QTY),
-            config.get('queue', consumer_name),
+            config.qty,
+            config.queue or consumer_name,
         )
 
     def new_process(self, consumer_name):
@@ -386,7 +385,7 @@ class MasterControlProgram(state.State):
         proc_num = self.new_process_number(consumer_name)
         process_name = f'{consumer_name}-{proc_num}'
         kwargs = {
-            'config': self.config.application,
+            'config': self.config,
             'consumer_name': consumer_name,
             'profile': self.profile,
             'daemon': False,

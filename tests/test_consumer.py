@@ -115,7 +115,11 @@ class ConsumerPropertyTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_body_property(self):
         await self.run_consumer()
-        self.assertEqual(self.obj.body, mocks.BODY)
+        # body is auto-deserialized from JSON since content_type is
+        # application/json in mocks.PROPERTIES
+        import json
+
+        self.assertEqual(self.obj.body, json.loads(mocks.BODY))
 
     async def test_settings_property(self):
         await self.run_consumer()

@@ -66,12 +66,12 @@ __version__ = '1.0.0'
 LOGGER = logging.getLogger(__name__)
 
 
-class ExampleConsumer(consumer.PublishingConsumer):
+class ExampleConsumer(consumer.Consumer):
 
     def process(self):
         LOGGER.info(self.body)
-        self.publish('new-exchange', 'routing-key', {}, self.body)
+        self.publish_message('new-exchange', 'routing-key', {}, self.body)
 ```
 
-Note that the previous example extends `rejected.consumer.PublishingConsumer`
-instead of `rejected.consumer.Consumer`.
+Note that `consumer.Consumer` supports publishing directly — there is no need
+to extend a separate `PublishingConsumer` class.

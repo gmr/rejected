@@ -1,18 +1,17 @@
 """
-The :py:class:`Consumer`, and :py:class:`SmartConsumer` provide base
-classes to extend for consumer applications.
+The :py:class:`Consumer` provides the base class for consumer applications.
 
-While the :py:class:`Consumer` class provides all the structure required for
-implementing a rejected consumer, the :py:class:`SmartConsumer` adds
-functionality designed to make writing consumers even easier. When messages
-are received by consumers extending :py:class:`SmartConsumer`, if the message's
-``content_type`` property contains one of the supported mime-types, the message
-body will automatically be deserialized, making the deserialized message body
-available via the ``body`` attribute. Additionally, should one of the supported
-``content_encoding`` types (``gzip`` or ``bzip2``) be specified in the
-message's property, it will automatically be decoded.
+When messages are received, if the message's ``content_type`` property contains
+one of the supported mime-types, the message body will automatically be
+deserialized, making the deserialized message body available via the ``body``
+attribute. Additionally, should one of the supported ``content_encoding`` types
+(``gzip`` or ``bzip2``) be specified in the message's property, it will
+automatically be decoded.
 
-Supported `SmartConsumer` MIME types are:
+When publishing a message, the body can be automatically serialized and encoded
+based on the ``content_type`` and ``content_encoding`` properties.
+
+Supported MIME types are:
 
  - application/msgpack (with u-msgpack-python installed)
  - application/json
@@ -333,31 +332,64 @@ class Consumer:
         await self.on_finish()
 
     def publish_message(
-        self, exchange, routing_key, properties, body, channel=None
+        self,
+        exchange,
+        routing_key,
+        properties,
+        body,
+        no_serialization=False,
+        no_encoding=False,
+        channel=None,
     ):
         """Publish a message to RabbitMQ on the same channel the original
         message was received on.
 
+        By default, if you pass a non-string object to the body and the
+        properties have a supported content-type set, the body will be
+        auto-serialized in the specified content-type.
+
+        If the properties do not have a timestamp set, it will be set to the
+        current time.
+
+        If you specify a content-encoding in the properties and the encoding is
+        supported, the body will be auto-encoded.
+
+        Both of these behaviors can be disabled by setting no_serialization or
+        no_encoding to True.
+
         :param str exchange: The exchange to publish to
         :param str routing_key: The routing key to publish with
         :param dict properties: The message properties
-        :param str body: The message body
+        :param mixed body: The message body to publish
+        :param bool no_serialization: Turn off auto-serialization of the body
+        :param bool no_encoding: Turn off auto-encoding of the body
         :param str channel: The channel/connection name to use. If it is not
             specified, the channel that the message was delivered on is used.
 
         """
-        self.logger.debug(
-            'Publishing message to %s:%s (%s)', exchange, routing_key, channel
-        )
-        with self._measurement.track_duration(
-            f'publish.{exchange}.{routing_key}'
+        # Auto-serialize the content if needed
+        is_string = isinstance(body, (str, bytes))
+        if (
+            not no_serialization
+            and not is_string
+            and properties.get('content_type')
         ):
-            self._publish_channel(channel).basic_publish(
-                exchange=exchange,
-                routing_key=routing_key,
-                properties=self._get_pika_properties(properties),
-                body=body,
-            )
+            self.logger.debug('Auto-serializing message body')
+            body = self._auto_serialize(properties.get('content_type'), body)
+
+        # Auto-encode the message body if needed
+        if not no_encoding and properties.get('content_encoding'):
+            self.logger.debug('Auto-encoding message body')
+            body = self._auto_encode(properties.get('content_encoding'), body)
+
+        # Publish the message
+        self.logger.debug('Publishing message to %s:%s', exchange, routing_key)
+        self._publish_channel(channel).basic_publish(
+            exchange=exchange,
+            routing_key=routing_key,
+            properties=self._get_pika_properties(properties),
+            body=body,
+        )
 
     def reply(
         self,
@@ -611,14 +643,55 @@ class Consumer:
 
     @property
     def body(self):
-        """Access the opaque body from the current message.
+        """Return the message body, unencoded if needed,
+        deserialized if possible.
 
-        :rtype: str
+        :rtype: any
 
         """
         if not self._message:
             return None
-        return self._message.body
+
+        # Return a materialized view of the body if it has been previously set
+        if self._message_body:
+            return self._message_body
+
+        # Handle bzip2 compressed content
+        elif self.content_encoding == 'bzip2':
+            self._message_body = self._decode_bz2(self._message.body)
+
+        # Handle zlib compressed content
+        elif self.content_encoding == 'gzip':
+            self._message_body = self._decode_gzip(self._message.body)
+
+        # Else we want to assign self._message.body to self._message_body
+        else:
+            self._message_body = self._message.body
+
+        # Handle the auto-deserialization
+        if self.content_type == 'application/json':
+            self._message_body = self._load_json_value(self._message_body)
+
+        elif umsgpack and self.content_type == 'application/msgpack':
+            self._message_body = self._load_msgpack_value(self._message_body)
+
+        elif self.content_type in PICKLE_MIME_TYPES:
+            self._message_body = self._load_pickle_value(self._message_body)
+
+        elif self.content_type == 'application/x-plist':
+            self._message_body = self._load_plist_value(self._message_body)
+
+        elif self.content_type == 'text/csv':
+            self._message_body = self._load_csv_value(self._message_body)
+
+        elif bs4 and self.content_type in BS4_MIME_TYPES:
+            self._message_body = self._load_bs4_value(self._message_body)
+
+        elif self.content_type in YAML_MIME_TYPES:
+            self._message_body = self._load_yaml_value(self._message_body)
+
+        # Return the message body
+        return self._message_body
 
     @property
     def content_encoding(self):
@@ -1100,241 +1173,6 @@ class Consumer:
         except KeyError:
             raise ValueError(f'Channel {name} not found')
 
-    def _republish_dropped_message(self, reason):
-        """Republish the original message that was received it is being dropped
-        by the consumer.
-
-        This for internal use and should not be extended or used directly.
-
-        :param str reason: The reason the message was dropped
-
-        """
-        self.logger.debug('Republishing due to ProcessingException')
-        properties = dict(self._message.properties) or {}
-        if 'headers' not in properties or not properties['headers']:
-            properties['headers'] = {}
-        properties['headers']['X-Dropped-By'] = self.name
-        properties['headers']['X-Dropped-Reason'] = reason
-        properties['headers']['X-Dropped-Timestamp'] = datetime.datetime.now(
-            tz=datetime.UTC
-        ).isoformat()
-        properties['headers']['X-Original-Exchange'] = self._message.exchange
-        properties['headers']['X-Original-Queue'] = self._process.queue_name
-
-        self._message.channel.basic_publish(
-            exchange=self._drop_exchange,
-            routing_key=self._message.routing_key,
-            body=self._message.body,
-            properties=pika.BasicProperties(**properties),
-        )
-
-    def _republish_processing_error(self, error):
-        """Republish the original message that was received because a
-        :exc:`~rejected.consumer.ProcessingException` was raised.
-
-        This for internal use and should not be extended or used directly.
-
-        Add a header that keeps track of how many times this has happened
-        for this message.
-
-        :param str error: The string value for the exception
-
-        """
-        self.logger.debug('Republishing due to ProcessingException')
-        properties = dict(self._message.properties) or {}
-        if 'headers' not in properties or not properties['headers']:
-            properties['headers'] = {}
-
-        properties['headers']['X-Original-Exchange'] = self._message.exchange
-        properties['headers']['X-Original-Queue'] = self._process.queue_name
-
-        if error:
-            properties['headers']['X-Processing-Exception'] = error
-
-        if _PROCESSING_EXCEPTIONS not in properties['headers']:
-            properties['headers'][_PROCESSING_EXCEPTIONS] = 1
-        else:
-            try:
-                properties['headers'][_PROCESSING_EXCEPTIONS] += 1
-            except TypeError:
-                properties['headers'][_PROCESSING_EXCEPTIONS] = 1
-
-        self._message.channel.basic_publish(
-            exchange=self._error_exchange,
-            routing_key=self._message.routing_key,
-            body=self._message.body,
-            properties=pika.BasicProperties(**properties),
-        )
-
-
-class PublishingConsumer(Consumer):
-    """Deprecated, functionality moved to :class:`rejected.consumer.Consumer`
-
-    .. deprecated:: 3.17.0
-
-    """
-
-    def __init__(self, *args, **kwargs):
-        warnings.warn(
-            'PublishingConsumer deprecated, all functionality moved'
-            'to Consumer',
-            category=DeprecationWarning,
-            stacklevel=2,
-        )
-        super().__init__(*args, **kwargs)
-
-
-class SmartConsumer(Consumer):
-    """Base class to ease the implementation of strongly typed message
-    consumers that validate and automatically decode and deserialize the
-    inbound message body based upon the message properties. Additionally,
-    should one of the supported ``content_encoding`` types (``gzip`` or
-    ``bzip2``) be specified in the message's property, it will automatically
-    be decoded.
-
-    When publishing a message, the message can be automatically serialized
-    and encoded. If the ``content_type`` property is specified, the consumer
-    will attempt to automatically serialize the message body. If the
-    ``content_encoding`` property is specified using a supported encoding
-    (``gzip`` or ``bzip2``), it will automatically be encoded as well.
-
-    *Supported MIME types for automatic serialization and deserialization are:*
-
-     - application/json
-     - application/pickle
-     - application/x-pickle
-     - application/x-plist
-     - application/x-vnd.python.pickle
-     - application/vnd.python.pickle
-     - text/csv
-     - text/html (with beautifulsoup4 installed)
-     - text/xml (with beautifulsoup4 installed)
-     - text/yaml
-     - text/x-yaml
-
-    In any of the consumer base classes, if the ``MESSAGE_TYPE`` attribute is
-    set, the ``type`` property of incoming messages will be validated against
-    when a message is received, checking for string equality against the
-    ``MESSAGE_TYPE`` attribute. If they are not matched, the consumer will not
-    process the message and will drop the message without an exception if the
-    ``DROP_INVALID_MESSAGES`` attribute is set to ``True``. If it is ``False``,
-    a :py:class:`ConsumerException` is raised.
-
-    .. note:: Since 3.17, :class:`~rejected.consumer.SmartConsumer` and
-        :class:`~rejected.consumer.SmartPublishingConsumer` have been combined
-        into the same class.
-
-    """
-
-    def publish_message(
-        self,
-        exchange,
-        routing_key,
-        properties,
-        body,
-        no_serialization=False,
-        no_encoding=False,
-        channel=None,
-    ):
-        """Publish a message to RabbitMQ on the same channel the original
-        message was received on.
-
-        By default, if you pass a non-string object to the body and the
-        properties have a supported content-type set, the body will be
-        auto-serialized in the specified content-type.
-
-        If the properties do not have a timestamp set, it will be set to the
-        current time.
-
-        If you specify a content-encoding in the properties and the encoding is
-        supported, the body will be auto-encoded.
-
-        Both of these behaviors can be disabled by setting no_serialization or
-        no_encoding to True.
-
-        :param str exchange: The exchange to publish to
-        :param str routing_key: The routing key to publish with
-        :param dict properties: The message properties
-        :param mixed body: The message body to publish
-        :param bool no_serialization: Turn off auto-serialization of the body
-        :param bool no_encoding: Turn off auto-encoding of the body
-        :param str channel: The channel/connection name to use. If it is not
-            specified, the channel that the message was delivered on is used.
-
-        """
-        # Auto-serialize the content if needed
-        is_string = isinstance(body, (str, bytes))
-        if (
-            not no_serialization
-            and not is_string
-            and properties.get('content_type')
-        ):
-            self.logger.debug('Auto-serializing message body')
-            body = self._auto_serialize(properties.get('content_type'), body)
-
-        # Auto-encode the message body if needed
-        if not no_encoding and properties.get('content_encoding'):
-            self.logger.debug('Auto-encoding message body')
-            body = self._auto_encode(properties.get('content_encoding'), body)
-
-        # Publish the message
-        self.logger.debug('Publishing message to %s:%s', exchange, routing_key)
-        self._publish_channel(channel).basic_publish(
-            exchange=exchange,
-            routing_key=routing_key,
-            properties=self._get_pika_properties(properties),
-            body=body,
-        )
-
-    @property
-    def body(self):
-        """Return the message body, unencoded if needed,
-        deserialized if possible.
-
-        :rtype: any
-
-        """
-        # Return a materialized view of the body if it has been previously set
-        if self._message_body:
-            return self._message_body
-
-        # Handle bzip2 compressed content
-        elif self.content_encoding == 'bzip2':
-            self._message_body = self._decode_bz2(self._message.body)
-
-        # Handle zlib compressed content
-        elif self.content_encoding == 'gzip':
-            self._message_body = self._decode_gzip(self._message.body)
-
-        # Else we want to assign self._message.body to self._message_body
-        else:
-            self._message_body = self._message.body
-
-        # Handle the auto-deserialization
-        if self.content_type == 'application/json':
-            self._message_body = self._load_json_value(self._message_body)
-
-        elif umsgpack and self.content_type == 'application/msgpack':
-            self._message_body = self._load_msgpack_value(self._message_body)
-
-        elif self.content_type in PICKLE_MIME_TYPES:
-            self._message_body = self._load_pickle_value(self._message_body)
-
-        elif self.content_type == 'application/x-plist':
-            self._message_body = self._load_plist_value(self._message_body)
-
-        elif self.content_type == 'text/csv':
-            self._message_body = self._load_csv_value(self._message_body)
-
-        elif bs4 and self.content_type in BS4_MIME_TYPES:
-            self._message_body = self._load_bs4_value(self._message_body)
-
-        elif self.content_type in YAML_MIME_TYPES:
-            self._message_body = self._load_yaml_value(self._message_body)
-
-        # Return the message body
-        return self._message_body
-
     def _auto_encode(self, content_encoding, value):
         """Based upon the value of the content_encoding, encode the value.
 
@@ -1626,20 +1464,117 @@ class SmartConsumer(Consumer):
         """
         return yaml.load(value)
 
+    def _republish_dropped_message(self, reason):
+        """Republish the original message that was received it is being dropped
+        by the consumer.
 
-class SmartPublishingConsumer(SmartConsumer):
-    """Deprecated, functionality moved to
-    :class:`rejected.consumer.SmartConsumer`
+        This for internal use and should not be extended or used directly.
 
-        .. deprecated:: 3.17.0
+        :param str reason: The reason the message was dropped
+
+        """
+        self.logger.debug('Republishing due to ProcessingException')
+        properties = dict(self._message.properties) or {}
+        if 'headers' not in properties or not properties['headers']:
+            properties['headers'] = {}
+        properties['headers']['X-Dropped-By'] = self.name
+        properties['headers']['X-Dropped-Reason'] = reason
+        properties['headers']['X-Dropped-Timestamp'] = datetime.datetime.now(
+            tz=datetime.UTC
+        ).isoformat()
+        properties['headers']['X-Original-Exchange'] = self._message.exchange
+        properties['headers']['X-Original-Queue'] = self._process.queue_name
+
+        self._message.channel.basic_publish(
+            exchange=self._drop_exchange,
+            routing_key=self._message.routing_key,
+            body=self._message.body,
+            properties=pika.BasicProperties(**properties),
+        )
+
+    def _republish_processing_error(self, error):
+        """Republish the original message that was received because a
+        :exc:`~rejected.consumer.ProcessingException` was raised.
+
+        This for internal use and should not be extended or used directly.
+
+        Add a header that keeps track of how many times this has happened
+        for this message.
+
+        :param str error: The string value for the exception
+
+        """
+        self.logger.debug('Republishing due to ProcessingException')
+        properties = dict(self._message.properties) or {}
+        if 'headers' not in properties or not properties['headers']:
+            properties['headers'] = {}
+
+        properties['headers']['X-Original-Exchange'] = self._message.exchange
+        properties['headers']['X-Original-Queue'] = self._process.queue_name
+
+        if error:
+            properties['headers']['X-Processing-Exception'] = error
+
+        if _PROCESSING_EXCEPTIONS not in properties['headers']:
+            properties['headers'][_PROCESSING_EXCEPTIONS] = 1
+        else:
+            try:
+                properties['headers'][_PROCESSING_EXCEPTIONS] += 1
+            except TypeError:
+                properties['headers'][_PROCESSING_EXCEPTIONS] = 1
+
+        self._message.channel.basic_publish(
+            exchange=self._error_exchange,
+            routing_key=self._message.routing_key,
+            body=self._message.body,
+            properties=pika.BasicProperties(**properties),
+        )
+
+
+class SmartConsumer(Consumer):
+    """Deprecated alias for :class:`Consumer`.
+
+    .. deprecated:: 4.0.0
+        Use :class:`Consumer` directly.
 
     """
 
     def __init__(self, *args, **kwargs):
         warnings.warn(
-            'SmartPublishingConsumer deprecated, all functionality '
-            'moved to SmartConsumer',
-            category=DeprecationWarning,
+            'SmartConsumer is deprecated, use Consumer directly',
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        super().__init__(*args, **kwargs)
+
+
+class PublishingConsumer(Consumer):
+    """Deprecated alias for :class:`Consumer`.
+
+    .. deprecated:: 3.17.0
+
+    """
+
+    def __init__(self, *args, **kwargs):
+        warnings.warn(
+            'PublishingConsumer is deprecated, use Consumer directly',
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        super().__init__(*args, **kwargs)
+
+
+class SmartPublishingConsumer(Consumer):
+    """Deprecated alias for :class:`Consumer`.
+
+    .. deprecated:: 3.17.0
+
+    """
+
+    def __init__(self, *args, **kwargs):
+        warnings.warn(
+            'SmartPublishingConsumer is deprecated, use Consumer directly',
+            DeprecationWarning,
             stacklevel=2,
         )
         super().__init__(*args, **kwargs)

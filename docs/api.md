@@ -6,12 +6,6 @@ The primary base classes for building message consumers.
 
 ::: rejected.consumer.Consumer
 
-::: rejected.consumer.PublishingConsumer
-
-::: rejected.consumer.SmartConsumer
-
-::: rejected.consumer.SmartPublishingConsumer
-
 ## Exceptions
 
 ::: rejected.consumer.ConsumerException

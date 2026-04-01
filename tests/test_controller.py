@@ -6,8 +6,8 @@ import sys
 import unittest
 from unittest import mock
 
-from rejected import config as config_module
 import rejected.controller
+from rejected import config as config_module
 
 
 def _make_args(**kwargs):
@@ -44,7 +44,9 @@ class ControllerInitTests(unittest.TestCase):
 
 class ControllerSignalTests(unittest.TestCase):
     def setUp(self):
-        self.ctrl = rejected.controller.Controller(_make_args(), _make_config())
+        self.ctrl = rejected.controller.Controller(
+            _make_args(), _make_config()
+        )
         self.ctrl._mcp = mock.Mock()
 
     def test_on_sigterm_sets_shutdown_requested(self):
@@ -80,12 +82,16 @@ class ControllerSignalTests(unittest.TestCase):
 
 class ControllerRunTests(unittest.TestCase):
     def setUp(self):
-        self.ctrl = rejected.controller.Controller(_make_args(), _make_config())
+        self.ctrl = rejected.controller.Controller(
+            _make_args(), _make_config()
+        )
 
     def test_normal_run_starts_mcp_once(self):
         mock_mcp = mock.Mock()
-        with mock.patch('rejected.controller.mcp.MasterControlProgram',
-                        return_value=mock_mcp):
+        with mock.patch(
+            'rejected.controller.mcp.MasterControlProgram',
+            return_value=mock_mcp,
+        ):
             with mock.patch.object(self.ctrl, '_setup_signals'):
                 self.ctrl.run()
         mock_mcp.run.assert_called_once()
@@ -94,8 +100,10 @@ class ControllerRunTests(unittest.TestCase):
         self.ctrl.args.prepend_path = '/some/path'
         mock_mcp = mock.Mock()
         original_path = sys.path[:]
-        with mock.patch('rejected.controller.mcp.MasterControlProgram',
-                        return_value=mock_mcp):
+        with mock.patch(
+            'rejected.controller.mcp.MasterControlProgram',
+            return_value=mock_mcp,
+        ):
             with mock.patch.object(self.ctrl, '_setup_signals'):
                 self.ctrl.run()
         self.assertEqual(sys.path[0], '/some/path')
@@ -104,23 +112,29 @@ class ControllerRunTests(unittest.TestCase):
     def test_keyboard_interrupt_exits_cleanly(self):
         mock_mcp = mock.Mock()
         mock_mcp.run.side_effect = KeyboardInterrupt
-        with mock.patch('rejected.controller.mcp.MasterControlProgram',
-                        return_value=mock_mcp):
+        with mock.patch(
+            'rejected.controller.mcp.MasterControlProgram',
+            return_value=mock_mcp,
+        ):
             with mock.patch.object(self.ctrl, '_setup_signals'):
                 self.ctrl.run()  # should not raise
 
     def test_exception_propagates(self):
         mock_mcp = mock.Mock()
         mock_mcp.run.side_effect = RuntimeError('boom')
-        with mock.patch('rejected.controller.mcp.MasterControlProgram',
-                        return_value=mock_mcp):
+        with mock.patch(
+            'rejected.controller.mcp.MasterControlProgram',
+            return_value=mock_mcp,
+        ):
             with mock.patch.object(self.ctrl, '_setup_signals'):
                 with self.assertRaises(RuntimeError):
                     self.ctrl.run()
 
     def test_shutdown_requested_skips_loop(self):
         self.ctrl._shutdown_requested = True
-        with mock.patch('rejected.controller.mcp.MasterControlProgram') as mock_cls:
+        with mock.patch(
+            'rejected.controller.mcp.MasterControlProgram'
+        ) as mock_cls:
             with mock.patch.object(self.ctrl, '_setup_signals'):
                 self.ctrl.run()
         mock_cls.assert_not_called()
@@ -156,8 +170,10 @@ class ControllerReloadTests(unittest.TestCase):
                 return_value=new_cfg,
             )
 
-        with mock.patch('rejected.controller.mcp.MasterControlProgram',
-                        return_value=mock_mcp):
+        with mock.patch(
+            'rejected.controller.mcp.MasterControlProgram',
+            return_value=mock_mcp,
+        ):
             with mock.patch.object(self.ctrl, '_setup_signals'):
                 with load_target:
                     self.ctrl.run()

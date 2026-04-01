@@ -36,6 +36,7 @@ import datetime
 import io
 import json
 import logging
+import pathlib
 import pickle
 import plistlib
 import sys
@@ -82,6 +83,8 @@ AVRO_DATUM_MIME_TYPE = 'application/vnd.apache.avro.datum'
 _DROPPED_MESSAGE = 'X-Rejected-Dropped'
 _PROCESSING_EXCEPTIONS = 'X-Processing-Exceptions'
 _EXCEPTION_FROM = 'X-Exception-From'
+
+_UNSET = object()
 
 BS4_MIME_TYPES = ('text/html', 'text/xml')
 PICKLE_MIME_TYPES = (
@@ -213,7 +216,7 @@ class Consumer:
         self._message = None
         self._message_type = message_type or self.MESSAGE_TYPE
         self._measurement = None
-        self._message_body = None
+        self._message_body = _UNSET
         self._process = process
         self._settings = settings
 
@@ -395,10 +398,10 @@ class Consumer:
                 self.logger.debug('Auto-serializing message body')
                 body = self._auto_serialize(content_type, body)
 
-        # Auto-encode the message body if needed
-        if not no_encoding and properties.get('content_encoding'):
+        content_encoding = properties.get('content_encoding')
+        if not no_encoding and content_encoding:
             self.logger.debug('Auto-encoding message body')
-            body = self._auto_encode(properties.get('content_encoding'), body)
+            body = self._auto_encode(content_encoding, body)
 
         # Publish the message
         self.logger.debug('Publishing message to %s:%s', exchange, routing_key)
@@ -670,27 +673,25 @@ class Consumer:
         if not self._message:
             return None
 
-        # Return a materialized view of the body if it has been previously set
-        if self._message_body:
+        if self._message_body is not _UNSET:
             return self._message_body
 
-        # Handle bzip2 compressed content
-        elif self.content_encoding == 'bzip2':
+        if self.content_encoding == 'bzip2':
             self._message_body = self._decode_bz2(self._message.body)
-
-        # Handle zlib compressed content
         elif self.content_encoding == 'gzip':
             self._message_body = self._decode_gzip(self._message.body)
-
-        # Else we want to assign self._message.body to self._message_body
         else:
             self._message_body = self._message.body
 
-        # Handle the auto-deserialization
         if fastavro and self.content_type == AVRO_DATUM_MIME_TYPE:
             if self.message_type:
                 self._message_body = self._deserialize_avro(
                     self._avro_schema(self.message_type), self._message_body
+                )
+            else:
+                self.logger.warning(
+                    'Avro datum received without message_type; '
+                    'returning raw bytes'
                 )
 
         elif self.content_type == 'application/json':
@@ -1165,7 +1166,7 @@ class Consumer:
         """Resets all assigned data for the current message."""
         self._finished = False
         self._message = None
-        self._message_body = None
+        self._message_body = _UNSET
 
     @staticmethod
     def _get_pika_properties(properties_in):
@@ -1244,17 +1245,14 @@ class Consumer:
             self.logger.debug('Auto-serializing content as csv')
             return self._dump_csv_value(value)
 
-        # If it's XML or HTML auto
         elif (
             bs4
             and isinstance(value, bs4.BeautifulSoup)
-            and content_type in ('text/html', 'text/xml')
+            and content_type in BS4_MIME_TYPES
         ):
-            self.logger.debug('Dumping BS4 object into HTML or XML')
             return self._dump_bs4_value(value)
 
-        # If it's YAML, load the content via pyyaml into a dict
-        elif self.content_type in YAML_MIME_TYPES:
+        elif content_type in YAML_MIME_TYPES:
             self.logger.debug('Auto-serializing content as YAML')
             return self._dump_yaml_value(value)
 
@@ -1497,7 +1495,7 @@ class Consumer:
         :param str reason: The reason the message was dropped
 
         """
-        self.logger.debug('Republishing due to ProcessingException')
+        self.logger.debug('Republishing dropped message: %s', reason)
         properties = dict(self._message.properties) or {}
         if 'headers' not in properties or not properties['headers']:
             properties['headers'] = {}
@@ -1605,14 +1603,13 @@ class Consumer:
             'Loading Avro schema for %s from %s', message_type, uri
         )
         if uri.startswith('file://'):
-            import pathlib
-
             file_path = pathlib.Path(uri[7:])
-            if not file_path.exists():
+            try:
+                return json.loads(file_path.read_text())
+            except FileNotFoundError:
                 raise ConsumerException(
                     f'Missing Avro schema file: {file_path}'
-                )
-            return json.loads(file_path.read_text())
+                ) from None
         if uri.startswith(('http://', 'https://')):
             if not _requests:
                 raise ConsumerException(

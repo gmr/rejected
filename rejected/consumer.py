@@ -589,7 +589,7 @@ class Consumer:
 
         """
         if sentry_sdk and self._process and self._process.sentry_client:
-            sentry_sdk.set_tag(tag, None)
+            sentry_sdk.get_current_scope().remove_tag(tag)
 
     async def yield_to_ioloop(self):
         """Function that will allow Rejected to process IOLoop events while
@@ -1072,14 +1072,6 @@ class Consumer:
         self._finished = False
         self._message = None
         self._message_body = None
-
-    def _get_exc_info(self, result):
-        if asyncio.isfuture(result):
-            exc = result.exception()
-            if exc is not None:
-                tb = exc.__traceback__
-                return type(exc), exc, tb
-        return sys.exc_info()
 
     @staticmethod
     def _get_pika_properties(properties_in):

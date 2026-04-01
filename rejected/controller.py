@@ -12,9 +12,9 @@ import helper
 from helper import controller, parser
 
 try:
-    import raven
+    import sentry_sdk
 except ImportError:
-    raven = None
+    sentry_sdk = None
 
 from . import __version__, mcp
 
@@ -30,18 +30,16 @@ class Controller(controller.Controller):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._mcp = None
-        self._sentry_client = None
-        if raven and self.config.application.get('sentry_dsn'):
+        self._sentry_client = False
+        if sentry_sdk and self.config.application.get('sentry_dsn'):
             kwargs = {
-                'exclude_paths': ['tornado'],
-                'include_paths': ['pika', 'helper', 'rejected'],
-                'processors': ['raven.processors.SanitizePasswordsProcessor'],
+                'dsn': self.config.application['sentry_dsn'],
+                'send_default_pii': False,
             }
             if os.environ.get('ENVIRONMENT'):
                 kwargs['environment'] = os.environ['ENVIRONMENT']
-            self._sentry_client = raven.Client(
-                self.config.application['sentry_dsn'], **kwargs
-            )
+            sentry_sdk.init(**kwargs)
+            self._sentry_client = True
 
     def _master_control_program(self):
         """Return an instance of the MasterControlProgram.
@@ -110,10 +108,9 @@ class Controller(controller.Controller):
             LOGGER.info('Caught CTRL-C, shutting down')
         except Exception:
             exc_info = sys.exc_info()
-            kwargs = {'logger': 'rejected.controller'}
-            LOGGER.debug('Sending exception to sentry: %r', kwargs)
             if self._sentry_client:
-                self._sentry_client.captureException(exc_info, **kwargs)
+                LOGGER.debug('Sending exception to sentry')
+                sentry_sdk.capture_exception(exc_info)
             raise
         if self.is_running:
             self.stop()

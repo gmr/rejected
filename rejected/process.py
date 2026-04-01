@@ -484,6 +484,7 @@ class Process(multiprocessing.Process, state.State):
         self.previous = None
         self.sentry_client = None
         self.state = self.STATE_INITIALIZING
+        self._tasks: set[asyncio.Task] = set()
         self.state_start = time.time()
         self.statsd = None
 
@@ -669,9 +670,15 @@ class Process(multiprocessing.Process, state.State):
                     self.state_description,
                 )
         if self.pending:
-            asyncio.ensure_future(  # noqa: RUF006
-                self.invoke_consumer(self.pending.popleft())
-            )
+            self._schedule(self.invoke_consumer(self.pending.popleft()))
+
+    def _schedule(self, coro):
+        """Schedule a coroutine as a fire-and-forget task, keeping a reference
+        to prevent it from being garbage-collected before completion.
+        """
+        task = asyncio.create_task(coro)
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
 
     @property
     def is_processing(self):
@@ -731,12 +738,12 @@ class Process(multiprocessing.Process, state.State):
     def on_connection_blocked(self, name):
         LOGGER.warning('Connection %s blocked', name)
         if self.is_processing:
-            asyncio.ensure_future(self.consumer.on_blocked(name))  # noqa: RUF006
+            self._schedule(self.consumer.on_blocked(name))
 
     def on_connection_unblocked(self, name):
         LOGGER.info('Connection %s unblocked', name)
         if self.is_processing:
-            asyncio.ensure_future(self.consumer.on_unblocked(name))  # noqa: RUF006
+            self._schedule(self.consumer.on_unblocked(name))
 
     def on_confirmation(self, name, delivered, delivery_tag):
         """Invoked on delivery confirmation
@@ -763,7 +770,7 @@ class Process(multiprocessing.Process, state.State):
         if self.is_processing:
             self.pending.append(message)
         else:
-            asyncio.ensure_future(self.invoke_consumer(message))  # noqa: RUF006
+            self._schedule(self.invoke_consumer(message))
 
     def on_returned(self, name, channel, method, properties, body):
         """Send a message to the consumer that was returned by RabbitMQ
@@ -780,7 +787,7 @@ class Process(multiprocessing.Process, state.State):
         if self.is_processing:
             self.pending.append(message)
         else:
-            asyncio.ensure_future(self.invoke_consumer(message))  # noqa: RUF006
+            self._schedule(self.invoke_consumer(message))
 
     def on_processed(self, message, result, start_time):
         """Invoked after a message is processed by the consumer and
@@ -1033,12 +1040,12 @@ class Process(multiprocessing.Process, state.State):
         except TypeError:
             duration = 0
         LOGGER.debug('Sending exception to sentry')
-        with sentry_sdk.push_scope() as scope:
+        with sentry_sdk.new_scope() as scope:
             scope.set_extra('consumer_name', self.consumer_name)
             scope.set_extra('env', dict(os.environ))
             scope.set_extra('message', message)
             scope.set_extra('time_spent', duration)
-            sentry_sdk.capture_exception(exc_info)
+            sentry_sdk.capture_exception(exc_info, scope=scope)
 
     def setup(self):
         """Initialize the consumer, setting up needed attributes and connecting

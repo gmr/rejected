@@ -181,12 +181,16 @@ class Connection(state.State):
             self.callbacks.on_closed(self.name)
 
     def on_blocked(self, *args, **kwargs):
-        LOGGER.warning('Connection %s is blocked: (%r %r)', args, kwargs)
+        LOGGER.warning(
+            'Connection %s is blocked: (%r %r)', self.name, args, kwargs
+        )
         self.blocked = True
         self.callbacks.on_blocked(self.name)
 
     def on_unblocked(self, *args, **kwargs):
-        LOGGER.warning('Connection %s is unblocked: (%r %r)', args, kwargs)
+        LOGGER.warning(
+            'Connection %s is unblocked: (%r %r)', self.name, args, kwargs
+        )
         self.blocked = False
         self.callbacks.on_unblocked(self.name)
 
@@ -383,9 +387,7 @@ class Connection(state.State):
         if not ssl_options:
             return
 
-        context = ssl.SSLContext(
-            protocol=int(ssl_options.get('protocol', ssl.PROTOCOL_TLS))
-        )
+        context = ssl.SSLContext()
 
         # Load a set of certification authority (CA) certificates
         if any(
@@ -630,7 +632,8 @@ class Process(multiprocessing.Process, state.State):
         async with self.consumer_lock:
             if self.is_idle:
                 self.set_state(self.STATE_PROCESSING)
-                self.delivery_time = start_time = time.time()
+                self.delivery_time = time.time()
+                start_time = time.monotonic()
                 self.active_message = message
 
                 self.measurement = data.Measurement()
@@ -799,7 +802,7 @@ class Process(multiprocessing.Process, state.State):
         :param float start_time: When the message was received
 
         """
-        duration = max(start_time, time.time()) - start_time
+        duration = time.monotonic() - start_time
         self.counters[self.TIME_SPENT] += duration
         self.measurement.add_duration(self.TIME_SPENT, duration)
 
@@ -1090,16 +1093,13 @@ class Process(multiprocessing.Process, state.State):
         for key in {'ENVIRONMENT', 'SERVICE'}:
             if key in os.environ:
                 base_tags[key.lower()] = os.environ[key]
+        scheme = config.get(
+            'scheme', os.environ.get('INFLUXDB_SCHEME', 'http')
+        )
+        host = config.get('host', os.environ.get('INFLUXDB_HOST', 'localhost'))
+        port = config.get('port', os.environ.get('INFLUXDB_PORT', '8086'))
         influxdb.install(
-            '{}://{}:{}/write'.format(
-                config.get(
-                    'scheme', os.environ.get('INFLUXDB_SCHEME', 'http')
-                ),
-                config.get(
-                    'host', os.environ.get('INFLUXDB_HOST', 'localhost')
-                ),
-                config.get('port', os.environ.get('INFLUXDB_PORT', '8086')),
-            ),
+            f'{scheme}://{host}:{port}/write',
             config.get('user', os.environ.get('INFLUXDB_USER')),
             config.get('password', os.environ.get('INFLUXDB_PASSWORD')),
             base_tags=base_tags,

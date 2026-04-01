@@ -71,13 +71,6 @@ try:
 except ImportError:
     sentry_sdk = None
 
-# Python3 Support
-try:
-    unicode()
-except NameError:
-    unicode = str
-
-
 DEFAULT_CHANNEL = 'default'
 _DROPPED_MESSAGE = 'X-Rejected-Dropped'
 _PROCESSING_EXCEPTIONS = 'X-Processing-Exceptions'
@@ -198,10 +191,16 @@ class Consumer:
         self._correlation_id = None
         self._drop_exchange = drop_exchange or self.DROP_EXCHANGE
         self._drop_invalid = (
-            drop_invalid_messages or self.DROP_INVALID_MESSAGES
+            self.DROP_INVALID_MESSAGES
+            if drop_invalid_messages is None
+            else drop_invalid_messages
         )
         self._error_exchange = error_exchange or self.ERROR_EXCHANGE
-        self._error_max_retry = error_max_retry or self.ERROR_MAX_RETRY
+        self._error_max_retry = (
+            self.ERROR_MAX_RETRY
+            if error_max_retry is None
+            else error_max_retry
+        )
         self._finished = False
         self._message = None
         self._message_type = message_type or self.MESSAGE_TYPE
@@ -318,7 +317,7 @@ class Consumer:
         """
         self.logger.debug('shutdown invoked')
 
-    """Utility Methods for use by Consumer Code"""
+    # Utility Methods for use by Consumer Code
 
     async def finish(self):
         """Finishes message processing for the current message. If this is
@@ -559,13 +558,11 @@ class Consumer:
         :param str key: The key for the timing to track
 
         """
-        start_time = time.time()
+        start_time = time.monotonic()
         try:
             yield
         finally:
-            self.stats_add_duration(
-                key, max(start_time, time.time()) - start_time
-            )
+            self.stats_add_duration(key, time.monotonic() - start_time)
 
     def statsd_track_duration(self, key):
         """Time around a context and add to the the per-message measurements
@@ -777,7 +774,7 @@ class Consumer:
         """
         if not self._message:
             return None
-        return self._message.redelivered
+        return self._message.returned
 
     @property
     def routing_key(self):
@@ -926,7 +923,7 @@ class Consumer:
                 error,
             )
             self._measurement.set_tag('exception', error.__class__.__name__)
-            return None
+            return data.MESSAGE_REQUEUE
 
         except exceptions.ConnectionClosed as error:
             self.logger.critical(
@@ -935,7 +932,7 @@ class Consumer:
                 str(error),
             )
             self._measurement.set_tag('exception', error.__class__.__name__)
-            return None
+            return data.MESSAGE_REQUEUE
 
         except ConsumerException as error:
             self.logger.error(
@@ -1040,8 +1037,8 @@ class Consumer:
 
         """
         if name not in self.settings:
-            raise Exception(
-                f'You must define the "{name}" setting in to use {feature}'
+            raise ValueError(
+                f'You must define the "{name}" setting to use {feature}'
             )
 
     def set_channel(self, name, channel):
@@ -1266,11 +1263,7 @@ class SmartConsumer(Consumer):
 
         """
         # Auto-serialize the content if needed
-        is_string = (
-            isinstance(body, str)
-            or isinstance(body, bytes)
-            or isinstance(body, unicode)
-        )
+        is_string = isinstance(body, (str, bytes))
         if (
             not no_serialization
             and not is_string

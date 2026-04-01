@@ -39,6 +39,7 @@ dependencies = [
 [project.optional-dependencies]
 html = ["beautifulsoup4"]
 msgpack = ["u-msgpack-python"]
+sentry = ["sentry-sdk>=2"]
 
 [project.scripts]
 rejected = "rejected.controller:main"

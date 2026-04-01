@@ -66,6 +66,11 @@ except ImportError:
     LOGGER.warning('umsgpack not found, disabling msgpack support')
     umsgpack = None
 
+try:
+    import sentry_sdk
+except ImportError:
+    sentry_sdk = None
+
 # Python3 Support
 try:
     unicode()
@@ -433,11 +438,11 @@ class Consumer:
         :param str value: The context value
 
         """
-        if self.sentry_client:
+        if self.sentry_client and sentry_sdk:
             self.logger.debug(
                 'Setting sentry context for %s to %s', tag, value
             )
-            self.sentry_client.tags_context({tag: value})
+            sentry_sdk.set_tag(tag, value)
 
     def stats_add_duration(self, key, duration):
         """Add a duration to the per-message measurements
@@ -583,8 +588,8 @@ class Consumer:
         :param str tag: The context tag to remove
 
         """
-        if self.sentry_client:
-            self.sentry_client.tags.pop(tag, None)
+        if self.sentry_client and sentry_sdk:
+            sentry_sdk.set_tag(tag, None)
 
     async def yield_to_ioloop(self):
         """Function that will allow Rejected to process IOLoop events while
@@ -799,14 +804,14 @@ class Consumer:
 
     @property
     def sentry_client(self):
-        """Access the Sentry raven ``Client`` instance or ``None``
+        """Indicates whether Sentry is enabled.
 
-        Use this object to add tags or additional context to Sentry
-        error reports (see :meth:`raven.base.Client.tags_context`) or
-        to report messages (via :meth:`raven.base.Client.captureMessage`)
-        directly to Sentry.
+        Returns ``True`` if ``sentry_sdk`` is installed and a ``sentry_dsn``
+        is configured, ``None`` otherwise. Use :meth:`set_sentry_context`
+        and :meth:`unset_sentry_context` to tag events, or call
+        ``sentry_sdk`` directly for additional reporting.
 
-        :rtype: :class:`raven.base.Client`
+        :rtype: bool or None
 
         """
         if hasattr(self._process, 'sentry_client'):

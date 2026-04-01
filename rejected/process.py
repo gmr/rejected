@@ -29,11 +29,11 @@ from pika import exceptions, spec
 from pika.adapters import asyncio_connection
 
 try:
-    import raven
-    from raven import breadcrumbs
-    from raven.contrib.tornado import AsyncSentryClient
+    import sentry_sdk
+    from sentry_sdk.integrations.logging import LoggingIntegration
 except ImportError:
-    breadcrumbs, raven, AsyncSentryClient = None, None, None
+    sentry_sdk = None
+    LoggingIntegration = None
 
 from . import __version__, data, state, statsd, utils
 
@@ -1032,16 +1032,13 @@ class Process(multiprocessing.Process, state.State):
             duration = math.ceil(time.time() - self.delivery_time) * 1000
         except TypeError:
             duration = 0
-        kwargs = {
-            'extra': {
-                'consumer_name': self.consumer_name,
-                'env': dict(os.environ),
-                'message': message,
-            },
-            'time_spent': duration,
-        }
-        LOGGER.debug('Sending exception to sentry: %r', kwargs)
-        self.sentry_client.captureException(exc_info, **kwargs)
+        LOGGER.debug('Sending exception to sentry')
+        with sentry_sdk.push_scope() as scope:
+            scope.set_extra('consumer_name', self.consumer_name)
+            scope.set_extra('env', dict(os.environ))
+            scope.set_extra('message', message)
+            scope.set_extra('time_spent', duration)
+            sentry_sdk.capture_exception(exc_info)
 
     def setup(self):
         """Initialize the consumer, setting up needed attributes and connecting
@@ -1142,48 +1139,30 @@ class Process(multiprocessing.Process, state.State):
             LOGGER.debug('InfluxDB measurements configured: %r', self.influxdb)
 
     def setup_sentry(self, cfg, consumer_name):
-        # Setup the Sentry client if configured and installed
+        # Setup Sentry if configured and sentry_sdk is installed
         sentry_dsn = cfg['Consumers'][consumer_name].get(
             'sentry_dsn', cfg.get('sentry_dsn')
         )
-        if not raven or not sentry_dsn:
-            return
-        consumer = cfg['Consumers'][consumer_name]['consumer'].split('.')[0]
+        if not sentry_sdk or not sentry_dsn:
+            return False
         kwargs = {
-            'exclude_paths': [],
-            'include_paths': [
-                'pika',
-                'rejected',
-                'raven',
-                'tornado',
-                consumer,
-            ],
-            'ignore_exceptions': [
+            'dsn': sentry_dsn,
+            'send_default_pii': False,
+            'ignore_errors': [
                 'rejected.consumer.ConsumerException',
                 'rejected.consumer.MessageException',
                 'rejected.consumer.ProcessingException',
             ],
-            'processors': ['raven.processors.SanitizePasswordsProcessor'],
+            'integrations': [
+                LoggingIntegration(level=None, event_level=None),
+            ],
         }
-
         if os.environ.get('ENVIRONMENT'):
             kwargs['environment'] = os.environ['ENVIRONMENT']
-
         if self.consumer_version:
-            kwargs['version'] = self.consumer_version
-
-        for logger in {
-            'pika',
-            'pika.channel',
-            'pika.connection',
-            'pika.callback',
-            'pika.heartbeat',
-            'rejected.process',
-            'rejected.state',
-        }:
-            breadcrumbs.ignore_logger(logger)
-
-        return AsyncSentryClient(sentry_dsn, **kwargs)
+            kwargs['release'] = self.consumer_version
+        sentry_sdk.init(**kwargs)
+        return True
 
     def setup_sighandlers(self):
         """Setup the stats and stop signal handlers."""

@@ -150,13 +150,16 @@ def main():
     if args.quantity is not None and args.consumer is None:
         parser.error('--qty requires --only')
 
-    if cfg.logging:
-        logging.config.dictConfig(cfg.logging)
-    else:
-        logging.basicConfig(
-            level=logging.INFO,
-            format='%(levelname)-8s %(name)s: %(message)s',
-        )
+    try:
+        if cfg.logging:
+            logging.config.dictConfig(cfg.logging)
+        else:
+            logging.basicConfig(
+                level=logging.INFO,
+                format='%(levelname)-8s %(name)s: %(message)s',
+            )
+    except (ValueError, TypeError, AttributeError, ImportError) as exc:
+        sys.exit(f'Error: invalid logging configuration: {exc}')
 
     ctrl = Controller(args, cfg)
     ctrl.run()

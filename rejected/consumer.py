@@ -1652,55 +1652,6 @@ class Consumer:
         return stream.getvalue()
 
 
-class SmartConsumer(Consumer):
-    """Deprecated alias for :class:`Consumer`.
-
-    .. deprecated:: 4.0.0
-        Use :class:`Consumer` directly.
-
-    """
-
-    def __init__(self, *args, **kwargs):
-        warnings.warn(
-            'SmartConsumer is deprecated, use Consumer directly',
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        super().__init__(*args, **kwargs)
-
-
-class PublishingConsumer(Consumer):
-    """Deprecated alias for :class:`Consumer`.
-
-    .. deprecated:: 3.17.0
-
-    """
-
-    def __init__(self, *args, **kwargs):
-        warnings.warn(
-            'PublishingConsumer is deprecated, use Consumer directly',
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        super().__init__(*args, **kwargs)
-
-
-class SmartPublishingConsumer(Consumer):
-    """Deprecated alias for :class:`Consumer`.
-
-    .. deprecated:: 3.17.0
-
-    """
-
-    def __init__(self, *args, **kwargs):
-        warnings.warn(
-            'SmartPublishingConsumer is deprecated, use Consumer directly',
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        super().__init__(*args, **kwargs)
-
-
 class RejectedException(Exception):
     """Base exception for :py:class:`~rejected.consumer.Consumer` related
     exceptions.

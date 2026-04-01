@@ -15,9 +15,6 @@ from rejected.consumer import (  # noqa: E402
     ConsumerException,
     MessageException,
     ProcessingException,
-    PublishingConsumer,
-    SmartConsumer,
-    SmartPublishingConsumer,
 )
 
 __author__ = 'Gavin M. Roy <gavinmroy@gmail.com>'
@@ -33,9 +30,6 @@ __all__ = [
     'ConsumerException',
     'MessageException',
     'ProcessingException',
-    'PublishingConsumer',
-    'SmartConsumer',
-    'SmartPublishingConsumer',
     '__author__',
     '__since__',
     '__version__',

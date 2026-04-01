@@ -5,7 +5,7 @@ from rejected import consumer, testing
 
 class TestPublishedMessages(testing.AsyncTestCase):
     def get_consumer(self):
-        class Consumer(consumer.SmartConsumer):
+        class Consumer(consumer.Consumer):
             async def process(self):
                 for i in range(10):
                     self.publish_message(
@@ -37,7 +37,7 @@ class TestPublishedMessages(testing.AsyncTestCase):
 
 class TestProcessingException(testing.AsyncTestCase):
     def get_consumer(self):
-        class Consumer(consumer.SmartConsumer):
+        class Consumer(consumer.Consumer):
             async def process(self):
                 raise consumer.ProcessingException
 
@@ -75,7 +75,7 @@ class TestProcessingException(testing.AsyncTestCase):
 
 class TestMessageException(testing.AsyncTestCase):
     def get_consumer(self):
-        class Consumer(consumer.SmartConsumer):
+        class Consumer(consumer.Consumer):
             MESSAGE_TYPE = 'a_type'
 
         return Consumer

@@ -196,7 +196,7 @@ class ConsumerPropertyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.obj.user_id, mocks.PROPERTIES.user_id)
 
 
-class TestSmartConsumer(consumer.SmartConsumer):
+class TestSmartConsumer(consumer.Consumer):
     async def process(self):
         pass
 

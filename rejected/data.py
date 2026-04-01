@@ -291,10 +291,8 @@ class Measurement:
         """
         if key not in self.durations:
             self.durations[key] = []
-        start_time = time.time()
+        start_time = time.monotonic()
         try:
             yield
         finally:
-            self.durations[key].append(
-                max(start_time, time.time()) - start_time
-            )
+            self.durations[key].append(time.monotonic() - start_time)

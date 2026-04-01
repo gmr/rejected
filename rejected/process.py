@@ -13,6 +13,7 @@ import profile
 import signal
 import ssl
 import time
+import typing
 import warnings
 from os import path
 
@@ -29,11 +30,11 @@ from pika import exceptions, spec
 from pika.adapters import asyncio_connection
 
 try:
-    import raven
-    from raven import breadcrumbs
-    from raven.contrib.tornado import AsyncSentryClient
+    import sentry_sdk
+    from sentry_sdk.integrations.logging import LoggingIntegration
 except ImportError:
-    breadcrumbs, raven, AsyncSentryClient = None, None, None
+    sentry_sdk = None
+    LoggingIntegration = None
 
 from . import __version__, data, state, statsd, utils
 
@@ -78,6 +79,10 @@ class Callbacks:
 class Connection(state.State):
     HB_INTERVAL = 300
     STATE_CLOSED = 0x08
+    STATES: typing.ClassVar[dict[int, str]] = {
+        **state.State.STATES,
+        STATE_CLOSED: 'Closed',
+    }
 
     def __init__(
         self,
@@ -100,9 +105,6 @@ class Connection(state.State):
         self.name = name
         self.publisher_confirm = publisher_confirmations
         self.connection = self.connect()
-
-        # Override STOPPED with CLOSED
-        self.STATES[0x08] = 'CLOSED'
 
     @property
     def is_closed(self):
@@ -181,12 +183,16 @@ class Connection(state.State):
             self.callbacks.on_closed(self.name)
 
     def on_blocked(self, *args, **kwargs):
-        LOGGER.warning('Connection %s is blocked: (%r %r)', args, kwargs)
+        LOGGER.warning(
+            'Connection %s is blocked: (%r %r)', self.name, args, kwargs
+        )
         self.blocked = True
         self.callbacks.on_blocked(self.name)
 
     def on_unblocked(self, *args, **kwargs):
-        LOGGER.warning('Connection %s is unblocked: (%r %r)', args, kwargs)
+        LOGGER.warning(
+            'Connection %s is unblocked: (%r %r)', self.name, args, kwargs
+        )
         self.blocked = False
         self.callbacks.on_unblocked(self.name)
 
@@ -383,9 +389,10 @@ class Connection(state.State):
         if not ssl_options:
             return
 
-        context = ssl.SSLContext(
-            protocol=int(ssl_options.get('protocol', ssl.PROTOCOL_TLS))
-        )
+        protocol = ssl_options.get('protocol', ssl.PROTOCOL_TLS_CLIENT)
+        if isinstance(protocol, str):
+            protocol = getattr(ssl, protocol)
+        context = ssl.SSLContext(protocol)
 
         # Load a set of certification authority (CA) certificates
         if any(
@@ -425,6 +432,10 @@ class Process(multiprocessing.Process, state.State):
 
     # Additional State constants
     STATE_PROCESSING = 0x04
+    STATES: typing.ClassVar[dict[int, str]] = {
+        **state.State.STATES,
+        STATE_PROCESSING: 'Processing',
+    }
 
     # Counter constants
     ACKED = 'acked'
@@ -484,11 +495,9 @@ class Process(multiprocessing.Process, state.State):
         self.previous = None
         self.sentry_client = None
         self.state = self.STATE_INITIALIZING
+        self._tasks: set[asyncio.Task] = set()
         self.state_start = time.time()
         self.statsd = None
-
-        # Override ACTIVE with PROCESSING
-        self.STATES[0x04] = 'Processing'
 
     def ack_message(self, message):
         """Acknowledge the message on the broker and log the ack
@@ -629,7 +638,8 @@ class Process(multiprocessing.Process, state.State):
         async with self.consumer_lock:
             if self.is_idle:
                 self.set_state(self.STATE_PROCESSING)
-                self.delivery_time = start_time = time.time()
+                self.delivery_time = time.time()
+                start_time = time.monotonic()
                 self.active_message = message
 
                 self.measurement = data.Measurement()
@@ -669,9 +679,15 @@ class Process(multiprocessing.Process, state.State):
                     self.state_description,
                 )
         if self.pending:
-            asyncio.ensure_future(  # noqa: RUF006
-                self.invoke_consumer(self.pending.popleft())
-            )
+            self._schedule(self.invoke_consumer(self.pending.popleft()))
+
+    def _schedule(self, coro):
+        """Schedule a coroutine as a fire-and-forget task, keeping a reference
+        to prevent it from being garbage-collected before completion.
+        """
+        task = asyncio.create_task(coro)
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
 
     @property
     def is_processing(self):
@@ -731,12 +747,12 @@ class Process(multiprocessing.Process, state.State):
     def on_connection_blocked(self, name):
         LOGGER.warning('Connection %s blocked', name)
         if self.is_processing:
-            asyncio.ensure_future(self.consumer.on_blocked(name))  # noqa: RUF006
+            self._schedule(self.consumer.on_blocked(name))
 
     def on_connection_unblocked(self, name):
         LOGGER.info('Connection %s unblocked', name)
         if self.is_processing:
-            asyncio.ensure_future(self.consumer.on_unblocked(name))  # noqa: RUF006
+            self._schedule(self.consumer.on_unblocked(name))
 
     def on_confirmation(self, name, delivered, delivery_tag):
         """Invoked on delivery confirmation
@@ -763,7 +779,7 @@ class Process(multiprocessing.Process, state.State):
         if self.is_processing:
             self.pending.append(message)
         else:
-            asyncio.ensure_future(self.invoke_consumer(message))  # noqa: RUF006
+            self._schedule(self.invoke_consumer(message))
 
     def on_returned(self, name, channel, method, properties, body):
         """Send a message to the consumer that was returned by RabbitMQ
@@ -780,7 +796,7 @@ class Process(multiprocessing.Process, state.State):
         if self.is_processing:
             self.pending.append(message)
         else:
-            asyncio.ensure_future(self.invoke_consumer(message))  # noqa: RUF006
+            self._schedule(self.invoke_consumer(message))
 
     def on_processed(self, message, result, start_time):
         """Invoked after a message is processed by the consumer and
@@ -792,7 +808,7 @@ class Process(multiprocessing.Process, state.State):
         :param float start_time: When the message was received
 
         """
-        duration = max(start_time, time.time()) - start_time
+        duration = time.monotonic() - start_time
         self.counters[self.TIME_SPENT] += duration
         self.measurement.add_duration(self.TIME_SPENT, duration)
 
@@ -998,10 +1014,6 @@ class Process(multiprocessing.Process, state.State):
         asyncio.set_event_loop(self.ioloop)
         self.consumer_lock = asyncio.Lock()
 
-        self.sentry_client = self.setup_sentry(
-            self._kwargs['config'], self.consumer_name
-        )
-
         try:
             self.setup()
         except (AttributeError, ImportError) as error:
@@ -1009,6 +1021,10 @@ class Process(multiprocessing.Process, state.State):
             return self.on_startup_error(
                 f'Failed to import the Python module for {self.consumer_name}'
             )
+
+        self.sentry_client = self.setup_sentry(
+            self._kwargs['config'], self.consumer_name
+        )
 
         if not self.is_stopped:
             try:
@@ -1032,16 +1048,32 @@ class Process(multiprocessing.Process, state.State):
             duration = math.ceil(time.time() - self.delivery_time) * 1000
         except TypeError:
             duration = 0
-        kwargs = {
-            'extra': {
-                'consumer_name': self.consumer_name,
-                'env': dict(os.environ),
-                'message': message,
-            },
-            'time_spent': duration,
-        }
-        LOGGER.debug('Sending exception to sentry: %r', kwargs)
-        self.sentry_client.captureException(exc_info, **kwargs)
+        LOGGER.debug('Sending exception to sentry')
+        with sentry_sdk.new_scope() as scope:
+            scope.set_extra('consumer_name', self.consumer_name)
+            scope.set_extra(
+                'env',
+                {
+                    k: v
+                    for k, v in os.environ.items()
+                    if not any(
+                        s in k.upper()
+                        for s in (
+                            'KEY',
+                            'SECRET',
+                            'TOKEN',
+                            'PASSWORD',
+                            'DSN',
+                            'CREDENTIAL',
+                            'AUTH',
+                            'PRIVATE',
+                        )
+                    )
+                },
+            )
+            scope.set_extra('message', message)
+            scope.set_extra('time_spent', duration)
+            sentry_sdk.capture_exception(exc_info, scope=scope)
 
     def setup(self):
         """Initialize the consumer, setting up needed attributes and connecting
@@ -1086,16 +1118,13 @@ class Process(multiprocessing.Process, state.State):
         for key in {'ENVIRONMENT', 'SERVICE'}:
             if key in os.environ:
                 base_tags[key.lower()] = os.environ[key]
+        scheme = config.get(
+            'scheme', os.environ.get('INFLUXDB_SCHEME', 'http')
+        )
+        host = config.get('host', os.environ.get('INFLUXDB_HOST', 'localhost'))
+        port = config.get('port', os.environ.get('INFLUXDB_PORT', '8086'))
         influxdb.install(
-            '{}://{}:{}/write'.format(
-                config.get(
-                    'scheme', os.environ.get('INFLUXDB_SCHEME', 'http')
-                ),
-                config.get(
-                    'host', os.environ.get('INFLUXDB_HOST', 'localhost')
-                ),
-                config.get('port', os.environ.get('INFLUXDB_PORT', '8086')),
-            ),
+            f'{scheme}://{host}:{port}/write',
             config.get('user', os.environ.get('INFLUXDB_USER')),
             config.get('password', os.environ.get('INFLUXDB_PASSWORD')),
             base_tags=base_tags,
@@ -1142,48 +1171,30 @@ class Process(multiprocessing.Process, state.State):
             LOGGER.debug('InfluxDB measurements configured: %r', self.influxdb)
 
     def setup_sentry(self, cfg, consumer_name):
-        # Setup the Sentry client if configured and installed
+        # Setup Sentry if configured and sentry_sdk is installed
         sentry_dsn = cfg['Consumers'][consumer_name].get(
             'sentry_dsn', cfg.get('sentry_dsn')
         )
-        if not raven or not sentry_dsn:
-            return
-        consumer = cfg['Consumers'][consumer_name]['consumer'].split('.')[0]
+        if not sentry_sdk or not sentry_dsn:
+            return False
         kwargs = {
-            'exclude_paths': [],
-            'include_paths': [
-                'pika',
-                'rejected',
-                'raven',
-                'tornado',
-                consumer,
-            ],
-            'ignore_exceptions': [
+            'dsn': sentry_dsn,
+            'send_default_pii': False,
+            'ignore_errors': [
                 'rejected.consumer.ConsumerException',
                 'rejected.consumer.MessageException',
                 'rejected.consumer.ProcessingException',
             ],
-            'processors': ['raven.processors.SanitizePasswordsProcessor'],
+            'integrations': [
+                LoggingIntegration(level=None, event_level=None),
+            ],
         }
-
         if os.environ.get('ENVIRONMENT'):
             kwargs['environment'] = os.environ['ENVIRONMENT']
-
         if self.consumer_version:
-            kwargs['version'] = self.consumer_version
-
-        for logger in {
-            'pika',
-            'pika.channel',
-            'pika.connection',
-            'pika.callback',
-            'pika.heartbeat',
-            'rejected.process',
-            'rejected.state',
-        }:
-            breadcrumbs.ignore_logger(logger)
-
-        return AsyncSentryClient(sentry_dsn, **kwargs)
+            kwargs['release'] = self.consumer_version
+        sentry_sdk.init(**kwargs)
+        return True
 
     def setup_sighandlers(self):
         """Setup the stats and stop signal handlers."""

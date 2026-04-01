@@ -54,9 +54,9 @@ from pika import channel, spec
 from pika.adapters import asyncio_connection
 
 try:
-    import raven
+    import sentry_sdk
 except ImportError:
-    raven = None
+    sentry_sdk = None
 
 from . import consumer, data, process
 
@@ -298,7 +298,7 @@ class AsyncTestCase(unittest.IsolatedAsyncioTestCase):
     def _create_process(self):
         obj = mock.Mock(spec=process.Process)
         obj.connections = {'mock': self._create_connection()}
-        obj.sentry_client = mock.Mock(spec=raven.Client) if raven else None
+        obj.sentry_client = True if sentry_sdk else None
         return obj
 
 

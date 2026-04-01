@@ -66,12 +66,10 @@ except ImportError:
     LOGGER.warning('umsgpack not found, disabling msgpack support')
     umsgpack = None
 
-# Python3 Support
 try:
-    unicode()
-except NameError:
-    unicode = str
-
+    import sentry_sdk
+except ImportError:
+    sentry_sdk = None
 
 DEFAULT_CHANNEL = 'default'
 _DROPPED_MESSAGE = 'X-Rejected-Dropped'
@@ -193,10 +191,16 @@ class Consumer:
         self._correlation_id = None
         self._drop_exchange = drop_exchange or self.DROP_EXCHANGE
         self._drop_invalid = (
-            drop_invalid_messages or self.DROP_INVALID_MESSAGES
+            self.DROP_INVALID_MESSAGES
+            if drop_invalid_messages is None
+            else drop_invalid_messages
         )
         self._error_exchange = error_exchange or self.ERROR_EXCHANGE
-        self._error_max_retry = error_max_retry or self.ERROR_MAX_RETRY
+        self._error_max_retry = (
+            self.ERROR_MAX_RETRY
+            if error_max_retry is None
+            else error_max_retry
+        )
         self._finished = False
         self._message = None
         self._message_type = message_type or self.MESSAGE_TYPE
@@ -313,7 +317,7 @@ class Consumer:
         """
         self.logger.debug('shutdown invoked')
 
-    """Utility Methods for use by Consumer Code"""
+    # Utility Methods for use by Consumer Code
 
     async def finish(self):
         """Finishes message processing for the current message. If this is
@@ -433,11 +437,11 @@ class Consumer:
         :param str value: The context value
 
         """
-        if self.sentry_client:
+        if sentry_sdk and self._process and self._process.sentry_client:
             self.logger.debug(
                 'Setting sentry context for %s to %s', tag, value
             )
-            self.sentry_client.tags_context({tag: value})
+            sentry_sdk.set_tag(tag, value)
 
     def stats_add_duration(self, key, duration):
         """Add a duration to the per-message measurements
@@ -554,13 +558,11 @@ class Consumer:
         :param str key: The key for the timing to track
 
         """
-        start_time = time.time()
+        start_time = time.monotonic()
         try:
             yield
         finally:
-            self.stats_add_duration(
-                key, max(start_time, time.time()) - start_time
-            )
+            self.stats_add_duration(key, time.monotonic() - start_time)
 
     def statsd_track_duration(self, key):
         """Time around a context and add to the the per-message measurements
@@ -583,8 +585,8 @@ class Consumer:
         :param str tag: The context tag to remove
 
         """
-        if self.sentry_client:
-            self.sentry_client.tags.pop(tag, None)
+        if sentry_sdk and self._process and self._process.sentry_client:
+            sentry_sdk.get_isolation_scope().remove_tag(tag)
 
     async def yield_to_ioloop(self):
         """Function that will allow Rejected to process IOLoop events while
@@ -772,7 +774,7 @@ class Consumer:
         """
         if not self._message:
             return None
-        return self._message.redelivered
+        return self._message.returned
 
     @property
     def routing_key(self):
@@ -796,21 +798,6 @@ class Consumer:
         if not self._message:
             return None
         return self._message.properties.type
-
-    @property
-    def sentry_client(self):
-        """Access the Sentry raven ``Client`` instance or ``None``
-
-        Use this object to add tags or additional context to Sentry
-        error reports (see :meth:`raven.base.Client.tags_context`) or
-        to report messages (via :meth:`raven.base.Client.captureMessage`)
-        directly to Sentry.
-
-        :rtype: :class:`raven.base.Client`
-
-        """
-        if hasattr(self._process, 'sentry_client'):
-            return self._process.sentry_client
 
     @property
     def settings(self):
@@ -936,7 +923,7 @@ class Consumer:
                 error,
             )
             self._measurement.set_tag('exception', error.__class__.__name__)
-            return None
+            return data.MESSAGE_REQUEUE
 
         except exceptions.ConnectionClosed as error:
             self.logger.critical(
@@ -945,7 +932,7 @@ class Consumer:
                 str(error),
             )
             self._measurement.set_tag('exception', error.__class__.__name__)
-            return None
+            return data.MESSAGE_REQUEUE
 
         except ConsumerException as error:
             self.logger.error(
@@ -1050,8 +1037,8 @@ class Consumer:
 
         """
         if name not in self.settings:
-            raise Exception(
-                f'You must define the "{name}" setting in to use {feature}'
+            raise ValueError(
+                f'You must define the "{name}" setting to use {feature}'
             )
 
     def set_channel(self, name, channel):
@@ -1082,14 +1069,6 @@ class Consumer:
         self._finished = False
         self._message = None
         self._message_body = None
-
-    def _get_exc_info(self, result):
-        if asyncio.isfuture(result):
-            exc = result.exception()
-            if exc is not None:
-                tb = exc.__traceback__
-                return type(exc), exc, tb
-        return sys.exc_info()
 
     @staticmethod
     def _get_pika_properties(properties_in):
@@ -1284,11 +1263,7 @@ class SmartConsumer(Consumer):
 
         """
         # Auto-serialize the content if needed
-        is_string = (
-            isinstance(body, str)
-            or isinstance(body, bytes)
-            or isinstance(body, unicode)
-        )
+        is_string = isinstance(body, (str, bytes))
         if (
             not no_serialization
             and not is_string

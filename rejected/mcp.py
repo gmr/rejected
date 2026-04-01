@@ -665,7 +665,7 @@ class MasterControlProgram(state.State):
                 'Failed to start %s for %s: %r', process_name, name, error
             )
             try:
-                del self.consumers[name].process[process_name]
+                del self.consumers[name].processes[process_name]
             except AttributeError as error:
                 LOGGER.warning('Could not cleanup consumer process: %s', error)
 

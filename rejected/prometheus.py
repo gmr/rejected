@@ -4,6 +4,7 @@ Exposes per-consumer metrics via an HTTP endpoint that Prometheus scrapes.
 Requires ``rejected[prometheus]`` to be installed.
 
 """
+
 import logging
 
 try:
@@ -32,8 +33,7 @@ def start(port: int) -> None:
 
     if not prometheus_client:
         LOGGER.error(
-            'prometheus_client is not installed; '
-            'install rejected[prometheus]'
+            'prometheus_client is not installed; install rejected[prometheus]'
         )
         return
 
@@ -78,15 +78,9 @@ def update(stats: dict) -> None:
 
     consumers = stats.get('consumers', {})
     for name, data in consumers.items():
-        _messages_processed.labels(consumer=name).set(
-            data.get('processed', 0)
-        )
-        _messages_failed.labels(consumer=name).set(
-            data.get('failed', 0)
-        )
+        _messages_processed.labels(consumer=name).set(data.get('processed', 0))
+        _messages_failed.labels(consumer=name).set(data.get('failed', 0))
         _messages_redelivered.labels(consumer=name).set(
             data.get('redelivered', 0)
         )
-        _consumer_processes.labels(consumer=name).set(
-            data.get('processes', 0)
-        )
+        _consumer_processes.labels(consumer=name).set(data.get('processes', 0))

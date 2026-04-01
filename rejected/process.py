@@ -490,7 +490,7 @@ class Process(multiprocessing.Process, state.State):
         self.last_stats_time = None
         self.measurement = None
         self.message_connection_id = None
-        self.pending = collections.deque(maxlen=self.qos_prefetch)
+        self.pending = collections.deque()
         self.prepend_path = None
         self.previous = None
         self.sentry_client = None

@@ -2,8 +2,7 @@
 The :class:`rejected.testing.AsyncTestCase` provides a based class for the
 easy creation of tests for your consumers. The test cases exposes multiple
 methods to make it easy to setup a consumer and process messages. It is
-build on top of :class:`tornado.testing.AsyncTestCase` which extends
-:class:`unittest.TestCase`.
+built on top of :class:`unittest.IsolatedAsyncioTestCase`.
 
 To get started, override the
 :meth:`rejected.testing.AsyncTestCase.get_consumer` method.
@@ -15,8 +14,7 @@ Finally, to invoke your Consumer as if it were receiving a message, the
 :meth:`~rejected.testing.AsyncTestCase.process_message` method should be
 invoked.
 
-.. note:: Tests are asynchronous, so each test should be decorated with
-            :meth:`~rejected.testing.gen_test`.
+.. note:: Tests are asynchronous; define test methods as ``async def``.
 
 Example
 -------
@@ -38,27 +36,22 @@ consumer, the consumer will raise a :exc:`~rejected.consumer.MessageException`.
         def get_settings(self):
             return {'remote_url': 'http://foo'}
 
-        @testing.gen_test
-        def test_consumer_raises_message_exception(self):
+        async def test_consumer_raises_message_exception(self):
             with self.assertRaises(consumer.MessageException):
-                yield self.process_message({'foo': 'bar'})
+                await self.process_message({'foo': 'bar'})
 
 """
 
 import json
 import logging
 import time
+import unittest
 import uuid
-
-try:
-    from unittest import mock
-except ImportError:
-    from unittest import mock
+from unittest import mock
 
 from helper import config
 from pika import channel, spec
-from pika.adapters import tornado_connection
-from tornado import gen, ioloop, testing
+from pika.adapters import asyncio_connection
 
 try:
     import raven
@@ -69,31 +62,25 @@ from . import consumer, data, process
 
 LOGGER = logging.getLogger(__name__)
 
-gen_test = testing.gen_test
-"""Testing equivalent of :func:`tornado.gen.coroutine`, to be applied to test
-methods.
 
-"""
-
-
-class AsyncTestCase(testing.AsyncTestCase):
-    """:class:`tornado.testing.AsyncTestCase` subclass for testing
+class AsyncTestCase(unittest.IsolatedAsyncioTestCase):
+    """:class:`unittest.IsolatedAsyncioTestCase` subclass for testing
     :class:`~rejected.consumer.Consumer` classes.
 
     """
 
     _consumer = None
 
-    def setUp(self):
-        super().setUp()
+    async def asyncSetUp(self):
+        await super().asyncSetUp()
         self.correlation_id = str(uuid.uuid4())
         self.process = self._create_process()
         self.consumer = self._create_consumer()
         self.channel = self.process.connections['mock'].channel
         self.exc_info = None
 
-    def tearDown(self):
-        super().tearDown()
+    async def asyncTearDown(self):
+        await super().asyncTearDown()
         if not self.consumer._finished:
             self.consumer.finish()
 
@@ -213,8 +200,7 @@ class AsyncTestCase(testing.AsyncTestCase):
         """
         return self.consumer._measurement
 
-    @gen.coroutine
-    def process_message(
+    async def process_message(
         self,
         message_body=None,
         content_type='application/json',
@@ -239,13 +225,12 @@ class AsyncTestCase(testing.AsyncTestCase):
 
             class ConsumerTestCase(testing.AsyncTestCase):
 
-                @testing.gen_test
-                def test_consumer_raises_message_exception(self):
+                async def test_consumer_raises_message_exception(self):
                     with self.assertRaises(consumer.MessageException):
-                        result = yield self.process_message({'foo': 'bar'})
+                        result = await self.process_message({'foo': 'bar'})
 
 
-        .. note:: This method is a co-routine and must be yielded to ensure
+        .. note:: This method is a coroutine and must be awaited to ensure
                   that your tests are functioning properly.
 
         :param any message_body: the body of the message to create
@@ -269,7 +254,7 @@ class AsyncTestCase(testing.AsyncTestCase):
         measurement = data.Measurement()
 
         self.consumer.log_exception = self.log_exception
-        result = yield self.consumer.execute(
+        result = await self.consumer.execute(
             self.create_message(
                 message_body, properties, exchange, routing_key
             ),
@@ -285,15 +270,14 @@ class AsyncTestCase(testing.AsyncTestCase):
             if self.exc_info:
                 raise self.exc_info[1]
             raise AssertionError('UNHANDLED_EXCEPTION')
-        raise gen.Return(measurement)
+        return measurement
 
     @staticmethod
     def _create_channel():
         return mock.Mock(spec=channel.Channel)
 
     def _create_connection(self):
-        obj = mock.Mock(spec=tornado_connection.TornadoConnection)
-        obj.ioloop = ioloop.IOLoop.current()
+        obj = mock.Mock(spec=asyncio_connection.AsyncioConnection)
         obj.channel = self._create_channel()
         obj.channel.connection = obj
         return obj

@@ -1,19 +1,20 @@
 """Tests for rejected.process"""
 
+import asyncio
 import copy
 import signal
 import typing
+import unittest
 from unittest import mock
 
 from helper import config as helper_config
-from tornado import locks, testing
 
 from rejected import __version__, consumer, data, process
 
 from . import mocks, test_state
 
 
-class TestProcess(testing.AsyncTestCase, test_state.TestState):
+class TestProcess(unittest.IsolatedAsyncioTestCase, test_state.TestState):
     config: typing.ClassVar[dict] = {
         'stats': {
             'influxdb': {'enabled': False},
@@ -84,11 +85,11 @@ class TestProcess(testing.AsyncTestCase, test_state.TestState):
         'logging_config': helper_config.Config.LOGGING,
     }
 
-    def setUp(self):
-        super().setUp()
+    async def asyncSetUp(self):
+        await super().asyncSetUp()
         self._obj = self.new_process()
 
-    def tearDown(self):
+    async def asyncTearDown(self):
         del self._obj
 
     def new_kwargs(self, kwargs):
@@ -279,8 +280,7 @@ class TestProcess(testing.AsyncTestCase, test_state.TestState):
             self._obj.STATES[self._obj.STATE_PROCESSING],
         )
 
-    @testing.gen_test
-    def test_invoke_consumer_when_amqp_conn_is_connected(self):
+    async def test_invoke_consumer_when_amqp_conn_is_connected(self):
         mock_process = self.mock_setup()
         mock_process.counters[mock_process.CLOSED_ON_COMPLETE] = 5
 
@@ -288,7 +288,7 @@ class TestProcess(testing.AsyncTestCase, test_state.TestState):
         mock_process.consumer.execute.side_effect = Exception('blow up!')
 
         # mimic running process
-        mock_process.consumer_lock = locks.Lock()
+        mock_process.consumer_lock = asyncio.Lock()
         mock_process.state = mock_process.STATE_IDLE
 
         # configure mock conn
@@ -306,7 +306,7 @@ class TestProcess(testing.AsyncTestCase, test_state.TestState):
             False,
         )
 
-        yield mock_process.invoke_consumer(message)
+        await mock_process.invoke_consumer(message)
 
         self.assertEqual(mock_conn.shutdown.call_count, 0)
         self.assertEqual(mocks.CHANNEL.basic_nack.call_count, 1)
@@ -314,8 +314,7 @@ class TestProcess(testing.AsyncTestCase, test_state.TestState):
             mock_process.counters[mock_process.CLOSED_ON_COMPLETE], 5
         )
 
-    @testing.gen_test
-    def test_invoke_consumer_when_amqp_conn_is_not_connected(self):
+    async def test_invoke_consumer_when_amqp_conn_is_not_connected(self):
         mock_process = self.mock_setup()
         mock_process.counters[mock_process.CLOSED_ON_COMPLETE] = 5
 
@@ -323,7 +322,7 @@ class TestProcess(testing.AsyncTestCase, test_state.TestState):
         mock_process.consumer.execute.side_effect = Exception('blow up!')
 
         # mimic running process
-        mock_process.consumer_lock = locks.Lock()
+        mock_process.consumer_lock = asyncio.Lock()
         mock_process.state = mock_process.STATE_IDLE
 
         # configure mock conn
@@ -341,7 +340,7 @@ class TestProcess(testing.AsyncTestCase, test_state.TestState):
             False,
         )
 
-        yield mock_process.invoke_consumer(message)
+        await mock_process.invoke_consumer(message)
 
         self.assertEqual(mock_conn.shutdown.call_count, 1)
         self.assertEqual(mocks.CHANNEL.basic_ack.call_count, 0)

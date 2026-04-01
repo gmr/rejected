@@ -29,6 +29,7 @@ Supported `SmartConsumer` MIME types are:
 
 """
 
+import asyncio
 import bz2
 import contextlib
 import csv
@@ -47,7 +48,6 @@ import zlib
 import pika
 import yaml
 from pika import exceptions
-from tornado import concurrent, gen, locks
 
 from . import data, log
 
@@ -204,7 +204,6 @@ class Consumer:
         self._message_body = None
         self._process = process
         self._settings = settings
-        self._yield_condition = locks.Condition()
 
         # Create a logger that attaches correlation ID to the record
         self._logger = logging.getLogger(
@@ -229,11 +228,11 @@ class Consumer:
         """Called when a message is received before
         :meth:`~rejected.consumer.Consumer.process`.
 
-        .. note:: Asynchronous support: Decorate this method with
-            :func:`tornado.gen.coroutine` to make it asynchronous.
+        .. note:: Asynchronous support: Define this method as ``async def``
+            to make it asynchronous.
 
-        If this method returns a :class:`~tornado.concurrent.Future`, execution
-        will not proceed until the Future has completed.
+        If this method returns a coroutine or :class:`asyncio.Future`,
+        execution will not proceed until the Future has completed.
 
         """
         pass
@@ -245,8 +244,8 @@ class Consumer:
         n failures to process messages, raise the
         :exc:`~rejected.consumer.ConsumerException`.
 
-        .. note:: Asynchronous support: Decorate this method with
-            :func:`tornado.gen.coroutine` to make it asynchronous.
+        .. note:: Asynchronous support: Define this method as ``async def``
+            to make it asynchronous.
 
         :raises: :exc:`rejected.consumer.ConsumerException`
         :raises: :exc:`rejected.consumer.MessageException`
@@ -279,8 +278,8 @@ class Consumer:
         If an exception is raised during the processing of a message,
         :meth:`~rejected.consumer.Consumer.prepare` is not invoked.
 
-        .. note:: Asynchronous support: Decorate this method with
-            :func:`tornado.gen.coroutine` to make it asynchronous.
+        .. note:: Asynchronous support: Define this method as ``async def``
+            to make it asynchronous.
 
         """
         self.logger.debug('on_finished invoked')
@@ -591,18 +590,12 @@ class Consumer:
         if self.sentry_client:
             self.sentry_client.tags.pop(tag, None)
 
-    @gen.coroutine
-    def yield_to_ioloop(self):
+    async def yield_to_ioloop(self):
         """Function that will allow Rejected to process IOLoop events while
         in a tight-loop inside an asynchronous consumer.
 
         """
-        try:
-            yield self._yield_condition.wait(
-                self._message.channel.connection.ioloop.time() + 0.001
-            )
-        except gen.TimeoutError:
-            pass
+        await asyncio.sleep(0.001)
 
     """Quick-access properties"""
 
@@ -705,15 +698,15 @@ class Consumer:
 
     @property
     def io_loop(self):
-        """Access the :py:class:`tornado.ioloop.IOLoop` instance for the
+        """Access the :py:class:`asyncio.AbstractEventLoop` instance for the
         current message.
 
         .. versionadded:: 3.18.4
 
-        :rtype: tornado.ioloop.IOLoop
+        :rtype: asyncio.AbstractEventLoop
 
         """
-        return self._message.channel.connection.ioloop
+        return asyncio.get_event_loop()
 
     @property
     def message_id(self):
@@ -871,8 +864,7 @@ class Consumer:
 
     """Internal Methods"""
 
-    @gen.coroutine
-    def execute(self, message_in, measurement):
+    async def execute(self, message_in, measurement):
         """Process the message from RabbitMQ. To implement logic for processing
         a message, extend Consumer._process, not this method.
 
@@ -924,8 +916,8 @@ class Consumer:
                 if self._drop_invalid:
                     if self._drop_exchange:
                         self._republish_dropped_message('invalid type')
-                    raise gen.Return(data.MESSAGE_DROP)
-                raise gen.Return(data.MESSAGE_EXCEPTION)
+                    return data.MESSAGE_DROP
+                return data.MESSAGE_EXCEPTION
 
         # Check the number of ProcessingErrors and possibly drop the message
         if self._error_max_retry and _PROCESSING_EXCEPTIONS in self.headers:
@@ -938,23 +930,23 @@ class Consumer:
                     self._republish_dropped_message(
                         f'max retries ({self.headers[_PROCESSING_EXCEPTIONS]})'
                     )
-                raise gen.Return(data.MESSAGE_DROP)
+                return data.MESSAGE_DROP
 
         result = None
         try:
             result = self.prepare()
-            if concurrent.is_future(result):
-                yield result
+            if asyncio.isfuture(result) or asyncio.iscoroutine(result):
+                await result
             if not self._finished:
                 result = self.process()
-                if concurrent.is_future(result):
-                    yield result
-                    self.logger.debug('Post yield of future process')
+                if asyncio.isfuture(result) or asyncio.iscoroutine(result):
+                    await result
+                    self.logger.debug('Post await of coroutine/future process')
         except KeyboardInterrupt:
             self.logger.debug('CTRL-C')
             self._process.reject(message_in.delivery_tag, True)
             self._process.stop()
-            raise gen.Return(data.MESSAGE_REQUEUE)
+            return data.MESSAGE_REQUEUE
 
         except exceptions.ChannelClosed as error:
             self.logger.critical(
@@ -963,7 +955,7 @@ class Consumer:
                 error,
             )
             self._measurement.set_tag('exception', error.__class__.__name__)
-            raise gen.Return(None)
+            return None
 
         except exceptions.ConnectionClosed as error:
             self.logger.critical(
@@ -972,7 +964,7 @@ class Consumer:
                 str(error),
             )
             self._measurement.set_tag('exception', error.__class__.__name__)
-            raise gen.Return(None)
+            return None
 
         except ConsumerException as error:
             self.logger.error(
@@ -983,7 +975,7 @@ class Consumer:
             self._measurement.set_tag('exception', error.__class__.__name__)
             if error.metric:
                 self._measurement.set_tag('error', error.metric)
-            raise gen.Return(data.CONSUMER_EXCEPTION)
+            return data.CONSUMER_EXCEPTION
 
         except MessageException as error:
             self.logger.info(
@@ -994,7 +986,7 @@ class Consumer:
             self._measurement.set_tag('exception', error.__class__.__name__)
             if error.metric:
                 self._measurement.set_tag('error', error.metric)
-            raise gen.Return(data.MESSAGE_EXCEPTION)
+            return data.MESSAGE_EXCEPTION
 
         except ProcessingException as error:
             self.logger.warning(
@@ -1008,7 +1000,7 @@ class Consumer:
             self._republish_processing_error(
                 error.metric or error.__class__.__name__
             )
-            raise gen.Return(data.PROCESSING_EXCEPTION)
+            return data.PROCESSING_EXCEPTION
 
         except NotImplementedError as error:
             self.log_exception(
@@ -1018,7 +1010,7 @@ class Consumer:
                 exc_info=self._get_exc_info(result),
             )
             self._measurement.set_tag('exception', 'UnhandledException')
-            raise gen.Return(data.UNHANDLED_EXCEPTION)
+            return data.UNHANDLED_EXCEPTION
 
         except Exception as error:
             self.log_exception(
@@ -1028,12 +1020,12 @@ class Consumer:
                 exc_info=self._get_exc_info(result),
             )
             self._measurement.set_tag('exception', 'UnhandledException')
-            raise gen.Return(data.UNHANDLED_EXCEPTION)
+            return data.UNHANDLED_EXCEPTION
 
         if not self._finished:
             self.finish()
         self.logger.debug('Post finish')
-        raise gen.Return(data.MESSAGE_ACK)
+        return data.MESSAGE_ACK
 
     def log_exception(self, msg_format, *args, exc_info):
         """Customize the logging of uncaught exceptions.
@@ -1111,11 +1103,11 @@ class Consumer:
         self._message_body = None
 
     def _get_exc_info(self, result):
-        if concurrent.is_future(result):
-            try:
-                return result.exc_info()
-            except AttributeError:
-                pass
+        if asyncio.isfuture(result):
+            exc = result.exception()
+            if exc is not None:
+                tb = exc.__traceback__
+                return type(exc), exc, tb
         return sys.exc_info()
 
     @staticmethod

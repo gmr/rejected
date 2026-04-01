@@ -14,12 +14,53 @@ except ImportError:
 
 LOGGER = logging.getLogger(__name__)
 
-_messages_processed = None
-_messages_failed = None
-_messages_redelivered = None
-_consumer_processes = None
-_previous: dict[str, dict[str, int]] = {}
+_metrics: dict = {}
+_previous: dict[str, dict[str, float]] = {}
 _started = False
+
+# Counter keys from process.Process that map to Prometheus Counters.
+# Each entry is (process counter key, prometheus metric name, help text).
+_COUNTER_DEFS = [
+    ('acked', 'rejected_messages_acked_total', 'Total messages acknowledged'),
+    ('dropped', 'rejected_messages_dropped_total', 'Total messages dropped'),
+    (
+        'failed',
+        'rejected_messages_failed_total',
+        'Total messages that resulted in errors',
+    ),
+    (
+        'nacked',
+        'rejected_messages_nacked_total',
+        'Total messages negatively acknowledged',
+    ),
+    (
+        'processed',
+        'rejected_messages_processed_total',
+        'Total messages processed',
+    ),
+    (
+        'redelivered',
+        'rejected_messages_redelivered_total',
+        'Total redelivered messages',
+    ),
+    (
+        'requeued',
+        'rejected_messages_requeued_total',
+        'Total messages requeued',
+    ),
+    (
+        'processing_time',
+        'rejected_processing_seconds_total',
+        'Total time spent processing messages in seconds',
+    ),
+]
+
+_EXCEPTION_TYPES = [
+    'consumer_exception',
+    'message_exception',
+    'processing_exception',
+    'unhandled_exception',
+]
 
 
 def start(port: int) -> None:
@@ -28,8 +69,7 @@ def start(port: int) -> None:
     :param int port: The port to listen on
 
     """
-    global _messages_processed, _messages_failed
-    global _messages_redelivered, _consumer_processes, _started
+    global _started
 
     if not prometheus_client:
         LOGGER.error(
@@ -41,22 +81,18 @@ def start(port: int) -> None:
         LOGGER.warning('Prometheus exporter already running')
         return
 
-    _messages_processed = prometheus_client.Counter(
-        'rejected_messages_processed_total',
-        'Total messages processed',
-        ['consumer'],
+    for key, name, help_text in _COUNTER_DEFS:
+        _metrics[key] = prometheus_client.Counter(
+            name, help_text, ['consumer']
+        )
+
+    _metrics['exceptions'] = prometheus_client.Counter(
+        'rejected_exceptions_total',
+        'Total consumer exceptions',
+        ['consumer', 'type'],
     )
-    _messages_failed = prometheus_client.Counter(
-        'rejected_messages_failed_total',
-        'Total messages that resulted in errors',
-        ['consumer'],
-    )
-    _messages_redelivered = prometheus_client.Counter(
-        'rejected_messages_redelivered_total',
-        'Total redelivered messages',
-        ['consumer'],
-    )
-    _consumer_processes = prometheus_client.Gauge(
+
+    _metrics['processes'] = prometheus_client.Gauge(
         'rejected_consumer_processes',
         'Number of active consumer processes',
         ['consumer'],
@@ -70,7 +106,7 @@ def start(port: int) -> None:
 def update(stats: dict) -> None:
     """Update Prometheus metrics from the MCP stats dict.
 
-    Computes deltas from the previous poll cycle to increment Counters.
+    Computes deltas from the previous poll to increment Counters.
 
     :param dict stats: The stats dict from MCP.calculate_stats()
 
@@ -81,18 +117,23 @@ def update(stats: dict) -> None:
     consumers = stats.get('consumers', {})
     for name, data in consumers.items():
         prev = _previous.get(name, {})
-        for key, counter in (
-            ('processed', _messages_processed),
-            ('failed', _messages_failed),
-            ('redelivered', _messages_redelivered),
-        ):
+
+        for key, _, _ in _COUNTER_DEFS:
             current = data.get(key, 0)
             delta = current - prev.get(key, 0)
             if delta > 0:
-                counter.labels(consumer=name).inc(delta)
-        _consumer_processes.labels(consumer=name).set(data.get('processes', 0))
-        _previous[name] = {
-            'processed': data.get('processed', 0),
-            'failed': data.get('failed', 0),
-            'redelivered': data.get('redelivered', 0),
-        }
+                _metrics[key].labels(consumer=name).inc(delta)
+
+        for exc_type in _EXCEPTION_TYPES:
+            current = data.get(exc_type, 0)
+            delta = current - prev.get(exc_type, 0)
+            if delta > 0:
+                _metrics['exceptions'].labels(
+                    consumer=name, type=exc_type
+                ).inc(delta)
+
+        _metrics['processes'].labels(consumer=name).set(
+            data.get('processes', 0)
+        )
+
+        _previous[name] = dict(data)

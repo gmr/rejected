@@ -226,9 +226,18 @@ class MasterControlProgram(state.State):
 
         """
         return {
+            process.Process.ACKED: 0,
+            process.Process.CONSUMER_EXCEPTION: 0,
+            process.Process.DROPPED: 0,
             process.Process.ERROR: 0,
+            process.Process.MESSAGE_EXCEPTION: 0,
+            process.Process.NACKED: 0,
             process.Process.PROCESSED: 0,
+            process.Process.PROCESSING_EXCEPTION: 0,
             process.Process.REDELIVERED: 0,
+            process.Process.REQUEUED: 0,
+            process.Process.TIME_SPENT: 0,
+            process.Process.UNHANDLED_EXCEPTION: 0,
         }
 
     def get_consumer_process(self, consumer, name):

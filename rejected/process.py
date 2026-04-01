@@ -389,7 +389,10 @@ class Connection(state.State):
         if not ssl_options:
             return
 
-        context = ssl.SSLContext()
+        protocol = ssl_options.get('protocol', ssl.PROTOCOL_TLS_CLIENT)
+        if isinstance(protocol, str):
+            protocol = getattr(ssl, protocol)
+        context = ssl.SSLContext(protocol)
 
         # Load a set of certification authority (CA) certificates
         if any(
@@ -1011,10 +1014,6 @@ class Process(multiprocessing.Process, state.State):
         asyncio.set_event_loop(self.ioloop)
         self.consumer_lock = asyncio.Lock()
 
-        self.sentry_client = self.setup_sentry(
-            self._kwargs['config'], self.consumer_name
-        )
-
         try:
             self.setup()
         except (AttributeError, ImportError) as error:
@@ -1022,6 +1021,10 @@ class Process(multiprocessing.Process, state.State):
             return self.on_startup_error(
                 f'Failed to import the Python module for {self.consumer_name}'
             )
+
+        self.sentry_client = self.setup_sentry(
+            self._kwargs['config'], self.consumer_name
+        )
 
         if not self.is_stopped:
             try:

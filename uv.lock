@@ -836,7 +836,7 @@ requires-dist = [
     { name = "pika", specifier = ">=1.2.0,<3" },
     { name = "psutil" },
     { name = "pyyaml", specifier = ">=5.3.1,<7" },
-    { name = "sentry-sdk", marker = "extra == 'sentry'", specifier = ">=2" },
+    { name = "sentry-sdk", marker = "extra == 'sentry'", specifier = ">=2,<3" },
     { name = "u-msgpack-python", marker = "extra == 'msgpack'" },
 ]
 provides-extras = ["html", "msgpack", "sentry"]

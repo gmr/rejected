@@ -43,8 +43,16 @@ class StatsdConfig(pydantic.BaseModel):
     include_hostname: bool = True
 
 
+class PrometheusConfig(pydantic.BaseModel):
+    enabled: bool = False
+    port: int = 9090
+
+
 class StatsConfig(pydantic.BaseModel):
     log: bool = False
+    prometheus: PrometheusConfig = pydantic.Field(
+        default_factory=PrometheusConfig
+    )
     statsd: StatsdConfig = pydantic.Field(default_factory=StatsdConfig)
 
 

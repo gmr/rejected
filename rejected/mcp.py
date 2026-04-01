@@ -14,7 +14,7 @@ import time
 
 import psutil
 
-from . import __version__, process, state
+from . import __version__, process, prometheus, state
 
 LOGGER = logging.getLogger(__name__)
 
@@ -206,6 +206,7 @@ class MasterControlProgram(state.State):
 
         # Calculate the stats
         self.stats = self.calculate_stats(self.last_poll_results)
+        prometheus.update(self.stats)
 
     @staticmethod
     def consumer_keyword(counts):
@@ -587,6 +588,9 @@ class MasterControlProgram(state.State):
         """
         self.set_state(self.STATE_ACTIVE)
         self.setup_consumers()
+
+        if self.config.stats.prometheus.enabled:
+            prometheus.start(self.config.stats.prometheus.port)
 
         # Set the SIGCHLD handler for child creation errors
         signal.signal(signal.SIGCHLD, self.on_sigchld)

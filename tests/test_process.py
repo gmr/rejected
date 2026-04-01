@@ -7,82 +7,89 @@ import typing
 import unittest
 from unittest import mock
 
-from helper import config as helper_config
-
-from rejected import __version__, consumer, data, process
+from rejected import (
+    __version__,
+    consumer,
+    data,
+    process,
+)
+from rejected import (
+    config as config_module,
+)
 
 from . import mocks, test_state
 
+# Raw config dict for building pydantic Config objects
+_CONFIG_RAW: typing.ClassVar[dict] = {
+    'stats': {
+        'influxdb': {'enabled': False},
+        'statsd': {'enabled': False},
+    },
+    'Connections': {
+        'MockConnection': {
+            'host': 'localhost',
+            'port': 5672,
+            'user': 'guest',
+            'pass': 'guest',
+            'vhost': '/',
+        },
+        'MockRemoteConnection': {
+            'host': 'remotehost',
+            'port': 5672,
+            'user': 'guest',
+            'pass': 'guest',
+            'vhost': '/',
+        },
+        'MockRemoteSSLConnection': {
+            'host': 'remotehost',
+            'port': 5672,
+            'user': 'guest',
+            'pass': 'guest',
+            'vhost': '/',
+            'ssl_options': {
+                'prototcol': 2,
+            },
+        },
+    },
+    'Consumers': {
+        'MockConsumer': {
+            'consumer': 'tests.mocks.MockConsumer',
+            'connections': ['MockConnection'],
+            'config': {'test_value': True, 'num_value': 100},
+            'max_errors': 10,
+            'qos_prefetch': 5,
+            'ack': True,
+            'queue': 'mock_queue',
+        },
+        'MockConsumer2': {
+            'consumer': 'mock_consumer.MockConsumer',
+            'connections': ['MockConnection', 'MockRemoteConnection'],
+            'config': {'num_value': 50},
+            'queue': 'mock_you',
+        },
+        'MockConsumer3': {
+            'consumer': 'mock_consumer.MockConsumer',
+            'connections': ['MockRemoteSSLConnection'],
+            'config': {'num_value': 50},
+            'queue': 'mock_you2',
+        },
+    },
+}
+
+
+def _make_config(raw=None) -> config_module.Config:
+    """Build a Config pydantic object from the raw dict."""
+    return config_module.Config.model_validate(raw or _CONFIG_RAW)
+
 
 class TestProcess(unittest.IsolatedAsyncioTestCase, test_state.TestState):
-    config: typing.ClassVar[dict] = {
-        'stats': {
-            'influxdb': {'enabled': False},
-            'statsd': {'enabled': False},
-        },
-        'Connections': {
-            'MockConnection': {
-                'host': 'localhost',
-                'port': 5672,
-                'user': 'guest',
-                'pass': 'guest',
-                'vhost': '/',
-            },
-            'MockRemoteConnection': {
-                'host': 'remotehost',
-                'port': 5672,
-                'user': 'guest',
-                'pass': 'guest',
-                'vhost': '/',
-            },
-            'MockRemoteSSLConnection': {
-                'host': 'remotehost',
-                'port': 5672,
-                'user': 'guest',
-                'pass': 'guest',
-                'vhost': '/',
-                'ssl_options': {
-                    'prototcol': 2,
-                },
-            },
-        },
-        'Consumers': {
-            'MockConsumer': {
-                'consumer': 'tests.mocks.MockConsumer',
-                'connections': ['MockConnection'],
-                'config': {'test_value': True, 'num_value': 100},
-                'min': 2,
-                'max': 5,
-                'max_errors': 10,
-                'qos_prefetch': 5,
-                'ack': True,
-                'queue': 'mock_queue',
-            },
-            'MockConsumer2': {
-                'consumer': 'mock_consumer.MockConsumer',
-                'connections': ['MockConnection', 'MockRemoteConnection'],
-                'config': {'num_value': 50},
-                'min': 1,
-                'max': 2,
-                'queue': 'mock_you',
-            },
-            'MockConsumer3': {
-                'consumer': 'mock_consumer.MockConsumer',
-                'connections': ['MockRemoteSSLConnection'],
-                'config': {'num_value': 50},
-                'min': 1,
-                'max': 2,
-                'queue': 'mock_you2',
-            },
-        },
-    }
-    logging_config = helper_config.LoggingConfig(helper_config.Config.LOGGING)
+    config: typing.ClassVar[config_module.Config] = _make_config()
 
     mock_args: typing.ClassVar[dict] = {
         'config': config,
         'consumer_name': 'MockConsumer',
         'stats_queue': 'StatsQueue',
-        'logging_config': helper_config.Config.LOGGING,
+        'logging_config': {},
     }
 
     async def asyncSetUp(self):
@@ -93,7 +100,7 @@ class TestProcess(unittest.IsolatedAsyncioTestCase, test_state.TestState):
         del self._obj
 
     def new_kwargs(self, kwargs):
-        return copy.deepcopy(kwargs)
+        return copy.copy(kwargs)
 
     def new_process(self, kwargs=None):
         with mock.patch('multiprocessing.Process'):
@@ -126,46 +133,49 @@ class TestProcess(unittest.IsolatedAsyncioTestCase, test_state.TestState):
         name = 'MockConsumer'
         number = 5
         pid = 1234
+        cfg = _make_config()
         expectation = {
-            'connection': self.config['Connections'][conn],
+            'connection': cfg.connections[conn],
             'consumer_name': name,
             'process_name': f'{name}_{pid}_tag_{number}',
         }
         with mock.patch('os.getpid', return_value=pid):
             self.assertEqual(
-                self._obj.get_config(self.config, number, name, conn),
+                self._obj.get_config(cfg, number, name, conn),
                 expectation,
             )
 
     def test_get_consumer_with_invalid_consumer(self):
-        cfg = self.config['Consumers']['MockConsumer2']
+        cfg = _make_config().consumers['MockConsumer2']
         self.assertIsNone(self._obj.get_consumer(cfg))
 
     def test_get_consumer_version_output(self):
-        config = {'consumer': 'tests.mocks.MockConsumer'}
+        cfg = config_module.ConsumerConfig(consumer='tests.mocks.MockConsumer')
         with mock.patch('logging.Logger.info') as info:
-            self._obj.get_consumer(config)
+            self._obj.get_consumer(cfg)
             info.assert_called_with(
                 'Creating consumer %s v%s',
-                config['consumer'],
+                cfg.consumer,
                 mocks.__version__,
             )
 
     @mock.patch.object(consumer.Consumer, '__init__', side_effect=ImportError)
     def test_get_consumer_with_config_is_none(self, mock_method):
-        config = {
-            'consumer': 'rejected.consumer.Consumer',
-            'config': {'field': 'value', 'true': True},
-        }
+        cfg = config_module.ConsumerConfig(
+            consumer='rejected.consumer.Consumer',
+            config={'field': 'value', 'true': True},
+        )
         new_process = self.new_process()
-        new_process.get_consumer(config)
-        self.assertIsNone(new_process.get_consumer(config))
+        new_process.get_consumer(cfg)
+        self.assertIsNone(new_process.get_consumer(cfg))
 
     @mock.patch.object(consumer.Consumer, '__init__', side_effect=ImportError)
     def test_get_consumer_with_no_config_is_none(self, mock_method):
-        config = {'consumer': 'rejected.consumer.Consumer'}
+        cfg = config_module.ConsumerConfig(
+            consumer='rejected.consumer.Consumer'
+        )
         new_process = self.new_process()
-        self.assertIsNone(new_process.get_consumer(config))
+        self.assertIsNone(new_process.get_consumer(cfg))
 
     def test_setup_signal_handlers(self):
         signals = [
@@ -203,33 +213,35 @@ class TestProcess(unittest.IsolatedAsyncioTestCase, test_state.TestState):
 
     def test_setup_config(self):
         mock_process = self.mock_setup()
-        config = self.config['Consumers']['MockConsumer']
-        self.assertEqual(mock_process.consumer_config, config)
+        expected = _make_config().consumers['MockConsumer']
+        self.assertEqual(mock_process.consumer_config, expected)
 
     def test_setup_config_queue_name(self):
         mock_process = self.mock_setup()
         self.assertEqual(
             mock_process.queue_name,
-            self.config['Consumers']['MockConsumer']['queue'],
+            _CONFIG_RAW['Consumers']['MockConsumer']['queue'],
         )
 
     def test_setup_config_no_ack(self):
         mock_process = self.mock_setup()
         self.assertEqual(
             mock_process.no_ack,
-            not self.config['Consumers']['MockConsumer']['ack'],
+            not _CONFIG_RAW['Consumers']['MockConsumer']['ack'],
         )
 
     def test_setup_max_error_count(self):
         mock_process = self.mock_setup()
         self.assertEqual(
             mock_process.max_error_count,
-            self.config['Consumers']['MockConsumer']['max_errors'],
+            _CONFIG_RAW['Consumers']['MockConsumer']['max_errors'],
         )
 
     def test_setup_prefetch_count_no_config(self):
-        args = copy.deepcopy(self.mock_args)
-        del args['config']['Consumers']['MockConsumer']['qos_prefetch']
+        raw = copy.deepcopy(_CONFIG_RAW)
+        del raw['Consumers']['MockConsumer']['qos_prefetch']
+        cfg = _make_config(raw)
+        args = {**self.mock_args, 'config': cfg}
         mock_process = self.new_process(args)
         mock_process.setup()
         self.assertEqual(
@@ -240,21 +252,45 @@ class TestProcess(unittest.IsolatedAsyncioTestCase, test_state.TestState):
         mock_process = self.mock_setup()
         self.assertEqual(
             mock_process.qos_prefetch,
-            self.config['Consumers']['MockConsumer']['qos_prefetch'],
+            _CONFIG_RAW['Consumers']['MockConsumer']['qos_prefetch'],
         )
 
     def test_setup_with_ssl_connection(self):
-        self.mock_args['consumer_name'] = 'MockConsumer3'
-        mock_process = self.mock_setup()
+        cfg = _make_config()
+        args = {
+            **self.mock_args,
+            'config': cfg,
+            'consumer_name': 'MockConsumer3',
+        }
+        new_process = self.new_process(args)
+        with mock.patch('signal.signal'):
+            with mock.patch(
+                'rejected.utils.import_consumer',
+                return_value=(mock.Mock, None),
+            ):
+                new_process.setup()
+        new_process.measurement = mock.Mock()
 
-        conn = mock_process.connections['MockRemoteSSLConnection'].connection
+        conn = new_process.connections['MockRemoteSSLConnection'].connection
         self.assertTrue(bool(conn.params.ssl_options))
 
     def test_setup_with_non_ssl_connection(self):
-        self.mock_args['consumer_name'] = 'MockConsumer2'
-        mock_process = self.mock_setup()
+        cfg = _make_config()
+        args = {
+            **self.mock_args,
+            'config': cfg,
+            'consumer_name': 'MockConsumer2',
+        }
+        new_process = self.new_process(args)
+        with mock.patch('signal.signal'):
+            with mock.patch(
+                'rejected.utils.import_consumer',
+                return_value=(mock.Mock, None),
+            ):
+                new_process.setup()
+        new_process.measurement = mock.Mock()
 
-        conn = mock_process.connections['MockRemoteConnection'].connection
+        conn = new_process.connections['MockRemoteConnection'].connection
         self.assertFalse(bool(conn.params.ssl_options))
 
     def test_is_idle_state_processing(self):

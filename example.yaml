@@ -73,11 +73,6 @@ Application:
       connections:
         - rabbitmq
 
-Daemon:
-  user: rejected
-  group: daemon
-  pidfile: /var/run/rejected.pid
-
 Logging:
   version: 1
   formatters:

@@ -49,7 +49,6 @@ import unittest
 import uuid
 from unittest import mock
 
-from helper import config
 from pika import channel, spec
 from pika.adapters import asyncio_connection
 
@@ -58,6 +57,7 @@ try:
 except ImportError:
     sentry_sdk = None
 
+from . import config as config_module
 from . import consumer, data, process
 
 LOGGER = logging.getLogger(__name__)
@@ -290,7 +290,7 @@ class AsyncTestCase(unittest.IsolatedAsyncioTestCase):
 
         """
         cls = self.get_consumer()
-        obj = cls(config.Data(self.get_settings()), self.process)
+        obj = cls(config_module.Settings(self.get_settings()), self.process)
         obj._message = self.create_message('dummy')
         obj.set_channel('mock', self.process.connections['mock'].channel)
         return obj

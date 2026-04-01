@@ -6,6 +6,7 @@ connection state and collects stats about the consuming process.
 
 import collections
 import logging
+import logging.config
 import math
 import multiprocessing
 import os
@@ -14,10 +15,7 @@ import signal
 import ssl
 import time
 import typing
-import warnings
 from os import path
-
-from helper import config as helper_config
 
 try:
     import sprockets_influxdb as influxdb
@@ -26,7 +24,7 @@ except ImportError:
 import asyncio
 
 import pika
-from pika import exceptions, spec
+from pika import exceptions
 from pika.adapters import asyncio_connection
 
 try:
@@ -37,6 +35,7 @@ except ImportError:
     LoggingIntegration = None
 
 from . import __version__, data, state, statsd, utils
+from . import config as config_module
 
 LOGGER = logging.getLogger(__name__)
 
@@ -355,17 +354,17 @@ class Connection(state.State):
 
         """
         return pika.ConnectionParameters(
-            self.config.get('host', 'localhost'),
-            self.config.get('port', 5672),
-            self.config.get('vhost', '/'),
+            self.config.host,
+            self.config.port,
+            self.config.vhost,
             pika.PlainCredentials(
-                self.config.get('user', 'guest'),
-                self.config.get('password', self.config.get('pass', 'guest')),
+                self.config.user,
+                self.config.password,
             ),
             ssl_options=self._ssl_options,
-            frame_max=self.config.get('frame_max', spec.FRAME_MAX_SIZE),
-            socket_timeout=self.config.get('socket_timeout', 10),
-            heartbeat=self.config.get('heartbeat_interval', self.HB_INTERVAL),
+            frame_max=self.config.frame_max,
+            socket_timeout=self.config.socket_timeout,
+            heartbeat=self.config.heartbeat_interval,
         )
 
     @property
@@ -385,7 +384,7 @@ class Connection(state.State):
         :rtype: `pika.SSLOptions`|None
 
         """
-        ssl_options = self.config.get('ssl_options')
+        ssl_options = self.config.ssl_options or None
         if not ssl_options:
             return
 
@@ -544,14 +543,14 @@ class Process(multiprocessing.Process, state.State):
 
         """
         self.set_state(self.STATE_CONNECTING)
-        for connection in self.consumer_config.get('connections', []):
+        for connection in self.consumer_config.connections:
             name, confirm, consume = connection, False, True
-            if isinstance(connection, dict):
-                name = connection['name']
-                confirm = connection.get('publisher_confirmation', False)
-                consume = connection.get('consume', True)
+            if isinstance(connection, config_module.ConnectionRef):
+                name = connection.name
+                confirm = connection.confirm
+                consume = connection.consume
 
-            if name not in self.config['Connections']:
+            if name not in self.config.connections:
                 LOGGER.critical(
                     'Connection "%s" for %s not found',
                     name,
@@ -561,7 +560,7 @@ class Process(multiprocessing.Process, state.State):
 
             self.connections[name] = Connection(
                 name,
-                self.config['Connections'][name],
+                self.config.connections[name],
                 self.consumer_name,
                 consume,
                 confirm,
@@ -581,7 +580,7 @@ class Process(multiprocessing.Process, state.State):
 
         """
         return {
-            'connection': cfg['Connections'][connection],
+            'connection': cfg.connections[connection],
             'consumer_name': name,
             'process_name': f'{name}_{os.getpid()}_tag_{number}',
         }
@@ -595,37 +594,37 @@ class Process(multiprocessing.Process, state.State):
 
         """
         try:
-            handle, version = utils.import_consumer(cfg['consumer'])
+            handle, version = utils.import_consumer(cfg.consumer)
         except ImportError as error:
             LOGGER.exception(
-                'Error importing the consumer %s: %s', cfg['consumer'], error
+                'Error importing the consumer %s: %s', cfg.consumer, error
             )
             return
 
         if version:
-            LOGGER.info('Creating consumer %s v%s', cfg['consumer'], version)
+            LOGGER.info('Creating consumer %s v%s', cfg.consumer, version)
             self.consumer_version = version
         else:
-            LOGGER.info('Creating consumer %s', cfg['consumer'])
+            LOGGER.info('Creating consumer %s', cfg.consumer)
 
-        settings = cfg.get('config', {})
-        settings['_import_module'] = '.'.join(cfg['consumer'].split('.')[0:-1])
+        settings = dict(cfg.config)
+        settings['_import_module'] = '.'.join(cfg.consumer.split('.')[0:-1])
 
         kwargs = {
             'settings': settings,
             'process': self,
-            'drop_exchange': cfg.get('drop_exchange'),
-            'drop_invalid_messages': cfg.get('drop_invalid_messages'),
-            'message_type': cfg.get('message_type'),
-            'error_exchange': cfg.get('error_exchange'),
-            'error_max_retry': cfg.get('error_max_retry'),
+            'drop_exchange': cfg.drop_exchange,
+            'drop_invalid_messages': cfg.drop_invalid_messages,
+            'message_type': cfg.message_type,
+            'error_exchange': cfg.error_exchange,
+            'error_max_retry': cfg.error_max_retry,
         }
 
         try:
             return handle(**kwargs)
         except Exception as error:
             LOGGER.exception(
-                'Error creating the consumer "%s": %s', cfg['consumer'], error
+                'Error creating the consumer "%s": %s', cfg.consumer, error
             )
 
     async def invoke_consumer(self, message):
@@ -1080,9 +1079,10 @@ class Process(multiprocessing.Process, state.State):
         to RabbitMQ.
 
         """
-        helper_config.LoggingConfig(self.logging_config).configure()
+        if self.logging_config:
+            logging.config.dictConfig(self.logging_config)
         LOGGER.info('Initializing for %s', self.name)
-        if 'consumer' not in self.consumer_config:
+        if not self.consumer_config.consumer:
             return self.on_startup_error(
                 '"consumer" not specified in configuration'
             )
@@ -1092,9 +1092,7 @@ class Process(multiprocessing.Process, state.State):
         if not self.consumer:
             return self.on_startup_error(
                 'Could not import "{}"'.format(
-                    self.consumer_config.get(
-                        'consumer', 'unconfigured consumer'
-                    )
+                    self.consumer_config.consumer or 'unconfigured consumer'
                 )
             )
 
@@ -1110,71 +1108,49 @@ class Process(multiprocessing.Process, state.State):
 
         """
         base_tags = {'version': self.consumer_version}
-        measurement = self.config.get(
-            'influxdb_measurement', os.environ.get('SERVICE')
+        measurement = (
+            self.consumer_config.influxdb_measurement
+            or os.environ.get('SERVICE')
         )
         if measurement != self.consumer_name:
             base_tags['consumer'] = self.consumer_name
         for key in {'ENVIRONMENT', 'SERVICE'}:
             if key in os.environ:
                 base_tags[key.lower()] = os.environ[key]
-        scheme = config.get(
-            'scheme', os.environ.get('INFLUXDB_SCHEME', 'http')
-        )
-        host = config.get('host', os.environ.get('INFLUXDB_HOST', 'localhost'))
-        port = config.get('port', os.environ.get('INFLUXDB_PORT', '8086'))
+        scheme = os.environ.get('INFLUXDB_SCHEME', config.scheme)
+        host = os.environ.get('INFLUXDB_HOST', config.host)
+        port = os.environ.get('INFLUXDB_PORT', str(config.port))
         influxdb.install(
             f'{scheme}://{host}:{port}/write',
-            config.get('user', os.environ.get('INFLUXDB_USER')),
-            config.get('password', os.environ.get('INFLUXDB_PASSWORD')),
+            config.user or os.environ.get('INFLUXDB_USER'),
+            config.password or os.environ.get('INFLUXDB_PASSWORD'),
             base_tags=base_tags,
         )
-        return config.get('database', 'rejected'), measurement
+        return config.database, measurement
 
     def setup_instrumentation(self):
         """Configure instrumentation for submission per message measurements
         to statsd and/or InfluxDB.
 
         """
-        if not self.config.get('stats') and not self.config.get('statsd'):
-            return
+        stats = self.config.stats
 
-        if 'stats' not in self.config:
-            self.config['stats'] = {}
-
-        # Backwards compatible statsd config support
-        if self.config.get('statsd'):
-            warnings.warn(
-                'Deprecated statsd configuration detected',
-                DeprecationWarning,
-                stacklevel=2,
+        if stats.statsd.enabled:
+            self.statsd = statsd.Client(
+                self.consumer_name,
+                stats.statsd.model_dump(),
+                self.stop,
             )
-            self.config['stats'].setdefault(
-                'statsd', self.config.get('statsd')
-            )
-
-        if self.config['stats'].get('statsd'):
-            if self.config['stats']['statsd'].get('enabled', True):
-                self.statsd = statsd.Client(
-                    self.consumer_name,
-                    self.config['stats']['statsd'],
-                    self.stop,
-                )
             LOGGER.debug('statsd measurements configured')
 
         # InfluxDB support
-        if influxdb and self.config['stats'].get('influxdb'):
-            if self.config['stats']['influxdb'].get('enabled', True):
-                self.influxdb = self.setup_influxdb(
-                    self.config['stats']['influxdb']
-                )
+        if influxdb and stats.influxdb.enabled:
+            self.influxdb = self.setup_influxdb(stats.influxdb)
             LOGGER.debug('InfluxDB measurements configured: %r', self.influxdb)
 
     def setup_sentry(self, cfg, consumer_name):
         # Setup Sentry if configured and sentry_sdk is installed
-        sentry_dsn = cfg['Consumers'][consumer_name].get(
-            'sentry_dsn', cfg.get('sentry_dsn')
-        )
+        sentry_dsn = self.consumer_config.sentry_dsn or cfg.sentry_dsn
         if not sentry_sdk or not sentry_dsn:
             return False
         kwargs = {
@@ -1326,7 +1302,9 @@ class Process(multiprocessing.Process, state.State):
 
     @property
     def consumer_config(self):
-        return self.config['Consumers'][self.consumer_name] or {}
+        return self.config.consumers.get(
+            self.consumer_name, config_module.ConsumerConfig()
+        )
 
     @property
     def consumer_name(self):
@@ -1342,13 +1320,11 @@ class Process(multiprocessing.Process, state.State):
 
     @property
     def max_error_count(self):
-        return int(
-            self.consumer_config.get('max_errors', self.MAX_ERROR_COUNT)
-        )
+        return int(self.consumer_config.max_errors)
 
     @property
     def no_ack(self):
-        return not self.consumer_config.get('ack', True)
+        return not self.consumer_config.ack
 
     @property
     def profile_file(self):
@@ -1375,13 +1351,11 @@ class Process(multiprocessing.Process, state.State):
         :rtype: int
 
         """
-        return self.consumer_config.get(
-            'qos_prefetch', self.QOS_PREFETCH_COUNT
-        )
+        return self.consumer_config.qos_prefetch
 
     @property
     def queue_name(self):
-        return self.consumer_config.get('queue', self.name)
+        return self.consumer_config.queue or self.name
 
     @property
     def stats_queue(self):

@@ -28,6 +28,7 @@ class Controller:
         self.args = args
         self.config = cfg
         self._mcp = None
+        self._shutdown_requested = False
         self._sentry_client = False
         if sentry_sdk and cfg.sentry_dsn:
             init_kwargs = {
@@ -47,6 +48,8 @@ class Controller:
     def run(self):
         """Run the application: set up signals, start MCP, block until done."""
         self._setup_signals()
+        if self._shutdown_requested:
+            return
         if self.args.prepend_path:
             sys.path.insert(0, self.args.prepend_path)
         self._mcp = mcp.MasterControlProgram(
@@ -55,6 +58,8 @@ class Controller:
             profile=self.args.profile,
             quantity=self.args.quantity,
         )
+        if self._shutdown_requested:
+            return
         try:
             self._mcp.run()
         except KeyboardInterrupt:
@@ -77,6 +82,7 @@ class Controller:
 
     def _on_sigterm(self, _signum, _frame):
         LOGGER.info('Received SIGTERM, initiating shutdown')
+        self._shutdown_requested = True
         if self._mcp:
             self._mcp.stop_processes()
 

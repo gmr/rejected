@@ -1,21 +1,12 @@
 """Configuration models and loader for rejected."""
-import logging.config
+
 import pathlib
-import sys
+import tomllib
 import typing
 
-import yaml
 import pydantic
 import pydantic.fields
-
-# TOML support (stdlib in Python 3.11+)
-if sys.version_info >= (3, 11):
-    import tomllib
-else:
-    try:
-        import tomllib
-    except ImportError:
-        tomllib = None
+import yaml
 
 
 class ConnectionRef(pydantic.BaseModel):
@@ -70,7 +61,7 @@ class StatsConfig(pydantic.BaseModel):
 
 class ConsumerConfig(pydantic.BaseModel):
     consumer: str | None = None
-    connections: list[typing.Union[str, ConnectionRef]] = pydantic.Field(
+    connections: list[str | ConnectionRef] = pydantic.Field(
         default_factory=list
     )
     qty: int = 1
@@ -123,7 +114,7 @@ class Settings:
         try:
             return self._data[name]
         except KeyError:
-            raise AttributeError(name)
+            raise AttributeError(name) from None
 
     def __getitem__(self, name: str):
         return self._data[name]

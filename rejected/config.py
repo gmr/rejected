@@ -59,6 +59,7 @@ class ConsumerConfig(pydantic.BaseModel):
     qos_prefetch: int = 1
     max_errors: int = 5
     error_exchange: str | None = None
+    schema_uri_format: str | None = None
     sentry_dsn: str | None = None
     drop_exchange: str | None = None
     drop_invalid_messages: bool | None = None

@@ -1590,7 +1590,11 @@ class Consumer:
                  and this method has not been overridden
 
         """
-        uri_format = self.settings.get('schema_uri_format')
+        uri_format = (
+            self._process.consumer_config.schema_uri_format
+            if self._process
+            else None
+        )
         if not uri_format:
             raise NotImplementedError(
                 'Set schema_uri_format in consumer config or override '

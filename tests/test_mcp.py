@@ -1,20 +1,22 @@
 """Tests for the MCP"""
-import multiprocessing
 
-try:
-    from unittest import mock
-except ImportError:
-    import mock
+import multiprocessing
+import typing
+from unittest import mock
 
 from helper import config
+
 from rejected import mcp
 
 from . import test_state
 
 
 class TestMCP(test_state.TestState):
-
-    CONFIG = {'poll_interval': 30.0, 'log_stats': True, 'Consumers': {}}
+    CONFIG: typing.ClassVar[dict] = {
+        'poll_interval': 30.0,
+        'log_stats': True,
+        'Consumers': {},
+    }
 
     @mock.patch.object(multiprocessing, 'Queue')
     def setUp(self, _mock_queue_unused):

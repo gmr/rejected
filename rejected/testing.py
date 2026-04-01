@@ -44,14 +44,16 @@ consumer, the consumer will raise a :exc:`~rejected.consumer.MessageException`.
                 yield self.process_message({'foo': 'bar'})
 
 """
+
 import json
 import logging
 import time
 import uuid
+
 try:
     from unittest import mock
 except ImportError:
-    import mock
+    from unittest import mock
 
 from helper import config
 from pika import channel, spec
@@ -79,10 +81,11 @@ class AsyncTestCase(testing.AsyncTestCase):
     :class:`~rejected.consumer.Consumer` classes.
 
     """
+
     _consumer = None
 
     def setUp(self):
-        super(AsyncTestCase, self).setUp()
+        super().setUp()
         self.correlation_id = str(uuid.uuid4())
         self.process = self._create_process()
         self.consumer = self._create_consumer()
@@ -90,7 +93,7 @@ class AsyncTestCase(testing.AsyncTestCase):
         self.exc_info = None
 
     def tearDown(self):
-        super(AsyncTestCase, self).tearDown()
+        super().tearDown()
         if not self.consumer._finished:
             self.consumer.finish()
 
@@ -113,7 +116,8 @@ class AsyncTestCase(testing.AsyncTestCase):
                 body=c[2]['body'],
                 exchange=c[2]['exchange'],
                 properties=c[2]['properties'],
-                routing_key=c[2]['routing_key'])
+                routing_key=c[2]['routing_key'],
+            )
             for c in self.channel.basic_publish.mock_calls
         ]
 
@@ -135,8 +139,9 @@ class AsyncTestCase(testing.AsyncTestCase):
         """
         return {}
 
-    def create_message(self, message, properties=None,
-                       exchange='rejected', routing_key='test'):
+    def create_message(
+        self, message, properties=None, exchange='rejected', routing_key='test'
+    ):
         """Create a message instance for use with the consumer in testing.
 
         :param any message: the body of the message to create
@@ -148,20 +153,24 @@ class AsyncTestCase(testing.AsyncTestCase):
         """
         if not properties:
             properties = {}
-        if isinstance(message, dict) and \
-                properties.get('content_type') == 'application/json':
+        if (
+            isinstance(message, dict)
+            and properties.get('content_type') == 'application/json'
+        ):
             message = json.dumps(message)
         return data.Message(
             connection='mock',
             channel=self.process.connections['mock'].channel,
             method=spec.Basic.Deliver(
-                'ctag0', 1, False, exchange, routing_key),
+                'ctag0', 1, False, exchange, routing_key
+            ),
             properties=spec.BasicProperties(
                 app_id=properties.get('app_id', 'rejected.testing'),
                 content_encoding=properties.get('content_encoding'),
                 content_type=properties.get('content_type'),
                 correlation_id=properties.get(
-                    'correlation_id', self.correlation_id),
+                    'correlation_id', self.correlation_id
+                ),
                 delivery_mode=properties.get('delivery_mode', 1),
                 expiration=properties.get('expiration'),
                 headers=properties.get('headers'),
@@ -170,8 +179,11 @@ class AsyncTestCase(testing.AsyncTestCase):
                 reply_to=properties.get('reply_to'),
                 timestamp=properties.get('timestamp', int(time.time())),
                 type=properties.get('type'),
-                user_id=properties.get('user_id')
-            ), body=message, returned=False)
+                user_id=properties.get('user_id'),
+            ),
+            body=message,
+            returned=False,
+        )
 
     def log_exception(self, msg_format, *args, exc_info):
         """Customize the logging of uncaught exceptions.
@@ -188,7 +200,7 @@ class AsyncTestCase(testing.AsyncTestCase):
         logged at the debug level.
 
         """
-        LOGGER.exception(msg_format, exc_info=exc_info, *args)
+        LOGGER.exception(msg_format, *args, exc_info=exc_info)
         self.exc_info = exc_info
 
     @property
@@ -202,13 +214,15 @@ class AsyncTestCase(testing.AsyncTestCase):
         return self.consumer._measurement
 
     @gen.coroutine
-    def process_message(self,
-                        message_body=None,
-                        content_type='application/json',
-                        message_type=None,
-                        properties=None,
-                        exchange='rejected',
-                        routing_key='routing-key'):
+    def process_message(
+        self,
+        message_body=None,
+        content_type='application/json',
+        message_type=None,
+        properties=None,
+        exchange='rejected',
+        routing_key='routing-key',
+    ):
         """Process a message as if it were being delivered by RabbitMQ. When
         invoked, an AMQP message will be locally created and passed into the
         consumer. With using the default values for the method, if you pass in
@@ -256,9 +270,11 @@ class AsyncTestCase(testing.AsyncTestCase):
 
         self.consumer.log_exception = self.log_exception
         result = yield self.consumer.execute(
-            self.create_message(message_body, properties,
-                                exchange, routing_key),
-            measurement)
+            self.create_message(
+                message_body, properties, exchange, routing_key
+            ),
+            measurement,
+        )
         if result == data.CONSUMER_EXCEPTION:
             raise consumer.ConsumerException()
         elif result == data.MESSAGE_EXCEPTION:
@@ -302,7 +318,7 @@ class AsyncTestCase(testing.AsyncTestCase):
         return obj
 
 
-class PublishedMessage(object):
+class PublishedMessage:
     """Contains information about messages published during a test when
     using :class:`rejected.testing.AsyncTestCase`.
 
@@ -314,7 +330,8 @@ class PublishedMessage(object):
     .. versionadded:: 3.18.9
 
     """
-    __slots__ = ['exchange', 'routing_key', 'properties', 'body']
+
+    __slots__ = ['body', 'exchange', 'properties', 'routing_key']
 
     def __init__(self, exchange, routing_key, properties, body):
         """Create a new instance of the object.
@@ -336,5 +353,7 @@ class PublishedMessage(object):
         :rtype: str
 
         """
-        return '<PublishedMessage exchange="{}" routing_key="{}">'.format(
-            self.exchange, self.routing_key)
+        return (
+            f'<PublishedMessage exchange="{self.exchange}"'
+            f' routing_key="{self.routing_key}">'
+        )

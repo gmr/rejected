@@ -2,6 +2,7 @@
 Rejected data objects
 
 """
+
 import collections
 import contextlib
 import copy
@@ -17,8 +18,7 @@ PROCESSING_EXCEPTION = 12
 UNHANDLED_EXCEPTION = 13
 
 
-class Data(object):
-
+class Data:
     __slots__ = []
 
     def __iter__(self):
@@ -37,9 +37,12 @@ class Data(object):
         :rtype: str
 
         """
-        items = ['%s=%s' % (k, getattr(self, k))
-                 for k in self.__slots__ if getattr(self, k)]
-        return '<%s(%s)>' % (self.__class__.__name__, items)
+        items = [
+            f'{k}={getattr(self, k)}'
+            for k in self.__slots__
+            if getattr(self, k)
+        ]
+        return f'<{self.__class__.__name__}({items})>'
 
 
 class Message(Data):
@@ -87,12 +90,24 @@ class Message(Data):
     +----------------------+-------------------------------------------+
 
     """
-    __slots__ = ['connection', 'channel', 'method', 'properties', 'body',
-                 'consumer_tag', 'delivery_tag', 'exchange', 'redelivered',
-                 'routing_key', 'returned']
 
-    def __init__(self, connection, channel, method, properties, body,
-                 returned=False):
+    __slots__ = [
+        'body',
+        'channel',
+        'connection',
+        'consumer_tag',
+        'delivery_tag',
+        'exchange',
+        'method',
+        'properties',
+        'redelivered',
+        'returned',
+        'routing_key',
+    ]
+
+    def __init__(
+        self, connection, channel, method, properties, body, returned=False
+    ):
         """Initialize a message setting the attributes from the given channel,
         method, header and body.
 
@@ -155,10 +170,22 @@ class Properties(Data):
     +--------------------------+--------------------------------------+
 
     """
-    __slots__ = ['app_id', 'content_type', 'content_encoding',
-                 'correlation_id', 'delivery_mode', 'expiration', 'headers',
-                 'priority', 'reply_to', 'message_id', 'timestamp', 'type',
-                 'user_id']
+
+    __slots__ = [
+        'app_id',
+        'content_encoding',
+        'content_type',
+        'correlation_id',
+        'delivery_mode',
+        'expiration',
+        'headers',
+        'message_id',
+        'priority',
+        'reply_to',
+        'timestamp',
+        'type',
+        'user_id',
+    ]
 
     def __init__(self, properties=None):
         """Create a base object to contain all of the properties we need
@@ -172,7 +199,7 @@ class Properties(Data):
                 setattr(self, attr, getattr(properties, attr))
 
 
-class Measurement(object):
+class Measurement:
     """Common Measurement Object that provides common methods for collecting
     and exposes measurement data that is submitted in
     :class:`rejected.process.Process` and :class:`rejected.consumer.Consumer`
@@ -196,6 +223,7 @@ class Measurement(object):
     .. versionadded:: 3.13.0
 
     """
+
     def __init__(self):
         self.durations = {}
         self.counters = collections.Counter()
@@ -268,4 +296,5 @@ class Measurement(object):
             yield
         finally:
             self.durations[key].append(
-                max(start_time, time.time()) - start_time)
+                max(start_time, time.time()) - start_time
+            )

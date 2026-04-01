@@ -206,4 +206,3 @@ Available at https://rejected.readthedocs.org/en/latest/history.html
 
 .. |License| image:: https://img.shields.io/pypi/l/rejected.svg?
    :target: https://rejected.readthedocs.org
-

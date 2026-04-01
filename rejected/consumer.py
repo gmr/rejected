@@ -28,6 +28,7 @@ Supported `SmartConsumer` MIME types are:
  - text/x-yaml
 
 """
+
 import bz2
 import contextlib
 import csv
@@ -44,9 +45,9 @@ import warnings
 import zlib
 
 import pika
+import yaml
 from pika import exceptions
 from tornado import concurrent, gen, locks
-import yaml
 
 from . import data, log
 
@@ -78,13 +79,16 @@ _PROCESSING_EXCEPTIONS = 'X-Processing-Exceptions'
 _EXCEPTION_FROM = 'X-Exception-From'
 
 BS4_MIME_TYPES = ('text/html', 'text/xml')
-PICKLE_MIME_TYPES = ('application/pickle', 'application/x-pickle',
-                     'application/x-vnd.python.pickle',
-                     'application/vnd.python.pickle')
+PICKLE_MIME_TYPES = (
+    'application/pickle',
+    'application/x-pickle',
+    'application/x-vnd.python.pickle',
+    'application/vnd.python.pickle',
+)
 YAML_MIME_TYPES = ('text/yaml', 'text/x-yaml')
 
 
-class Consumer(object):
+class Consumer:
     """Base consumer class that defines the contract between rejected and
     consumer applications.
 
@@ -161,6 +165,7 @@ class Consumer(object):
     :exc:`~rejected.consumer.MessageException`s only. Defaults to `False`.
 
     """
+
     DROP_EXCHANGE = None
     DROP_INVALID_MESSAGES = False
     MESSAGE_TYPE = None
@@ -169,12 +174,16 @@ class Consumer(object):
     MESSAGE_AGE_KEY = 'message_age'
     ACK_PROCESSING_EXCEPTIONS = False
 
-    def __init__(self, settings, process,
-                 drop_invalid_messages=None,
-                 message_type=None,
-                 error_exchange=None,
-                 error_max_retry=None,
-                 drop_exchange=None):
+    def __init__(
+        self,
+        settings,
+        process,
+        drop_invalid_messages=None,
+        message_type=None,
+        error_exchange=None,
+        error_max_retry=None,
+        drop_exchange=None,
+    ):
         """Creates a new instance of the :class:`~rejected.consumer.Consumer`
         class. To perform initialization tasks, extend
         :meth:`~rejected.consumer.Consumer.initialize`.
@@ -183,8 +192,9 @@ class Consumer(object):
         self._channels = {}
         self._correlation_id = None
         self._drop_exchange = drop_exchange or self.DROP_EXCHANGE
-        self._drop_invalid = drop_invalid_messages or \
-            self.DROP_INVALID_MESSAGES
+        self._drop_invalid = (
+            drop_invalid_messages or self.DROP_INVALID_MESSAGES
+        )
         self._error_exchange = error_exchange or self.ERROR_EXCHANGE
         self._error_max_retry = error_max_retry or self.ERROR_MAX_RETRY
         self._finished = False
@@ -198,7 +208,8 @@ class Consumer(object):
 
         # Create a logger that attaches correlation ID to the record
         self._logger = logging.getLogger(
-            settings.get('_import_module', __name__))
+            settings.get('_import_module', __name__)
+        )
         self.logger = log.CorrelationAdapter(self._logger, self)
 
         # Set a Sentry context for the consumer
@@ -322,8 +333,9 @@ class Consumer(object):
         self._finished = True
         self.on_finish()
 
-    def publish_message(self, exchange, routing_key, properties, body,
-                        channel=None):
+    def publish_message(
+        self, exchange, routing_key, properties, body, channel=None
+    ):
         """Publish a message to RabbitMQ on the same channel the original
         message was received on.
 
@@ -335,20 +347,27 @@ class Consumer(object):
             specified, the channel that the message was delivered on is used.
 
         """
-        self.logger.debug('Publishing message to %s:%s (%s)',
-                          exchange, routing_key, channel)
+        self.logger.debug(
+            'Publishing message to %s:%s (%s)', exchange, routing_key, channel
+        )
         with self._measurement.track_duration(
-                'publish.{}.{}'.format(exchange, routing_key)):
+            f'publish.{exchange}.{routing_key}'
+        ):
             self._publish_channel(channel).basic_publish(
                 exchange=exchange,
                 routing_key=routing_key,
                 properties=self._get_pika_properties(properties),
-                body=body)
+                body=body,
+            )
 
-    def reply(self, response_body, properties,
-              auto_id=True,
-              exchange=None,
-              reply_to=None):
+    def reply(
+        self,
+        response_body,
+        properties,
+        auto_id=True,
+        exchange=None,
+        reply_to=None,
+    ):
         """Reply to the received message.
 
         If ``auto_id`` is :data:`True`, a new UUIDv4 value will be generated
@@ -396,8 +415,12 @@ class Consumer(object):
         if properties.reply_to:
             properties.reply_to = None
 
-        self.publish_message(exchange or self._message.exchange, reply_to,
-                             dict(properties), response_body)
+        self.publish_message(
+            exchange or self._message.exchange,
+            reply_to,
+            dict(properties),
+            response_body,
+        )
 
     def send_exception_to_sentry(self, exc_info):
         """Send an exception to Sentry if enabled.
@@ -417,7 +440,8 @@ class Consumer(object):
         """
         if self.sentry_client:
             self.logger.debug(
-                'Setting sentry context for %s to %s', tag, value)
+                'Setting sentry context for %s to %s', tag, value
+            )
             self.sentry_client.tags_context({tag: value})
 
     def stats_add_duration(self, key, duration):
@@ -444,8 +468,11 @@ class Consumer(object):
         :param int|float duration: The timing value in seconds
 
         """
-        warnings.warn('Deprecated, use Consumer.stats_add_duration',
-                      DeprecationWarning)
+        warnings.warn(
+            'Deprecated, use Consumer.stats_add_duration',
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self.stats_add_duration(key, duration)
 
     def statsd_add_timing(self, key, duration):
@@ -457,8 +484,11 @@ class Consumer(object):
         .. deprecated:: 3.13.0
 
         """
-        warnings.warn('Deprecated, use Consumer.stats_add_duration',
-                      DeprecationWarning)
+        warnings.warn(
+            'Deprecated, use Consumer.stats_add_duration',
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self.stats_add_duration(key, duration)
 
     def stats_incr(self, key, value=1):
@@ -484,8 +514,11 @@ class Consumer(object):
         .. deprecated:: 3.13.0
 
         """
-        warnings.warn('Deprecated, use Consumer.stats_incr',
-                      DeprecationWarning)
+        warnings.warn(
+            'Deprecated, use Consumer.stats_incr',
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self.stats_incr(key, value)
 
     def stats_set_tag(self, key, value=1):
@@ -531,7 +564,8 @@ class Consumer(object):
             yield
         finally:
             self.stats_add_duration(
-                key, max(start_time, time.time()) - start_time)
+                key, max(start_time, time.time()) - start_time
+            )
 
     def statsd_track_duration(self, key):
         """Time around a context and add to the the per-message measurements
@@ -541,8 +575,11 @@ class Consumer(object):
         .. deprecated:: 3.13.0
 
         """
-        warnings.warn('Deprecated, use Consumer.stats_track_duration',
-                      DeprecationWarning)
+        warnings.warn(
+            'Deprecated, use Consumer.stats_track_duration',
+            DeprecationWarning,
+            stacklevel=2,
+        )
         return self.stats_track_duration(key)
 
     def unset_sentry_context(self, tag):
@@ -562,7 +599,8 @@ class Consumer(object):
         """
         try:
             yield self._yield_condition.wait(
-                self._message.channel.connection.ioloop.time() + 0.001)
+                self._message.channel.connection.ioloop.time() + 0.001
+            )
         except gen.TimeoutError:
             pass
 
@@ -601,8 +639,9 @@ class Consumer(object):
         """
         if not self._message:
             return None
-        return (self._message.properties.content_encoding or
-                '').lower() or None
+        return (
+            self._message.properties.content_encoding or ''
+        ).lower() or None
 
     @property
     def content_type(self):
@@ -854,15 +893,18 @@ class Consumer(object):
         # If timestamp is set, record age of the message coming in
         if message_in.properties.timestamp:
             message_age = float(
-                max(message_in.properties.timestamp, time.time()) -
-                message_in.properties.timestamp)
+                max(message_in.properties.timestamp, time.time())
+                - message_in.properties.timestamp
+            )
             if message_age > 0:
                 measurement.add_duration(self.message_age_key(), message_age)
 
         # Ensure there is a correlation ID
-        self._correlation_id = message_in.properties.correlation_id or \
-            message_in.properties.message_id or \
-            str(uuid.uuid4())
+        self._correlation_id = (
+            message_in.properties.correlation_id
+            or message_in.properties.message_id
+            or str(uuid.uuid4())
+        )
 
         if self.message_type:
             self.set_sentry_context('type', self.message_type)
@@ -875,8 +917,9 @@ class Consumer(object):
                 message_supported = self.message_type == self._message_type
 
             if not message_supported:
-                self.logger.warning('Received unsupported message type: %s',
-                                    self.message_type)
+                self.logger.warning(
+                    'Received unsupported message type: %s', self.message_type
+                )
                 # Should the message be dropped or returned to the broker?
                 if self._drop_invalid:
                     if self._drop_exchange:
@@ -885,16 +928,16 @@ class Consumer(object):
                 raise gen.Return(data.MESSAGE_EXCEPTION)
 
         # Check the number of ProcessingErrors and possibly drop the message
-        if (self._error_max_retry and
-                _PROCESSING_EXCEPTIONS in self.headers):
+        if self._error_max_retry and _PROCESSING_EXCEPTIONS in self.headers:
             if self.headers[_PROCESSING_EXCEPTIONS] >= self._error_max_retry:
-                self.logger.warning('Dropping message with %i deaths due to '
-                                    'ERROR_MAX_RETRY',
-                                    self.headers[_PROCESSING_EXCEPTIONS])
+                self.logger.warning(
+                    'Dropping message with %i deaths due to ERROR_MAX_RETRY',
+                    self.headers[_PROCESSING_EXCEPTIONS],
+                )
                 if self._drop_exchange:
                     self._republish_dropped_message(
-                        'max retries ({})'.format(
-                            self.headers[_PROCESSING_EXCEPTIONS]))
+                        f'max retries ({self.headers[_PROCESSING_EXCEPTIONS]})'
+                    )
                 raise gen.Return(data.MESSAGE_DROP)
 
         result = None
@@ -914,28 +957,40 @@ class Consumer(object):
             raise gen.Return(data.MESSAGE_REQUEUE)
 
         except exceptions.ChannelClosed as error:
-            self.logger.critical('Channel closed while processing %s: %s',
-                                 message_in.delivery_tag, error)
+            self.logger.critical(
+                'Channel closed while processing %s: %s',
+                message_in.delivery_tag,
+                error,
+            )
             self._measurement.set_tag('exception', error.__class__.__name__)
             raise gen.Return(None)
 
         except exceptions.ConnectionClosed as error:
-            self.logger.critical('Connection closed while processing %s: %s',
-                                 message_in.delivery_tag, str(error))
+            self.logger.critical(
+                'Connection closed while processing %s: %s',
+                message_in.delivery_tag,
+                str(error),
+            )
             self._measurement.set_tag('exception', error.__class__.__name__)
             raise gen.Return(None)
 
         except ConsumerException as error:
-            self.logger.error('ConsumerException processing delivery %s: %s',
-                              message_in.delivery_tag, str(error))
+            self.logger.error(
+                'ConsumerException processing delivery %s: %s',
+                message_in.delivery_tag,
+                str(error),
+            )
             self._measurement.set_tag('exception', error.__class__.__name__)
             if error.metric:
                 self._measurement.set_tag('error', error.metric)
             raise gen.Return(data.CONSUMER_EXCEPTION)
 
         except MessageException as error:
-            self.logger.info('MessageException processing delivery %s: %s',
-                             message_in.delivery_tag, str(error))
+            self.logger.info(
+                'MessageException processing delivery %s: %s',
+                message_in.delivery_tag,
+                str(error),
+            )
             self._measurement.set_tag('exception', error.__class__.__name__)
             if error.metric:
                 self._measurement.set_tag('error', error.metric)
@@ -944,25 +999,34 @@ class Consumer(object):
         except ProcessingException as error:
             self.logger.warning(
                 'ProcessingException processing delivery %s: %s',
-                message_in.delivery_tag, str(error))
+                message_in.delivery_tag,
+                str(error),
+            )
             self._measurement.set_tag('exception', error.__class__.__name__)
             if error.metric:
                 self._measurement.set_tag('error', error.metric)
             self._republish_processing_error(
-                error.metric or error.__class__.__name__)
+                error.metric or error.__class__.__name__
+            )
             raise gen.Return(data.PROCESSING_EXCEPTION)
 
         except NotImplementedError as error:
-            self.log_exception('NotImplementedError processing delivery'
-                               ' %s: %s', message_in.delivery_tag, error,
-                               exc_info=self._get_exc_info(result))
+            self.log_exception(
+                'NotImplementedError processing delivery %s: %s',
+                message_in.delivery_tag,
+                error,
+                exc_info=self._get_exc_info(result),
+            )
             self._measurement.set_tag('exception', 'UnhandledException')
             raise gen.Return(data.UNHANDLED_EXCEPTION)
 
         except Exception as error:
-            self.log_exception('Exception processing delivery %s: %s',
-                               message_in.delivery_tag, str(error),
-                               exc_info=self._get_exc_info(result))
+            self.log_exception(
+                'Exception processing delivery %s: %s',
+                message_in.delivery_tag,
+                str(error),
+                exc_info=self._get_exc_info(result),
+            )
             self._measurement.set_tag('exception', 'UnhandledException')
             raise gen.Return(data.UNHANDLED_EXCEPTION)
 
@@ -986,7 +1050,7 @@ class Consumer(object):
         logged at the debug level.
 
         """
-        self.logger.exception(msg_format, exc_info=exc_info, *args)
+        self.logger.exception(msg_format, *args, exc_info=exc_info)
         self._process.send_exception_to_sentry(exc_info)
 
     def on_confirmation(self, name, delivered, delivery_tag):
@@ -1014,8 +1078,8 @@ class Consumer(object):
         """
         if name not in self.settings:
             raise Exception(
-                'You must define the "{}" setting in to use {}'.format(
-                    name, feature))
+                f'You must define the "{name}" setting in to use {feature}'
+            )
 
     def set_channel(self, name, channel):
         """Assign the _channel attribute to the channel that was passed in.
@@ -1082,7 +1146,7 @@ class Consumer(object):
         try:
             return self._channels[name]
         except KeyError:
-            raise ValueError('Channel {} not found'.format(name))
+            raise ValueError(f'Channel {name} not found')
 
     def _republish_dropped_message(self, reason):
         """Republish the original message that was received it is being dropped
@@ -1099,8 +1163,9 @@ class Consumer(object):
             properties['headers'] = {}
         properties['headers']['X-Dropped-By'] = self.name
         properties['headers']['X-Dropped-Reason'] = reason
-        properties['headers']['X-Dropped-Timestamp'] = \
-            datetime.datetime.utcnow().isoformat()
+        properties['headers']['X-Dropped-Timestamp'] = datetime.datetime.now(
+            tz=datetime.UTC
+        ).isoformat()
         properties['headers']['X-Original-Exchange'] = self._message.exchange
         properties['headers']['X-Original-Queue'] = self._process.queue_name
 
@@ -1108,7 +1173,8 @@ class Consumer(object):
             exchange=self._drop_exchange,
             routing_key=self._message.routing_key,
             body=self._message.body,
-            properties=pika.BasicProperties(**properties))
+            properties=pika.BasicProperties(**properties),
+        )
 
     def _republish_processing_error(self, error):
         """Republish the original message that was received because a
@@ -1145,7 +1211,8 @@ class Consumer(object):
             exchange=self._error_exchange,
             routing_key=self._message.routing_key,
             body=self._message.body,
-            properties=pika.BasicProperties(**properties))
+            properties=pika.BasicProperties(**properties),
+        )
 
 
 class PublishingConsumer(Consumer):
@@ -1154,10 +1221,15 @@ class PublishingConsumer(Consumer):
     .. deprecated:: 3.17.0
 
     """
+
     def __init__(self, *args, **kwargs):
-        warnings.warn('PublishingConsumer deprecated, all functionality moved'
-                      'to Consumer', category=DeprecationWarning)
-        super(PublishingConsumer, self).__init__(*args, **kwargs)
+        warnings.warn(
+            'PublishingConsumer deprecated, all functionality moved'
+            'to Consumer',
+            category=DeprecationWarning,
+            stacklevel=2,
+        )
+        super().__init__(*args, **kwargs)
 
 
 class SmartConsumer(Consumer):
@@ -1201,10 +1273,17 @@ class SmartConsumer(Consumer):
         into the same class.
 
     """
-    def publish_message(self, exchange, routing_key, properties, body,
-                        no_serialization=False,
-                        no_encoding=False,
-                        channel=None):
+
+    def publish_message(
+        self,
+        exchange,
+        routing_key,
+        properties,
+        body,
+        no_serialization=False,
+        no_encoding=False,
+        channel=None,
+    ):
         """Publish a message to RabbitMQ on the same channel the original
         message was received on.
 
@@ -1232,11 +1311,16 @@ class SmartConsumer(Consumer):
 
         """
         # Auto-serialize the content if needed
-        is_string = (isinstance(body, str) or
-                     isinstance(body, bytes) or
-                     isinstance(body, unicode))
-        if (not no_serialization and not is_string and
-                properties.get('content_type')):
+        is_string = (
+            isinstance(body, str)
+            or isinstance(body, bytes)
+            or isinstance(body, unicode)
+        )
+        if (
+            not no_serialization
+            and not is_string
+            and properties.get('content_type')
+        ):
             self.logger.debug('Auto-serializing message body')
             body = self._auto_serialize(properties.get('content_type'), body)
 
@@ -1248,8 +1332,11 @@ class SmartConsumer(Consumer):
         # Publish the message
         self.logger.debug('Publishing message to %s:%s', exchange, routing_key)
         self._publish_channel(channel).basic_publish(
-            exchange=exchange, routing_key=routing_key,
-            properties=self._get_pika_properties(properties), body=body)
+            exchange=exchange,
+            routing_key=routing_key,
+            properties=self._get_pika_properties(properties),
+            body=body,
+        )
 
     @property
     def body(self):
@@ -1315,7 +1402,8 @@ class SmartConsumer(Consumer):
             return self._encode_bz2(value)
 
         self.logger.warning(
-            'Invalid content-encoding specified for auto-encoding')
+            'Invalid content-encoding specified for auto-encoding'
+        )
         return value
 
     def _auto_serialize(self, content_type, value):
@@ -1347,8 +1435,11 @@ class SmartConsumer(Consumer):
             return self._dump_csv_value(value)
 
         # If it's XML or HTML auto
-        elif (bs4 and isinstance(value, bs4.BeautifulSoup) and
-              content_type in ('text/html', 'text/xml')):
+        elif (
+            bs4
+            and isinstance(value, bs4.BeautifulSoup)
+            and content_type in ('text/html', 'text/xml')
+        ):
             self.logger.debug('Dumping BS4 object into HTML or XML')
             return self._dump_bs4_value(value)
 
@@ -1358,7 +1449,8 @@ class SmartConsumer(Consumer):
             return self._dump_yaml_value(value)
 
         self.logger.warning(
-            'Invalid content-type specified for auto-serialization')
+            'Invalid content-type specified for auto-serialization'
+        )
         return value
 
     @staticmethod
@@ -1596,9 +1688,13 @@ class SmartPublishingConsumer(SmartConsumer):
     """
 
     def __init__(self, *args, **kwargs):
-        warnings.warn('SmartPublishingConsumer deprecated, all functionality '
-                      'moved to SmartConsumer', category=DeprecationWarning)
-        super(SmartPublishingConsumer, self).__init__(*args, **kwargs)
+        warnings.warn(
+            'SmartPublishingConsumer deprecated, all functionality '
+            'moved to SmartConsumer',
+            category=DeprecationWarning,
+            stacklevel=2,
+        )
+        super().__init__(*args, **kwargs)
 
 
 class RejectedException(Exception):
@@ -1618,6 +1714,7 @@ class RejectedException(Exception):
     .. versionadded:: 3.19.0
 
     """
+
     METRIC_NAME = 'rejected-exception'
 
     def __init__(self, *args, **kwargs):
@@ -1636,8 +1733,8 @@ class RejectedException(Exception):
 
     def __repr__(self):
         if not self.args and not self.kwargs:
-            return '{}()'.format(self.__class__.__name__)
-        return '{}({})'.format(self.__class__.__name__, str(self))
+            return f'{self.__class__.__name__}()'
+        return f'{self.__class__.__name__}({self!s})'
 
 
 class ConsumerException(RejectedException):
@@ -1648,8 +1745,9 @@ class ConsumerException(RejectedException):
     :param str metric: An optional value for auto-instrumentation of exceptions
 
     """
+
     def __init__(self, *args, **kwargs):
-        super(ConsumerException, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
 
 class MessageException(RejectedException):
@@ -1660,8 +1758,9 @@ class MessageException(RejectedException):
     :param str metric: An optional value for auto-instrumentation of exceptions
 
     """
+
     def __init__(self, *args, **kwargs):
-        super(MessageException, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
 
 class ProcessingException(RejectedException):
@@ -1674,5 +1773,6 @@ class ProcessingException(RejectedException):
     :param str metric: An optional value for auto-instrumentation of exceptions
 
     """
+
     def __init__(self, *args, **kwargs):
-        super(ProcessingException, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)

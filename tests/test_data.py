@@ -1,4 +1,5 @@
 """Tests for rejected.data"""
+
 import unittest
 
 from rejected import data
@@ -7,7 +8,6 @@ from . import mocks
 
 
 class TestProperties(unittest.TestCase):
-
     def setUp(self):
         self._obj = data.Properties(mocks.PROPERTIES)
 
@@ -15,19 +15,22 @@ class TestProperties(unittest.TestCase):
         self.assertEqual(self._obj.app_id, mocks.PROPERTIES.app_id)
 
     def test_content_encoding(self):
-        self.assertEqual(self._obj.content_encoding,
-                         mocks.PROPERTIES.content_encoding)
+        self.assertEqual(
+            self._obj.content_encoding, mocks.PROPERTIES.content_encoding
+        )
 
     def test_content_type(self):
         self.assertEqual(self._obj.content_type, mocks.PROPERTIES.content_type)
 
     def test_correlation_id(self):
-        self.assertEqual(self._obj.correlation_id,
-                         mocks.PROPERTIES.correlation_id)
+        self.assertEqual(
+            self._obj.correlation_id, mocks.PROPERTIES.correlation_id
+        )
 
     def test_delivery_mode(self):
-        self.assertEqual(self._obj.delivery_mode,
-                         mocks.PROPERTIES.delivery_mode)
+        self.assertEqual(
+            self._obj.delivery_mode, mocks.PROPERTIES.delivery_mode
+        )
 
     def test_expiration(self):
         self.assertEqual(self._obj.expiration, mocks.PROPERTIES.expiration)
@@ -52,11 +55,15 @@ class TestProperties(unittest.TestCase):
 
 
 class TestMessage(unittest.TestCase):
-
     def setUp(self):
         self._obj = data.Message(
-            'mock', mocks.CHANNEL, mocks.METHOD, mocks.PROPERTIES, mocks.BODY,
-            False)
+            'mock',
+            mocks.CHANNEL,
+            mocks.METHOD,
+            mocks.PROPERTIES,
+            mocks.BODY,
+            False,
+        )
 
     def test_body(self):
         self.assertEqual(self._obj.body, mocks.BODY)
@@ -86,45 +93,56 @@ class TestMessage(unittest.TestCase):
         self.assertEqual(self._obj.properties.app_id, mocks.PROPERTIES.app_id)
 
     def test_content_encoding(self):
-        self.assertEqual(self._obj.properties.content_encoding,
-                         mocks.PROPERTIES.content_encoding)
+        self.assertEqual(
+            self._obj.properties.content_encoding,
+            mocks.PROPERTIES.content_encoding,
+        )
 
     def test_content_type(self):
-        self.assertEqual(self._obj.properties.content_type,
-                         mocks.PROPERTIES.content_type)
+        self.assertEqual(
+            self._obj.properties.content_type, mocks.PROPERTIES.content_type
+        )
 
     def test_correlation_id(self):
-        self.assertEqual(self._obj.properties.correlation_id,
-                         mocks.PROPERTIES.correlation_id)
+        self.assertEqual(
+            self._obj.properties.correlation_id,
+            mocks.PROPERTIES.correlation_id,
+        )
 
     def test_delivery_mode(self):
-        self.assertEqual(self._obj.properties.delivery_mode,
-                         mocks.PROPERTIES.delivery_mode)
+        self.assertEqual(
+            self._obj.properties.delivery_mode, mocks.PROPERTIES.delivery_mode
+        )
 
     def test_expiration(self):
-        self.assertEqual(self._obj.properties.expiration,
-                         mocks.PROPERTIES.expiration)
+        self.assertEqual(
+            self._obj.properties.expiration, mocks.PROPERTIES.expiration
+        )
 
     def test_message_id(self):
-        self.assertEqual(self._obj.properties.message_id,
-                         mocks.PROPERTIES.message_id)
+        self.assertEqual(
+            self._obj.properties.message_id, mocks.PROPERTIES.message_id
+        )
 
     def test_priority(self):
-        self.assertEqual(self._obj.properties.priority,
-                         mocks.PROPERTIES.priority)
+        self.assertEqual(
+            self._obj.properties.priority, mocks.PROPERTIES.priority
+        )
 
     def test_reply_to(self):
-        self.assertEqual(self._obj.properties.reply_to,
-                         mocks.PROPERTIES.reply_to)
+        self.assertEqual(
+            self._obj.properties.reply_to, mocks.PROPERTIES.reply_to
+        )
 
     def test_timestamp(self):
-        self.assertEqual(self._obj.properties.timestamp,
-                         mocks.PROPERTIES.timestamp)
+        self.assertEqual(
+            self._obj.properties.timestamp, mocks.PROPERTIES.timestamp
+        )
 
     def test_type(self):
-        self.assertEqual(self._obj.properties.type,
-                         mocks.PROPERTIES.type)
+        self.assertEqual(self._obj.properties.type, mocks.PROPERTIES.type)
 
     def test_user_id(self):
-        self.assertEqual(self._obj.properties.user_id,
-                         mocks.PROPERTIES.user_id)
+        self.assertEqual(
+            self._obj.properties.user_id, mocks.PROPERTIES.user_id
+        )

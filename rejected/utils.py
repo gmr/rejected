@@ -1,7 +1,6 @@
 import importlib
+import importlib.metadata
 import math
-
-import pkg_resources
 
 
 def get_package_version(module_obj, value):
@@ -16,12 +15,10 @@ def get_package_version(module_obj, value):
         if hasattr(module_obj, key):
             return getattr(module_obj, key)
     parts = value.split('.')
-    for index, part in enumerate(parts):
+    for index, _part in enumerate(parts):
         try:
-            return pkg_resources.get_distribution(
-                '.'.join(parts[0:index + 1])).version
-        except (pkg_resources.DistributionNotFound,
-                pkg_resources.RequirementParseError):
+            return importlib.metadata.version('.'.join(parts[0 : index + 1]))
+        except importlib.metadata.PackageNotFoundError:
             continue
 
 
@@ -35,8 +32,10 @@ def import_consumer(value):
     """
     parts = value.split('.')
     module_obj = importlib.import_module('.'.join(parts[0:-1]))
-    return (getattr(module_obj, parts[-1]),
-            get_package_version(module_obj, value))
+    return (
+        getattr(module_obj, parts[-1]),
+        get_package_version(module_obj, value),
+    )
 
 
 def percentile(values, k):
@@ -51,4 +50,4 @@ def percentile(values, k):
         return None
     values.sort()
     index = (len(values) * (float(k) / 100)) - 1
-    return values[int(math.ceil(index))]
+    return values[math.ceil(index)]

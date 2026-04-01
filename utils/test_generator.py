@@ -1,4 +1,5 @@
 """Generate test messages for the example consumer."""
+
 import random
 import time
 import uuid
@@ -11,8 +12,10 @@ MESSAGE_COUNT = 100
 
 HTML_VALUE = '<html><head><title>Hi</title></head><body>Hello %i</body></html>'
 JSON_VALUE = '{"json_encoded": true, "value": "here", "random": %i}'
-XML_VALUE = '<?xml version="1.0"><document><node><item>True</item>' \
-            '<other attr="foo">Bar</other><value>%i</value></node></document>'
+XML_VALUE = (
+    '<?xml version="1.0"><document><node><item>True</item>'
+    '<other attr="foo">Bar</other><value>%i</value></node></document>'
+)
 YAML_VALUE = """%%YAML 1.2
 ---
 Application:
@@ -31,20 +34,34 @@ if __name__ == '__main__':
     channel.exchange_declare(exchange='example', type='topic', durable=True)
 
     # Declare the queue
-    channel.queue_declare(queue='generated_messages', durable=True,
-                          exclusive=False, auto_delete=False)
+    channel.queue_declare(
+        queue='generated_messages',
+        durable=True,
+        exclusive=False,
+        auto_delete=False,
+    )
 
-    channel.queue_bind(exchange='example', queue='generated_messages',
-                       routing_key='rejected_example')
+    channel.queue_bind(
+        exchange='example',
+        queue='generated_messages',
+        routing_key='rejected_example',
+    )
 
-    channel.queue_declare(queue='consumer_replies', durable=True,
-                          exclusive=False, auto_delete=False)
+    channel.queue_declare(
+        queue='consumer_replies',
+        durable=True,
+        exclusive=False,
+        auto_delete=False,
+    )
 
-    channel.queue_bind(exchange='example', queue='consumer_replies',
-                       routing_key='rejected_reply')
+    channel.queue_bind(
+        exchange='example',
+        queue='consumer_replies',
+        routing_key='rejected_reply',
+    )
 
     # Initialize our timers and loop until external influence stops us
-    for iteration in range(0, MESSAGE_COUNT):
+    for _iteration in range(0, MESSAGE_COUNT):
         msg_type = random.randint(1, 4)
         if msg_type == 1:
             body = HTML_VALUE % random.randint(1, 32768)
@@ -59,21 +76,26 @@ if __name__ == '__main__':
             body = YAML_VALUE % random.randint(1, 32768)
             content_type = 'text/x-yaml'
         else:
-            body = 'Plain text value %i' % random.randint(1, 32768)
+            body = f'Plain text value {random.randint(1, 32768)}'
             content_type = 'text/text'
 
-        properties = BasicProperties(timestamp=int(time.time()),
-                                     app_id=__file__,
-                                     user_id='guest',
-                                     content_type=content_type,
-                                     message_id=str(uuid.uuid4()),
-                                     type='Example message',
-                                     reply_to='rejected_reply',
-                                     delivery_mode=1)
+        properties = BasicProperties(
+            timestamp=int(time.time()),
+            app_id=__file__,
+            user_id='guest',
+            content_type=content_type,
+            message_id=str(uuid.uuid4()),
+            type='Example message',
+            reply_to='rejected_reply',
+            delivery_mode=1,
+        )
 
         # Send the message
         channel.basic_publish(
-            exchange='example', routing_key='rejected_example',
-            body=body, properties=properties)
+            exchange='example',
+            routing_key='rejected_example',
+            body=body,
+            properties=properties,
+        )
 
     connection.close()

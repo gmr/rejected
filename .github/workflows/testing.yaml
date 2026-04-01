@@ -1,0 +1,47 @@
+name: Testing
+on:
+  pull_request:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+      - '*.rst'
+    tags-ignore: ["*"]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install dependencies
+        run: uv sync --all-groups
+
+      - name: Create build directory
+        run: mkdir -p build
+
+      - name: Lint Check
+        run: uv run pre-commit run --all-files
+
+      - name: Run tests
+        run: |
+          uv run coverage run
+          uv run coverage report
+          uv run coverage xml
+
+      - name: Upload Coverage
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./build/coverage.xml
+          flags: unittests

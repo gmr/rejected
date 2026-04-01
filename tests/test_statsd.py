@@ -1,10 +1,10 @@
+import asyncio
 import logging
+import re
 import socket
 import unittest
 import uuid
 from unittest import mock
-
-from tornado import gen, iostream, locks, tcpserver, testing
 
 from rejected import statsd
 
@@ -108,52 +108,71 @@ class NoHostnameTestCase(TestCase):
         )
 
 
-class StatsdServer(tcpserver.TCPServer):
+class StatsdServer(asyncio.Protocol):
     PATTERN = rb'[a-z0-9._-]+:[0-9.]+\|(?:g|c|ms)\n'
 
-    def __init__(
-        self, ssl_options=None, max_buffer_size=None, read_chunk_size=None
-    ):
-        self.event = locks.Event()
+    def __init__(self):
+        self.event = asyncio.Event()
         self.packets = []
         self.reconnect_receive = False
-        super().__init__(ssl_options, max_buffer_size, read_chunk_size)
+        self._buffer = b''
+        self._transport = None
 
-    @gen.coroutine
-    def handle_stream(self, stream, address):
-        LOGGER.debug('Connected %r', address)
-        while True:
-            try:
-                result = yield stream.read_until_regex(self.PATTERN)
-            except iostream.StreamClosedError:
-                break
-            else:
-                self.event.set()
-                LOGGER.debug('Received %r', result)
-                self.packets.append(result)
-                if b'reconnect' in result:
-                    self.reconnect_receive = True
-                    stream.close()
-                    return
+    def connection_made(self, transport):
+        self._transport = transport
+        LOGGER.debug('Connected %r', transport.get_extra_info('peername'))
+
+    def data_received(self, data):
+        self._buffer += data
+        last_end = 0
+        for match in re.finditer(self.PATTERN, self._buffer):
+            result = match.group(0)
+            last_end = match.end()
+            self.event.set()
+            LOGGER.debug('Received %r', result)
+            self.packets.append(result)
+            if b'reconnect' in result:
+                self.reconnect_receive = True
+                if self._transport:
+                    self._transport.close()
+                self._buffer = self._buffer[last_end:]
+                return
+        self._buffer = self._buffer[last_end:]
+
+    def connection_lost(self, exc):
+        LOGGER.debug('Connection lost: %r', exc)
 
 
-class TCPTestCase(testing.AsyncTestCase):
-    def setUp(self):
-        super().setUp()
+class TCPTestCase(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        await super().asyncSetUp()
         self.failure_callback = mock.Mock()
-        self.sock, self.port = testing.bind_unused_port()
         self.name = str(uuid.uuid4())
+
+        loop = asyncio.get_running_loop()
+        self._server_protocol = StatsdServer()
+        self._server = await loop.create_server(
+            lambda: self._server_protocol,
+            '127.0.0.1',
+            0,
+        )
+        self.port = self._server.sockets[0].getsockname()[1]
+
         self.settings = self.get_settings()
         LOGGER.debug('Settings: %r', self.settings)
         self.statsd = statsd.Client(
             self.name, self.settings, self.failure_callback
         )
-        self.server = StatsdServer()
-        self.server.add_socket(self.sock)
+
+    async def asyncTearDown(self):
+        if self.statsd._tcp_writer:
+            self.statsd.stop()
+        self._server.close()
+        await self._server.wait_closed()
 
     def get_settings(self):
         return {
-            'host': self.sock.getsockname()[0],
+            'host': '127.0.0.1',
             'port': self.port,
             'prefix': str(uuid.uuid4()),
             'tcp': True,
@@ -164,46 +183,51 @@ class TCPTestCase(testing.AsyncTestCase):
             'utf-8'
         )
 
-    @testing.gen_test
-    def test_add_timing(self):
+    async def test_add_timing(self):
         self.statsd.add_timing('foo', 2.5)
-        yield self.server.event.wait()
+        await asyncio.wait_for(self._server_protocol.event.wait(), timeout=5)
         self.assertIn(
-            self.payload_format('foo', 2500.0, 'ms'), self.server.packets
+            self.payload_format('foo', 2500.0, 'ms'),
+            self._server_protocol.packets,
         )
 
-    @testing.gen_test
-    def test_incr(self):
+    async def test_incr(self):
         self.statsd.incr('bar', 2)
-        yield self.server.event.wait()
-        self.assertIn(self.payload_format('bar', 2, 'c'), self.server.packets)
-
-    @testing.gen_test
-    def test_set_gauge(self):
-        self.statsd.set_gauge('baz', 98.5)
-        yield self.server.event.wait()
+        await asyncio.wait_for(self._server_protocol.event.wait(), timeout=5)
         self.assertIn(
-            self.payload_format('baz', 98.5, 'g'), self.server.packets
+            self.payload_format('bar', 2, 'c'), self._server_protocol.packets
         )
 
-    @testing.gen_test
-    def test_reconnect(self):
+    async def test_set_gauge(self):
         self.statsd.set_gauge('baz', 98.5)
-        yield self.server.event.wait()
-        self.server.event.clear()
+        await asyncio.wait_for(self._server_protocol.event.wait(), timeout=5)
+        self.assertIn(
+            self.payload_format('baz', 98.5, 'g'),
+            self._server_protocol.packets,
+        )
+
+    async def test_reconnect(self):
+        self.statsd.set_gauge('baz', 98.5)
+        await asyncio.wait_for(self._server_protocol.event.wait(), timeout=5)
+        self._server_protocol.event.clear()
         self.statsd.set_gauge('reconnect', 100)
-        yield self.server.event.wait()
-        self.server.event.clear()
-        yield gen.sleep(2)
-        self.assertTrue(self.server.reconnect_receive)
+        await asyncio.wait_for(self._server_protocol.event.wait(), timeout=5)
+        self._server_protocol.event.clear()
+        await asyncio.sleep(2)
+        self.assertTrue(self._server_protocol.reconnect_receive)
+        self.statsd._tcp_writer = self.statsd._tcp_socket()
         self.statsd.set_gauge('bar', 10)
-        yield self.server.event.wait()
-        self.assertTrue(self.server.reconnect_receive)
+        await asyncio.wait_for(self._server_protocol.event.wait(), timeout=5)
+        self.assertTrue(self._server_protocol.reconnect_receive)
 
         self.assertIn(
-            self.payload_format('baz', 98.5, 'g'), self.server.packets
+            self.payload_format('baz', 98.5, 'g'),
+            self._server_protocol.packets,
         )
         self.assertIn(
-            self.payload_format('reconnect', 100, 'g'), self.server.packets
+            self.payload_format('reconnect', 100, 'g'),
+            self._server_protocol.packets,
         )
-        self.assertIn(self.payload_format('bar', 10, 'g'), self.server.packets)
+        self.assertIn(
+            self.payload_format('bar', 10, 'g'), self._server_protocol.packets
+        )

@@ -14,8 +14,6 @@ import logging
 import os
 import socket
 
-from tornado import iostream
-
 LOGGER = logging.getLogger(__name__)
 
 
@@ -50,9 +48,9 @@ class Client:
             int(self._setting('port', self.DEFAULT_PORT)),
         )
         self._prefix = self._setting('prefix', self.DEFAULT_PREFIX)
-        self._tcp_sock, self._udp_sock = None, None
+        self._tcp_writer, self._udp_sock = None, None
         if self._setting('tcp', False):
-            self._tcp_sock = self._tcp_socket()
+            self._tcp_writer = self._tcp_socket()
         else:
             self._udp_sock = self._udp_socket()
 
@@ -85,8 +83,12 @@ class Client:
 
     def stop(self):
         """Close the socket if connected via TCP."""
-        if self._tcp_sock:
-            self._tcp_sock.close()
+        if self._tcp_writer:
+            try:
+                self._tcp_writer.close()
+            except OSError:
+                pass
+            self._tcp_writer = None
 
     def _build_payload(self, key, value, metric_type):
         """Return the"""
@@ -114,8 +116,8 @@ class Client:
         payload = self._build_payload(key, value, metric_type)
         LOGGER.debug('Sending statsd payload: %r', payload)
         try:
-            if self._tcp_sock:
-                return self._tcp_sock.write(payload.encode('utf-8'))
+            if self._tcp_writer:
+                self._tcp_writer.sendall(payload.encode('utf-8'))
             else:
                 self._udp_sock.sendto(payload.encode('utf-8'), self._address)
         except OSError as error:  # pragma: nocover
@@ -145,35 +147,29 @@ class Client:
         """Invoked when the socket is closed."""
         LOGGER.warning('Disconnected from statsd, reconnecting')
         self._connected = False
-        self._tcp_sock = self._tcp_socket()
-
-    def _tcp_on_connected(self):
-        """Invoked when the IOStream is connected"""
-        LOGGER.debug('Connected to statsd at %s via TCP', self._address)
-        self._connected = True
+        self._tcp_writer = None
+        self._tcp_writer = self._tcp_socket()
 
     def _tcp_socket(self):
-        """Connect to statsd via TCP and return the IOStream handle.
+        """Connect to statsd via TCP and return the socket handle.
 
-        :rtype: iostream.IOStream
+        :rtype: socket.socket
 
         """
-        sock = iostream.IOStream(
-            socket.socket(
-                socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP
-            )
+        sock = socket.socket(
+            socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP
         )
-        sock.set_close_callback(self._tcp_on_closed)
         try:
-            sock.connect(self._address, self._tcp_on_connected)
+            sock.connect(self._address)
         except OSError as error:
             LOGGER.error(
                 'Failed to connect via TCP, triggering shutdown: %s', error
             )
             self._failure_callback()
-        else:
-            self._connected = True
-            return sock
+            return None
+        LOGGER.debug('Connected to statsd at %s via TCP', self._address)
+        self._connected = True
+        return sock
 
     @staticmethod
     def _udp_socket():

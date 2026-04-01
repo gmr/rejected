@@ -22,9 +22,11 @@ try:
     import sprockets_influxdb as influxdb
 except ImportError:
     influxdb = None
+import asyncio
+
 import pika
 from pika import exceptions, spec
-from pika.adapters import tornado_connection
+from pika.adapters import asyncio_connection
 
 try:
     import raven
@@ -32,7 +34,6 @@ try:
     from raven.contrib.tornado import AsyncSentryClient
 except ImportError:
     breadcrumbs, raven, AsyncSentryClient = None, None, None
-from tornado import gen, ioloop, locks
 
 from . import __version__, data, state, statsd, utils
 
@@ -108,14 +109,14 @@ class Connection(state.State):
         return self.is_stopped
 
     def connect(self):
-        """Setup the TornadoConnection which connects to RabbitMQ
+        """Setup the AsyncioConnection which connects to RabbitMQ
         automatically with connection callbacks for when the connection is
         opened, when there is an error opening a connection or when a
         previously opened connection is closed.
 
         """
         self.set_state(self.STATE_CONNECTING)
-        return tornado_connection.TornadoConnection(
+        return asyncio_connection.AsyncioConnection(
             self._connection_parameters,
             on_open_callback=self.on_open,
             on_open_error_callback=self.on_open_error,
@@ -144,7 +145,7 @@ class Connection(state.State):
     def on_open(self, connection):
         """Invoked when the connection is opened
 
-        :type connection: pika.adapters.tornado_connection.TornadoConnection
+        :type connection: pika.adapters.asyncio_connection.AsyncioConnection
 
         """
         LOGGER.debug('Connection %s is open (%r)', self.name, connection)
@@ -618,15 +619,14 @@ class Process(multiprocessing.Process, state.State):
                 'Error creating the consumer "%s": %s', cfg['consumer'], error
             )
 
-    @gen.coroutine
-    def invoke_consumer(self, message):
+    async def invoke_consumer(self, message):
         """Wrap the actual processor processing bits
 
         :param rejected.data.Message message: The message to process
 
         """
         # Only allow for a single message to be processed at a time
-        with (yield self.consumer_lock.acquire()):
+        async with self.consumer_lock:
             if self.is_idle:
                 self.set_state(self.STATE_PROCESSING)
                 self.delivery_time = start_time = time.time()
@@ -639,7 +639,7 @@ class Process(multiprocessing.Process, state.State):
                     self.measurement.set_tag(self.REDELIVERED, True)
 
                 try:
-                    result = yield self.consumer.execute(
+                    result = await self.consumer.execute(
                         message, self.measurement
                     )
                 except Exception as error:
@@ -669,8 +669,8 @@ class Process(multiprocessing.Process, state.State):
                     self.state_description,
                 )
         if self.pending:
-            self.ioloop.add_callback(
-                self.invoke_consumer, self.pending.popleft()
+            asyncio.ensure_future(  # noqa: RUF006
+                self.invoke_consumer(self.pending.popleft())
             )
 
     @property
@@ -731,12 +731,12 @@ class Process(multiprocessing.Process, state.State):
     def on_connection_blocked(self, name):
         LOGGER.warning('Connection %s blocked', name)
         if self.is_processing:
-            self.consumer.on_blocked(name)
+            asyncio.ensure_future(self.consumer.on_blocked(name))  # noqa: RUF006
 
     def on_connection_unblocked(self, name):
         LOGGER.info('Connection %s unblocked', name)
         if self.is_processing:
-            self.consumer.on_blocked(name)
+            asyncio.ensure_future(self.consumer.on_unblocked(name))  # noqa: RUF006
 
     def on_confirmation(self, name, delivered, delivery_tag):
         """Invoked on delivery confirmation
@@ -763,7 +763,7 @@ class Process(multiprocessing.Process, state.State):
         if self.is_processing:
             self.pending.append(message)
         else:
-            self.invoke_consumer(message)
+            asyncio.ensure_future(self.invoke_consumer(message))  # noqa: RUF006
 
     def on_returned(self, name, channel, method, properties, body):
         """Send a message to the consumer that was returned by RabbitMQ
@@ -780,7 +780,7 @@ class Process(multiprocessing.Process, state.State):
         if self.is_processing:
             self.pending.append(message)
         else:
-            self.invoke_consumer(message)
+            asyncio.ensure_future(self.invoke_consumer(message))  # noqa: RUF006
 
     def on_processed(self, message, result, start_time):
         """Invoked after a message is processed by the consumer and
@@ -879,9 +879,9 @@ class Process(multiprocessing.Process, state.State):
         # Clear IOLoop constructs
         self.consumer_lock = None
 
-        # Stop the IOLoop
+        # Stop the event loop
         if self.ioloop:
-            LOGGER.debug('Stopping IOLoop')
+            LOGGER.debug('Stopping event loop')
             self.ioloop.stop()
 
         # Note that shutdown is complete and set the state accordingly
@@ -994,8 +994,9 @@ class Process(multiprocessing.Process, state.State):
     def _run(self):
         """Run method that can be profiled"""
         self.set_state(self.STATE_INITIALIZING)
-        self.ioloop = ioloop.IOLoop.current()
-        self.consumer_lock = locks.Lock()
+        self.ioloop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self.ioloop)
+        self.consumer_lock = asyncio.Lock()
 
         self.sentry_client = self.setup_sentry(
             self._kwargs['config'], self.consumer_name
@@ -1011,7 +1012,7 @@ class Process(multiprocessing.Process, state.State):
 
         if not self.is_stopped:
             try:
-                self.ioloop.start()
+                self.ioloop.run_forever()
             except KeyboardInterrupt:
                 LOGGER.warning('CTRL-C while waiting for clean shutdown')
 

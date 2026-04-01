@@ -145,6 +145,11 @@ def main():
     except (FileNotFoundError, ValueError) as exc:
         sys.exit(f'Error: {exc}')
 
+    if args.consumer is not None and args.consumer not in cfg.consumers:
+        parser.error(f'Unknown consumer: {args.consumer}')
+    if args.quantity is not None and args.consumer is None:
+        parser.error('--qty requires --only')
+
     if cfg.logging:
         logging.config.dictConfig(cfg.logging)
     else:

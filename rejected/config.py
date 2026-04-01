@@ -154,6 +154,9 @@ def load(path: str | pathlib.Path) -> Config:
     except (OSError, yaml.YAMLError) as exc:
         raise ValueError(f'Failed to read configuration: {exc}') from exc
 
+    if not isinstance(raw, dict):
+        raise ValueError('Configuration root must be a mapping')
+
     app_raw = raw.get('Application', raw.get('application', {})) or {}
     logging_raw = raw.get('Logging', raw.get('logging', {})) or {}
 

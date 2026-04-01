@@ -605,7 +605,7 @@ class Process(multiprocessing.Process, state.State):
         settings['_import_module'] = '.'.join(cfg.consumer.split('.')[0:-1])
 
         kwargs = {
-            'settings': settings,
+            'settings': config_module.Settings(settings),
             'process': self,
             'drop_exchange': cfg.drop_exchange,
             'drop_invalid_messages': cfg.drop_invalid_messages,
@@ -1280,7 +1280,7 @@ class Process(multiprocessing.Process, state.State):
 
     @property
     def queue_name(self):
-        return self.consumer_config.queue or self.name
+        return self.consumer_config.queue or self.consumer_name
 
     @property
     def stats_queue(self):

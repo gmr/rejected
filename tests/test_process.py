@@ -46,7 +46,7 @@ _CONFIG_RAW: typing.ClassVar[dict] = {
             'pass': 'guest',
             'vhost': '/',
             'ssl_options': {
-                'prototcol': 2,
+                'protocol': 2,
             },
         },
     },

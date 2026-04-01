@@ -14,11 +14,11 @@ except ImportError:
 
 LOGGER = logging.getLogger(__name__)
 
-# Metrics are module-level singletons, created on first call to start().
 _messages_processed = None
 _messages_failed = None
 _messages_redelivered = None
 _consumer_processes = None
+_previous: dict[str, dict[str, int]] = {}
 _started = False
 
 
@@ -41,17 +41,17 @@ def start(port: int) -> None:
         LOGGER.warning('Prometheus exporter already running')
         return
 
-    _messages_processed = prometheus_client.Gauge(
+    _messages_processed = prometheus_client.Counter(
         'rejected_messages_processed_total',
         'Total messages processed',
         ['consumer'],
     )
-    _messages_failed = prometheus_client.Gauge(
+    _messages_failed = prometheus_client.Counter(
         'rejected_messages_failed_total',
         'Total messages that resulted in errors',
         ['consumer'],
     )
-    _messages_redelivered = prometheus_client.Gauge(
+    _messages_redelivered = prometheus_client.Counter(
         'rejected_messages_redelivered_total',
         'Total redelivered messages',
         ['consumer'],
@@ -70,6 +70,8 @@ def start(port: int) -> None:
 def update(stats: dict) -> None:
     """Update Prometheus metrics from the MCP stats dict.
 
+    Computes deltas from the previous poll cycle to increment Counters.
+
     :param dict stats: The stats dict from MCP.calculate_stats()
 
     """
@@ -78,9 +80,19 @@ def update(stats: dict) -> None:
 
     consumers = stats.get('consumers', {})
     for name, data in consumers.items():
-        _messages_processed.labels(consumer=name).set(data.get('processed', 0))
-        _messages_failed.labels(consumer=name).set(data.get('failed', 0))
-        _messages_redelivered.labels(consumer=name).set(
-            data.get('redelivered', 0)
-        )
+        prev = _previous.get(name, {})
+        for key, counter in (
+            ('processed', _messages_processed),
+            ('failed', _messages_failed),
+            ('redelivered', _messages_redelivered),
+        ):
+            current = data.get(key, 0)
+            delta = current - prev.get(key, 0)
+            if delta > 0:
+                counter.labels(consumer=name).inc(delta)
         _consumer_processes.labels(consumer=name).set(data.get('processes', 0))
+        _previous[name] = {
+            'processed': data.get('processed', 0),
+            'failed': data.get('failed', 0),
+            'redelivered': data.get('redelivered', 0),
+        }

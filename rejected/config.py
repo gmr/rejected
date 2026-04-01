@@ -153,6 +153,8 @@ def load(path: str | pathlib.Path) -> Config:
             raise ValueError(f'Unsupported config file type: {path.suffix}')
     except (OSError, yaml.YAMLError) as exc:
         raise ValueError(f'Failed to read configuration: {exc}') from exc
+    except tomllib.TOMLDecodeError as exc:
+        raise ValueError(f'Failed to read configuration: {exc}') from exc
 
     if not isinstance(raw, dict):
         raise ValueError('Configuration root must be a mapping')

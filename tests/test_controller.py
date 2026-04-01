@@ -100,14 +100,16 @@ class ControllerRunTests(unittest.TestCase):
         self.ctrl.args.prepend_path = '/some/path'
         mock_mcp = mock.Mock()
         original_path = sys.path[:]
-        with mock.patch(
-            'rejected.controller.mcp.MasterControlProgram',
-            return_value=mock_mcp,
-        ):
-            with mock.patch.object(self.ctrl, '_setup_signals'):
-                self.ctrl.run()
-        self.assertEqual(sys.path[0], '/some/path')
-        sys.path[:] = original_path  # restore
+        try:
+            with mock.patch(
+                'rejected.controller.mcp.MasterControlProgram',
+                return_value=mock_mcp,
+            ):
+                with mock.patch.object(self.ctrl, '_setup_signals'):
+                    self.ctrl.run()
+            self.assertEqual(sys.path[0], '/some/path')
+        finally:
+            sys.path[:] = original_path
 
     def test_keyboard_interrupt_exits_cleanly(self):
         mock_mcp = mock.Mock()
@@ -195,6 +197,10 @@ class ControllerReloadTests(unittest.TestCase):
 
     def test_reload_invalid_config_keeps_previous_config(self):
         self._run_with_reload(load_raises=ValueError('bad yaml'))
+        self.assertIs(self.ctrl.config, self.cfg)
+
+    def test_reload_toml_decode_error_keeps_previous_config(self):
+        self._run_with_reload(load_raises=ValueError('invalid toml'))
         self.assertIs(self.ctrl.config, self.cfg)
 
     def test_reload_still_restarts_after_load_failure(self):

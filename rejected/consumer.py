@@ -70,7 +70,15 @@ try:
 except ImportError:
     sentry_sdk = None
 
+try:
+    import fastavro
+    import requests as _requests
+except ImportError:
+    fastavro = None
+    _requests = None
+
 DEFAULT_CHANNEL = 'default'
+AVRO_DATUM_MIME_TYPE = 'application/vnd.apache.avro.datum'
 _DROPPED_MESSAGE = 'X-Rejected-Dropped'
 _PROCESSING_EXCEPTIONS = 'X-Processing-Exceptions'
 _EXCEPTION_FROM = 'X-Exception-From'
@@ -200,6 +208,7 @@ class Consumer:
             if error_max_retry is None
             else error_max_retry
         )
+        self._avro_schemas: dict = {}
         self._finished = False
         self._message = None
         self._message_type = message_type or self.MESSAGE_TYPE
@@ -369,13 +378,22 @@ class Consumer:
         """
         # Auto-serialize the content if needed
         is_string = isinstance(body, (str, bytes))
-        if (
-            not no_serialization
-            and not is_string
-            and properties.get('content_type')
-        ):
-            self.logger.debug('Auto-serializing message body')
-            body = self._auto_serialize(properties.get('content_type'), body)
+        if not no_serialization and not is_string:
+            content_type = properties.get('content_type')
+            if (
+                fastavro
+                and content_type == AVRO_DATUM_MIME_TYPE
+                and properties.get('type')
+            ):
+                self.logger.debug(
+                    'Auto-serializing message body as Avro datum'
+                )
+                body = self._serialize_avro(
+                    self._avro_schema(properties['type']), body
+                )
+            elif content_type:
+                self.logger.debug('Auto-serializing message body')
+                body = self._auto_serialize(content_type, body)
 
         # Auto-encode the message body if needed
         if not no_encoding and properties.get('content_encoding'):
@@ -669,7 +687,13 @@ class Consumer:
             self._message_body = self._message.body
 
         # Handle the auto-deserialization
-        if self.content_type == 'application/json':
+        if fastavro and self.content_type == AVRO_DATUM_MIME_TYPE:
+            if self.message_type:
+                self._message_body = self._deserialize_avro(
+                    self._avro_schema(self.message_type), self._message_body
+                )
+
+        elif self.content_type == 'application/json':
             self._message_body = self._load_json_value(self._message_body)
 
         elif umsgpack and self.content_type == 'application/msgpack':
@@ -1529,6 +1553,159 @@ class Consumer:
             body=self._message.body,
             properties=pika.BasicProperties(**properties),
         )
+
+    # Avro support
+
+    def _avro_schema(self, message_type: str) -> dict:
+        """Return the parsed Avro schema for the given message type, loading
+        and caching it on first access.
+
+        :param str message_type: The AMQP ``type`` property value
+        :rtype: dict
+
+        """
+        if message_type not in self._avro_schemas:
+            self.logger.debug('Loading Avro schema for %s', message_type)
+            self._avro_schemas[message_type] = self._load_avro_schema(
+                message_type
+            )
+        return self._avro_schemas[message_type]
+
+    def _load_avro_schema(self, message_type: str) -> dict:
+        """Load and return the Avro schema for the given message type.
+
+        Override this method (or use :class:`LocalSchemaConsumer` or
+        :class:`RemoteSchemaConsumer`) to provide schema loading.
+
+        :param str message_type: The AMQP ``type`` property value
+        :rtype: dict
+        :raises: NotImplementedError
+
+        """
+        raise NotImplementedError(
+            'Override _load_avro_schema to provide Avro schemas, '
+            'or use LocalSchemaConsumer/RemoteSchemaConsumer'
+        )
+
+    @staticmethod
+    def _deserialize_avro(avro_schema: dict, data: bytes) -> dict:
+        """Deserialize an Avro datum using the provided schema.
+
+        :param dict avro_schema: The parsed Avro schema
+        :param bytes data: The Avro-encoded bytes to deserialize
+        :rtype: dict
+
+        """
+        return fastavro.schemaless_reader(io.BytesIO(data), avro_schema)
+
+    @staticmethod
+    def _serialize_avro(avro_schema: dict, data: dict) -> bytes:
+        """Serialize a data structure into an Avro datum.
+
+        :param dict avro_schema: The parsed Avro schema
+        :param dict data: The value to serialize
+        :rtype: bytes
+
+        """
+        stream = io.BytesIO()
+        fastavro.schemaless_writer(stream, avro_schema, data)
+        return stream.getvalue()
+
+
+class LocalSchemaConsumer(Consumer):
+    """Consumer that loads Avro schemas from ``.avsc`` files on disk.
+
+    Configure ``schema_path`` in the consumer's ``config`` section:
+
+    .. code:: yaml
+
+        Consumers:
+          my-consumer:
+            consumer: myapp.MyConsumer
+            config:
+              schema_path: /etc/schemas
+
+    The schema file is resolved as ``{schema_path}/{message_type}.avsc``.
+
+    Requires ``rejected[avro]`` to be installed.
+
+    """
+
+    async def initialize(self):
+        self.require_setting('schema_path', 'LocalSchemaConsumer')
+        import pathlib
+
+        schema_path = pathlib.Path(self.settings['schema_path']).resolve()
+        if not schema_path.is_dir():
+            raise RuntimeError(
+                f'schema_path {str(schema_path)!r} does not exist '
+                f'or is not a directory'
+            )
+        await super().initialize()
+
+    def _load_avro_schema(self, message_type: str) -> dict:
+        """Load the Avro schema file from disk.
+
+        :param str message_type: The AMQP ``type`` property value
+        :rtype: dict
+        :raises: ConsumerException if the schema file is not found
+
+        """
+        import pathlib
+
+        schema_path = pathlib.Path(self.settings['schema_path']).resolve()
+        file_path = schema_path / f'{message_type}.avsc'
+        if not file_path.exists():
+            raise ConsumerException(f'Missing Avro schema file: {file_path}')
+        return json.loads(file_path.read_text())
+
+
+class RemoteSchemaConsumer(Consumer):
+    """Consumer that loads Avro schemas from a remote HTTP endpoint.
+
+    Configure ``schema_uri_format`` in the consumer's ``config`` section,
+    using ``{0}`` as a placeholder for the message type:
+
+    .. code:: yaml
+
+        Consumers:
+          my-consumer:
+            consumer: myapp.MyConsumer
+            config:
+              schema_uri_format: http://schema-registry/schemas/{0}.avsc
+
+    Requires ``rejected[avro]`` to be installed.
+
+    """
+
+    async def initialize(self):
+        self.require_setting('schema_uri_format', 'RemoteSchemaConsumer')
+        await super().initialize()
+
+    def _load_avro_schema(self, message_type: str) -> dict:
+        """Fetch the Avro schema from the configured URI.
+
+        :param str message_type: The AMQP ``type`` property value
+        :rtype: dict
+        :raises: ConsumerException on HTTP error
+
+        """
+        if not _requests:
+            raise ConsumerException(
+                'requests is required for RemoteSchemaConsumer; '
+                'install rejected[avro]'
+            )
+        url = self.settings['schema_uri_format'].format(message_type)
+        self.logger.debug(
+            'Fetching Avro schema for %s from %s', message_type, url
+        )
+        response = _requests.get(url)
+        if not response.ok:
+            raise ConsumerException(
+                f'Failed to fetch Avro schema for {message_type}: '
+                f'HTTP {response.status_code}'
+            )
+        return response.json()
 
 
 class SmartConsumer(Consumer):

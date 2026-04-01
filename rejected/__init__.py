@@ -10,11 +10,14 @@ from importlib.metadata import PackageNotFoundError, version
 logging.getLogger(__name__).addHandler(logging.NullHandler())
 
 from rejected.consumer import (  # noqa: E402
+    AVRO_DATUM_MIME_TYPE,
     Consumer,
     ConsumerException,
+    LocalSchemaConsumer,
     MessageException,
     ProcessingException,
     PublishingConsumer,
+    RemoteSchemaConsumer,
     SmartConsumer,
     SmartPublishingConsumer,
 )
@@ -27,11 +30,14 @@ except PackageNotFoundError:
     __version__ = 'unknown'
 
 __all__ = [
+    'AVRO_DATUM_MIME_TYPE',
     'Consumer',
     'ConsumerException',
+    'LocalSchemaConsumer',
     'MessageException',
     'ProcessingException',
     'PublishingConsumer',
+    'RemoteSchemaConsumer',
     'SmartConsumer',
     'SmartPublishingConsumer',
     '__author__',

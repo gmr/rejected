@@ -1616,7 +1616,7 @@ class Consumer:
                     'requests is required for HTTP schema loading; '
                     'install rejected[avro]'
                 )
-            response = _requests.get(uri)
+            response = _requests.get(uri, timeout=30)
             if not response.ok:
                 raise ConsumerException(
                     f'Failed to fetch Avro schema for {message_type}: '

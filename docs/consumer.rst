@@ -2,20 +2,18 @@
 
 Consumer API
 ============
-The :py:class:`Consumer <rejected.consumer.Consumer>` and
-:py:class:`SmartConsumer <rejected.consumer.SmartConsumer>` classes to extend
+The :py:class:`Consumer <rejected.consumer.Consumer>` class to extend
 for consumer applications.
 
-While the :py:class:`Consumer <rejected.consumer.Consumer>` class provides all
-the structure required for implementing a rejected consumer,
-the :py:class:`SmartConsumer <rejected.consumer.SmartConsumer>` adds
-functionality designed to make writing consumers even easier. When messages
-are received by consumers extending :py:class:`SmartConsumer <rejected.consumer.SmartConsumer>`,
-if the message's ``content_type`` property contains one of the supported mime-types,
-the message body will automatically be deserialized, making the deserialized
-message body available via the ``body`` attribute. Additionally, should one of
-the supported ``content_encoding`` types (``gzip`` or ``bzip2``) be specified in the
-message's property, it will automatically be decoded.
+The :py:class:`Consumer <rejected.consumer.Consumer>` class provides all
+the structure required for implementing a rejected consumer, including
+automatic deserialization of message bodies based on the message's
+``content_type`` property. When messages are received, if the message's
+``content_type`` property contains one of the supported mime-types, the message
+body will automatically be deserialized, making the deserialized message body
+available via the ``body`` attribute. Additionally, should one of the supported
+``content_encoding`` types (``gzip`` or ``bzip2``) be specified in the message's
+property, it will automatically be decoded.
 
 Message Type Validation
 -----------------------
@@ -51,7 +49,6 @@ Consumer Classes
    :maxdepth: 1
 
    api_consumer
-   api_smart_consumer
 
 Exceptions
 ----------

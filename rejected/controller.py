@@ -28,6 +28,7 @@ class Controller:
         self.args = args
         self.config = cfg
         self._mcp = None
+        self._reload_requested = False
         self._shutdown_requested = False
         self._sentry_client = False
         if sentry_sdk and cfg.sentry_dsn:
@@ -46,39 +47,59 @@ class Controller:
             self._sentry_client = True
 
     def run(self):
-        """Run the application: set up signals, start MCP, block until done."""
+        """Run the application: set up signals, start MCP, block until done.
+
+        Loops on SIGHUP to reload config and restart consumers without
+        dropping the process.
+        """
         self._setup_signals()
-        if self._shutdown_requested:
-            return
         if self.args.prepend_path:
             sys.path.insert(0, self.args.prepend_path)
-        self._mcp = mcp.MasterControlProgram(
-            self.config,
-            consumer=self.args.consumer,
-            profile=self.args.profile,
-            quantity=self.args.quantity,
-        )
-        if self._shutdown_requested:
-            return
-        try:
-            self._mcp.run()
-        except KeyboardInterrupt:
-            LOGGER.info('Caught CTRL-C, shutting down')
-        except Exception:
-            exc_info = sys.exc_info()
-            if self._sentry_client:
-                LOGGER.debug('Sending exception to sentry')
-                sentry_sdk.capture_exception(exc_info)
-            raise
-        if self._mcp and self._mcp.is_running:
-            self._mcp.stop_processes()
+
+        while not self._shutdown_requested:
+            self._reload_requested = False
+            self._mcp = mcp.MasterControlProgram(
+                self.config,
+                consumer=self.args.consumer,
+                profile=self.args.profile,
+                quantity=self.args.quantity,
+            )
+            try:
+                self._mcp.run()
+            except KeyboardInterrupt:
+                LOGGER.info('Caught CTRL-C, shutting down')
+                break
+            except Exception:
+                exc_info = sys.exc_info()
+                if self._sentry_client:
+                    LOGGER.debug('Sending exception to sentry')
+                    sentry_sdk.capture_exception(exc_info)
+                raise
+
+            if not self._reload_requested:
+                break
+
+            LOGGER.info('Reloading configuration from %s', self.args.config)
+            try:
+                self.config = config_module.load(self.args.config)
+                if self.config.logging:
+                    logging.config.dictConfig(self.config.logging)
+            except (FileNotFoundError, ValueError) as exc:
+                LOGGER.error(
+                    'Failed to reload configuration: %s — restarting with '
+                    'previous config',
+                    exc,
+                )
 
     def _setup_signals(self):
         signal.signal(signal.SIGHUP, self._on_sighup)
         signal.signal(signal.SIGTERM, self._on_sigterm)
 
     def _on_sighup(self, _signum, _frame):
-        LOGGER.info('Received SIGHUP')
+        LOGGER.info('Received SIGHUP — reloading configuration')
+        self._reload_requested = True
+        if self._mcp:
+            self._mcp.stop_processes()
 
     def _on_sigterm(self, _signum, _frame):
         LOGGER.info('Received SIGTERM, initiating shutdown')

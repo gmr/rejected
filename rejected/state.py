@@ -2,17 +2,20 @@
 Base State Tracking Class
 
 """
+
 import logging
 import time
+import typing
 
 LOGGER = logging.getLogger(__name__)
 
 
-class State(object):
+class State:
     """Class that is to be extended by MCP and process for maintaining the
     internal state of the application.
 
     """
+
     # State constants
     STATE_INITIALIZING = 0x01
     STATE_CONNECTING = 0x02
@@ -24,7 +27,7 @@ class State(object):
     STATE_STOPPED = 0x08
 
     # For reverse lookup
-    STATES = {
+    STATES: typing.ClassVar[dict[int, str]] = {
         0x01: 'Initializing',
         0x02: 'Connecting',
         0x03: 'Idle',
@@ -32,7 +35,7 @@ class State(object):
         0x05: 'Sleeping',
         0x06: 'Stop Requested',
         0x07: 'Shutting down',
-        0x08: 'Stopped'
+        0x08: 'Stopped',
     }
 
     def __init__(self):
@@ -49,11 +52,14 @@ class State(object):
         """
         # Make sure it's a valid state
         if new_state not in self.STATES:
-            raise ValueError('Invalid state value: %r' % new_state)
+            raise ValueError(f'Invalid state value: {new_state!r}')
 
         # Set the state
-        LOGGER.debug('State changing from %s to %s', self.STATES[self.state],
-                     self.STATES[new_state])
+        LOGGER.debug(
+            'State changing from %s to %s',
+            self.STATES[self.state],
+            self.STATES[new_state],
+        )
         self.state = new_state
         self.state_start = time.time()
 
@@ -92,8 +98,11 @@ class State(object):
         :rtype: bool
 
         """
-        return self.state in [self.STATE_IDLE, self.STATE_ACTIVE,
-                              self.STATE_SLEEPING]
+        return self.state in [
+            self.STATE_IDLE,
+            self.STATE_ACTIVE,
+            self.STATE_SLEEPING,
+        ]
 
     @property
     def is_shutting_down(self):

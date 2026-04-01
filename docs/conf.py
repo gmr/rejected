@@ -1,16 +1,19 @@
-# -*- coding: utf-8 -*-
 import os
 import sys
+
 sys.path.insert(0, os.path.abspath('..'))
 
-import rejected  # noqa E402
+import rejected
 
 release = rejected.__version__
 version = '.'.join(release.split('.')[0:1])
 
 extensions = [
-    'sphinx.ext.autodoc', 'sphinx.ext.doctest', 'sphinx.ext.viewcode',
-    'sphinx.ext.autosummary', 'sphinx.ext.intersphinx'
+    'sphinx.ext.autodoc',
+    'sphinx.ext.doctest',
+    'sphinx.ext.viewcode',
+    'sphinx.ext.autosummary',
+    'sphinx.ext.intersphinx',
 ]
 
 templates_path = ['_templates']
@@ -27,7 +30,7 @@ intersphinx_mapping = {
     'python': ('https://docs.python.org/3/', None),
     'pika': ('https://pika.readthedocs.io/en/latest/', None),
     'raven': ('https://raven.readthedocs.io/en/latest/', None),
-    'tornado': ('http://www.tornadoweb.org/en/latest/', None)
+    'tornado': ('http://www.tornadoweb.org/en/latest/', None),
 }
 
 html_theme = 'default'
@@ -37,14 +40,27 @@ htmlhelp_basename = 'rejecteddoc'
 latex_elements = {}
 
 latex_documents = [
-    ('index', 'rejected.tex', u'rejected Documentation', u'Gavin M. Roy',
-     'manual'),
+    (
+        'index',
+        'rejected.tex',
+        'rejected Documentation',
+        'Gavin M. Roy',
+        'manual',
+    ),
 ]
 
-man_pages = [('index', 'rejected', u'rejected Documentation',
-              [u'Gavin M. Roy'], 1)]
+man_pages = [
+    ('index', 'rejected', 'rejected Documentation', ['Gavin M. Roy'], 1)
+]
 
 texinfo_documents = [
-    ('index', 'rejected', u'rejected Documentation', u'Gavin M. Roy',
-     'rejected', 'One line description of project.', 'Miscellaneous'),
+    (
+        'index',
+        'rejected',
+        'rejected Documentation',
+        'Gavin M. Roy',
+        'rejected',
+        'One line description of project.',
+        'Miscellaneous',
+    ),
 ]

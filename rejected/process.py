@@ -3,19 +3,21 @@ Consumer process management. Imports consumer code, manages RabbitMQ
 connection state and collects stats about the consuming process.
 
 """
+
 import collections
 import logging
 import math
 import multiprocessing
 import os
-from os import path
 import profile
 import signal
 import ssl
 import time
 import warnings
+from os import path
 
 from helper import config as helper_config
+
 try:
     import sprockets_influxdb as influxdb
 except ImportError:
@@ -23,6 +25,7 @@ except ImportError:
 import pika
 from pika import exceptions, spec
 from pika.adapters import tornado_connection
+
 try:
     import raven
     from raven import breadcrumbs
@@ -38,11 +41,29 @@ LOGGER = logging.getLogger(__name__)
 
 class Callbacks:
     """Slotted callback classes to fix namedtuple issue in 3.9"""
-    __slots__ = ['on_ready', 'on_connection_failure', 'on_closed',
-                 'on_blocked', 'on_unblocked', 'on_confirmation',
-                 'on_delivery', 'on_return']
-    def __init__(self, on_ready, on_connection_failure, on_closed, on_blocked,
-                 on_unblocked, on_confirmation, on_delivery, on_return):
+
+    __slots__ = [
+        'on_blocked',
+        'on_closed',
+        'on_confirmation',
+        'on_connection_failure',
+        'on_delivery',
+        'on_ready',
+        'on_return',
+        'on_unblocked',
+    ]
+
+    def __init__(
+        self,
+        on_ready,
+        on_connection_failure,
+        on_closed,
+        on_blocked,
+        on_unblocked,
+        on_confirmation,
+        on_delivery,
+        on_return,
+    ):
         self.on_ready = on_ready
         self.on_connection_failure = on_connection_failure
         self.on_closed = on_closed
@@ -54,19 +75,26 @@ class Callbacks:
 
 
 class Connection(state.State):
-
     HB_INTERVAL = 300
     STATE_CLOSED = 0x08
 
-    def __init__(self, name, config, consumer_name, should_consume,
-                 publisher_confirmations, io_loop, callbacks):
-        super(Connection, self).__init__()
+    def __init__(
+        self,
+        name,
+        config,
+        consumer_name,
+        should_consume,
+        publisher_confirmations,
+        io_loop,
+        callbacks,
+    ):
+        super().__init__()
         self.blocked = False
         self.callbacks = callbacks
         self.channel = None
         self.config = config
         self.should_consume = should_consume
-        self.consumer_tag = '{}-{}'.format(consumer_name, os.getpid())
+        self.consumer_tag = f'{consumer_name}-{os.getpid()}'
         self.io_loop = io_loop
         self.name = name
         self.publisher_confirm = publisher_confirmations
@@ -92,7 +120,8 @@ class Connection(state.State):
             on_open_callback=self.on_open,
             on_open_error_callback=self.on_open_error,
             on_close_callback=self.on_closed,
-            custom_ioloop=self.io_loop)
+            custom_ioloop=self.io_loop,
+        )
 
     def shutdown(self):
         if self.is_shutting_down:
@@ -102,10 +131,13 @@ class Connection(state.State):
         self.set_state(self.STATE_SHUTTING_DOWN)
         LOGGER.debug('Connection %s is shutting down', self.name)
         if self.is_active:
-            LOGGER.debug('Connection %s is sending a Basic.Cancel to RabbitMQ',
-                         self.name)
-            self.channel.basic_cancel(self.on_consumer_cancelled,
-                                      self.consumer_tag)
+            LOGGER.debug(
+                'Connection %s is sending a Basic.Cancel to RabbitMQ',
+                self.name,
+            )
+            self.channel.basic_cancel(
+                self.on_consumer_cancelled, self.consumer_tag
+            )
         else:
             self.channel.close()
 
@@ -133,13 +165,18 @@ class Connection(state.State):
 
     def on_closed(self, *args, **kwargs):
         if self.is_connecting:
-            LOGGER.error('Connection %s failure while connecting: (%r %r)',
-                         self.name, args, kwargs)
+            LOGGER.error(
+                'Connection %s failure while connecting: (%r %r)',
+                self.name,
+                args,
+                kwargs,
+            )
             self.on_failure()
         elif not self.is_closed:
             self.set_state(self.STATE_CLOSED)
-            LOGGER.info('Connection %s closed (%r %r)',
-                        self.name, args, kwargs)
+            LOGGER.info(
+                'Connection %s closed (%r %r)', self.name, args, kwargs
+            )
             self.callbacks.on_closed(self.name)
 
     def on_blocked(self, *args, **kwargs):
@@ -192,22 +229,30 @@ class Connection(state.State):
             reply_text = 'unknown'
 
         if reply_code <= 0 or reply_code == 404:
-            LOGGER.error('Channel Error (%r): %s',
-                         reply_code, reply_text or 'unknown')
+            LOGGER.error(
+                'Channel Error (%r): %s', reply_code, reply_text or 'unknown'
+            )
             self.on_failure()
         elif self.is_shutting_down:
             LOGGER.debug('Connection %s closing', self.name)
             self.connection.close()
         elif self.is_running:
-            LOGGER.warning('Connection %s channel was closed: (%s) %s',
-                           self.name, reply_code, reply_text)
+            LOGGER.warning(
+                'Connection %s channel was closed: (%s) %s',
+                self.name,
+                reply_code,
+                reply_text,
+            )
 
             try:
                 self.connection.channel(on_open_callback=self.on_channel_open)
-            except (exceptions.ConnectionWrongStateError,
-                    exceptions.ConnectionClosed) as error:
-                LOGGER.warning('Error raised while creating new channel: %s',
-                               error)
+            except (
+                exceptions.ConnectionWrongStateError,
+                exceptions.ConnectionClosed,
+            ) as error:
+                LOGGER.warning(
+                    'Error raised while creating new channel: %s', error
+                )
                 self.on_failure()
             else:
                 self.set_state(self.STATE_CONNECTING)
@@ -236,14 +281,18 @@ class Connection(state.State):
 
         """
         self.set_state(self.STATE_ACTIVE)
-        self.channel.basic_qos(callback=self.on_qos_set,
-                               prefetch_size=0,
-                               prefetch_count=prefetch_count,
-                               global_qos=False)
-        self.channel.basic_consume(queue=queue_name,
-                                   on_message_callback=self.on_delivery,
-                                   auto_ack=no_ack,
-                                   consumer_tag=self.consumer_tag)
+        self.channel.basic_qos(
+            callback=self.on_qos_set,
+            prefetch_size=0,
+            prefetch_count=prefetch_count,
+            global_qos=False,
+        )
+        self.channel.basic_consume(
+            queue=queue_name,
+            on_message_callback=self.on_delivery,
+            auto_ack=no_ack,
+            consumer_tag=self.consumer_tag,
+        )
 
     def on_qos_set(self, frame):
         """Invoked by pika when the QoS is set
@@ -274,14 +323,19 @@ class Connection(state.State):
 
         """
         delivered = frame.method.NAME.split('.')[1].lower() == 'ack'
-        LOGGER.debug('Connection %s received delivery confirmation '
-                     '(Delivered: %s)', self.name, delivered)
+        LOGGER.debug(
+            'Connection %s received delivery confirmation (Delivered: %s)',
+            self.name,
+            delivered,
+        )
         self.callbacks.on_confirmation(
-            self.name, delivered, frame.method.delivery_tag)
+            self.name, delivered, frame.method.delivery_tag
+        )
 
     def on_delivery(self, channel, method, properties, body):
         self.callbacks.on_delivery(
-            self.name, channel, method, properties, body)
+            self.name, channel, method, properties, body
+        )
 
     def on_return(self, channel, method, properties, body):
         self.callbacks.on_return(self.name, channel, method, properties, body)
@@ -299,12 +353,13 @@ class Connection(state.State):
             self.config.get('vhost', '/'),
             pika.PlainCredentials(
                 self.config.get('user', 'guest'),
-                self.config.get('password', self.config.get('pass', 'guest'))),
+                self.config.get('password', self.config.get('pass', 'guest')),
+            ),
             ssl_options=self._ssl_options,
             frame_max=self.config.get('frame_max', spec.FRAME_MAX_SIZE),
             socket_timeout=self.config.get('socket_timeout', 10),
-            heartbeat=self.config.get(
-                'heartbeat_interval', self.HB_INTERVAL))
+            heartbeat=self.config.get('heartbeat_interval', self.HB_INTERVAL),
+        )
 
     @property
     def _ssl_options(self):
@@ -328,14 +383,22 @@ class Connection(state.State):
             return
 
         context = ssl.SSLContext(
-            protocol=int(ssl_options.get('protocol', ssl.PROTOCOL_TLS)))
+            protocol=int(ssl_options.get('protocol', ssl.PROTOCOL_TLS))
+        )
 
         # Load a set of certification authority (CA) certificates
-        if any([ssl_options.get('ca_certs'), ssl_options.get('ca_path'),
-                ssl_options.get('ca_data')]):
-            context.load_verify_locations(ssl_options.get('ca_certs'),
-                                          ssl_options.get('ca_path'),
-                                          ssl_options.get('ca_data'))
+        if any(
+            [
+                ssl_options.get('ca_certs'),
+                ssl_options.get('ca_path'),
+                ssl_options.get('ca_data'),
+            ]
+        ):
+            context.load_verify_locations(
+                ssl_options.get('ca_certs'),
+                ssl_options.get('ca_path'),
+                ssl_options.get('ca_data'),
+            )
 
         # Load a private key and the corresponding certificate
         if ssl_options.get('certfile'):
@@ -356,7 +419,8 @@ class Process(multiprocessing.Process, state.State):
     with RabbitMQ.
 
     """
-    AMQP_APP_ID = 'rejected/%s' % __version__
+
+    AMQP_APP_ID = f'rejected/{__version__}'
 
     # Additional State constants
     STATE_PROCESSING = 0x04
@@ -384,24 +448,23 @@ class Process(multiprocessing.Process, state.State):
     MAX_ERROR_WINDOW = 60
     MAX_SHUTDOWN_WAIT = 5
 
-    def __init__(self,
-                 group=None,
-                 target=None,
-                 name=None,
-                 args=(),
-                 kwargs=None):
+    def __init__(
+        self, group=None, target=None, name=None, args=(), kwargs=None
+    ):
         if kwargs is None:
             kwargs = {}
-        super(Process, self).__init__(group, target, name, args, kwargs)
+        super().__init__(group, target, name, args, kwargs)
         self.active_message = None
-        self.callbacks = Callbacks(self.on_connection_ready,
-                                   self.on_connection_failure,
-                                   self.on_connection_closed,
-                                   self.on_connection_blocked,
-                                   self.on_connection_unblocked,
-                                   self.on_confirmation,
-                                   self.on_delivery,
-                                   self.on_returned)
+        self.callbacks = Callbacks(
+            self.on_connection_ready,
+            self.on_connection_failure,
+            self.on_connection_closed,
+            self.on_connection_blocked,
+            self.on_connection_unblocked,
+            self.on_confirmation,
+            self.on_delivery,
+            self.on_returned,
+        )
         self.connections = {}
         self.consumer = None
         self.consumer_lock = None
@@ -451,8 +514,9 @@ class Process(multiprocessing.Process, state.State):
         :rtype: float
 
         """
-        processed = (values['counts'].get(self.PROCESSED, 0) -
-                     values['previous'].get(self.PROCESSED, 0))
+        processed = values['counts'].get(self.PROCESSED, 0) - values[
+            'previous'
+        ].get(self.PROCESSED, 0)
         duration = time.time() - self.last_stats_time
 
         # If there were no messages, do not calculate, use the base
@@ -478,13 +542,22 @@ class Process(multiprocessing.Process, state.State):
                 consume = connection.get('consume', True)
 
             if name not in self.config['Connections']:
-                LOGGER.critical('Connection "%s" for %s not found',
-                                name, self.consumer_name)
+                LOGGER.critical(
+                    'Connection "%s" for %s not found',
+                    name,
+                    self.consumer_name,
+                )
                 continue
 
             self.connections[name] = Connection(
-                name, self.config['Connections'][name], self.consumer_name,
-                consume, confirm, self.ioloop, self.callbacks)
+                name,
+                self.config['Connections'][name],
+                self.consumer_name,
+                consume,
+                confirm,
+                self.ioloop,
+                self.callbacks,
+            )
 
     @staticmethod
     def get_config(cfg, number, name, connection):
@@ -500,7 +573,7 @@ class Process(multiprocessing.Process, state.State):
         return {
             'connection': cfg['Connections'][connection],
             'consumer_name': name,
-            'process_name': '%s_%i_tag_%i' % (name, os.getpid(), number)
+            'process_name': f'{name}_{os.getpid()}_tag_{number}',
         }
 
     def get_consumer(self, cfg):
@@ -514,8 +587,9 @@ class Process(multiprocessing.Process, state.State):
         try:
             handle, version = utils.import_consumer(cfg['consumer'])
         except ImportError as error:
-            LOGGER.exception('Error importing the consumer %s: %s',
-                             cfg['consumer'], error)
+            LOGGER.exception(
+                'Error importing the consumer %s: %s', cfg['consumer'], error
+            )
             return
 
         if version:
@@ -534,14 +608,15 @@ class Process(multiprocessing.Process, state.State):
             'drop_invalid_messages': cfg.get('drop_invalid_messages'),
             'message_type': cfg.get('message_type'),
             'error_exchange': cfg.get('error_exchange'),
-            'error_max_retry': cfg.get('error_max_retry')
+            'error_max_retry': cfg.get('error_max_retry'),
         }
 
         try:
             return handle(**kwargs)
         except Exception as error:
-            LOGGER.exception('Error creating the consumer "%s": %s',
-                             cfg['consumer'], error)
+            LOGGER.exception(
+                'Error creating the consumer "%s": %s', cfg['consumer'], error
+            )
 
     @gen.coroutine
     def invoke_consumer(self, message):
@@ -564,19 +639,23 @@ class Process(multiprocessing.Process, state.State):
                     self.measurement.set_tag(self.REDELIVERED, True)
 
                 try:
-                    result = yield self.consumer.execute(message,
-                                                         self.measurement)
+                    result = yield self.consumer.execute(
+                        message, self.measurement
+                    )
                 except Exception as error:
-                    LOGGER.exception('Unhandled exception from consumer in '
-                                     'process. This should not happen. %s',
-                                     error)
+                    LOGGER.exception(
+                        'Unhandled exception from consumer in '
+                        'process. This should not happen. %s',
+                        error,
+                    )
                     result = data.MESSAGE_REQUEUE
 
                 LOGGER.debug('Finished processing message: %r', result)
                 self.on_processed(message, result, start_time)
             elif self.is_waiting_to_shutdown:
                 LOGGER.info(
-                    'Requeueing pending message due to pending shutdown')
+                    'Requeueing pending message due to pending shutdown'
+                )
                 self.reject(message, True)
                 self.shutdown_connections()
             elif self.is_shutting_down:
@@ -584,12 +663,15 @@ class Process(multiprocessing.Process, state.State):
                 self.reject(message, True)
                 self.on_ready_to_stop()
             else:
-                LOGGER.warning('Exiting invoke_consumer without processing, '
-                               'this should not happen. State: %s',
-                               self.state_description)
+                LOGGER.warning(
+                    'Exiting invoke_consumer without processing, '
+                    'this should not happen. State: %s',
+                    self.state_description,
+                )
         if self.pending:
             self.ioloop.add_callback(
-                self.invoke_consumer, self.pending.popleft())
+                self.invoke_consumer, self.pending.popleft()
+            )
 
     @property
     def is_processing(self):
@@ -621,10 +703,17 @@ class Process(multiprocessing.Process, state.State):
 
     def on_connection_failure(self, *args, **kwargs):
         ready = all(c.is_closed for c in self.connections.values())
-        LOGGER.warning('Connection failure while %s - Ready to stop: %r',
-                       self.state_description, ready)
-        if (self.is_connecting or self.is_idle or self.is_shutting_down or
-                self.is_waiting_to_shutdown) and ready:
+        LOGGER.warning(
+            'Connection failure while %s - Ready to stop: %r',
+            self.state_description,
+            ready,
+        )
+        if (
+            self.is_connecting
+            or self.is_idle
+            or self.is_shutting_down
+            or self.is_waiting_to_shutdown
+        ) and ready:
             self.on_ready_to_stop()
 
     def on_connection_ready(self, name):
@@ -634,7 +723,8 @@ class Process(multiprocessing.Process, state.State):
             for key in self.connections.keys():
                 if self.connections[key].should_consume:
                     self.connections[key].consume(
-                        self.queue_name, self.no_ack, self.qos_prefetch)
+                        self.queue_name, self.no_ack, self.qos_prefetch
+                    )
             if self.is_connecting:
                 self.set_state(self.STATE_IDLE)
 
@@ -756,14 +846,17 @@ class Process(multiprocessing.Process, state.State):
         """
         duration = time.time() - self.last_failure
         if duration > self.MAX_ERROR_WINDOW:
-            LOGGER.info('Resetting failure window, %i seconds since last',
-                        duration)
+            LOGGER.info(
+                'Resetting failure window, %i seconds since last', duration
+            )
             self.reset_error_counter()
         self.counters[self.ERROR] += 1
         self.last_failure = time.time()
         if self.too_many_errors:
-            LOGGER.critical('Error threshold exceeded (%i), shutting down',
-                            self.counters[self.ERROR])
+            LOGGER.critical(
+                'Error threshold exceeded (%i), shutting down',
+                self.counters[self.ERROR],
+            )
             self.shutdown_connections()
 
     def on_ready_to_stop(self):
@@ -832,10 +925,14 @@ class Process(multiprocessing.Process, state.State):
             self.connections[message.connection].shutdown()
             return
 
-        LOGGER.warning('Rejecting message %s %s requeue', message.delivery_tag,
-                       'with' if requeue else 'without')
+        LOGGER.warning(
+            'Rejecting message %s %s requeue',
+            message.delivery_tag,
+            'with' if requeue else 'without',
+        )
         message.channel.basic_nack(
-            delivery_tag=message.delivery_tag, requeue=requeue)
+            delivery_tag=message.delivery_tag, requeue=requeue
+        )
         self.measurement.set_tag(self.NACKED, True)
         self.measurement.set_tag(self.REQUEUED, requeue)
 
@@ -849,7 +946,7 @@ class Process(multiprocessing.Process, state.State):
             'name': self.name,
             'consumer_name': self.consumer_name,
             'counts': dict(self.counters),
-            'previous': dict(self.previous)
+            'previous': dict(self.previous),
         }
         self.previous = dict(self.counters)
         return values
@@ -875,19 +972,24 @@ class Process(multiprocessing.Process, state.State):
             pass
         else:
             LOGGER.critical('Unexepected state: %s', self.state_description)
-        LOGGER.debug('State reset to %s (%s in pending)',
-                     self.state_description, len(self.pending))
+        LOGGER.debug(
+            'State reset to %s (%s in pending)',
+            self.state_description,
+            len(self.pending),
+        )
 
     def run(self):
         """Start the consumer"""
         if self.profile_file:
             LOGGER.info('Profiling to %s', self.profile_file)
-            profile.runctx('self._run()', globals(), locals(),
-                           self.profile_file)
+            profile.runctx(
+                'self._run()', globals(), locals(), self.profile_file
+            )
         else:
             self._run()
-        LOGGER.debug('Exiting %s (%i, %i)', self.name, os.getpid(),
-                     os.getppid())
+        LOGGER.debug(
+            'Exiting %s (%i, %i)', self.name, os.getpid(), os.getppid()
+        )
 
     def _run(self):
         """Run method that can be profiled"""
@@ -896,15 +998,16 @@ class Process(multiprocessing.Process, state.State):
         self.consumer_lock = locks.Lock()
 
         self.sentry_client = self.setup_sentry(
-            self._kwargs['config'], self.consumer_name)
+            self._kwargs['config'], self.consumer_name
+        )
 
         try:
             self.setup()
         except (AttributeError, ImportError) as error:
             LOGGER.exception('Setup failure: %s', error)
             return self.on_startup_error(
-                'Failed to import the Python module for {}'.format(
-                    self.consumer_name))
+                f'Failed to import the Python module for {self.consumer_name}'
+            )
 
         if not self.is_stopped:
             try:
@@ -932,8 +1035,10 @@ class Process(multiprocessing.Process, state.State):
             'extra': {
                 'consumer_name': self.consumer_name,
                 'env': dict(os.environ),
-                'message': message},
-            'time_spent': duration}
+                'message': message,
+            },
+            'time_spent': duration,
+        }
         LOGGER.debug('Sending exception to sentry: %r', kwargs)
         self.sentry_client.captureException(exc_info, **kwargs)
 
@@ -946,7 +1051,8 @@ class Process(multiprocessing.Process, state.State):
         LOGGER.info('Initializing for %s', self.name)
         if 'consumer' not in self.consumer_config:
             return self.on_startup_error(
-                '"consumer" not specified in configuration')
+                '"consumer" not specified in configuration'
+            )
 
         self.consumer = self.get_consumer(self.consumer_config)
 
@@ -954,7 +1060,10 @@ class Process(multiprocessing.Process, state.State):
             return self.on_startup_error(
                 'Could not import "{}"'.format(
                     self.consumer_config.get(
-                        'consumer', 'unconfigured consumer')))
+                        'consumer', 'unconfigured consumer'
+                    )
+                )
+            )
 
         self.setup_instrumentation()
         self.reset_error_counter()
@@ -967,11 +1076,10 @@ class Process(multiprocessing.Process, state.State):
         :param dict config: The InfluxDB configuration stanza
 
         """
-        base_tags = {
-            'version': self.consumer_version
-        }
-        measurement = self.config.get('influxdb_measurement',
-                                      os.environ.get('SERVICE'))
+        base_tags = {'version': self.consumer_version}
+        measurement = self.config.get(
+            'influxdb_measurement', os.environ.get('SERVICE')
+        )
         if measurement != self.consumer_name:
             base_tags['consumer'] = self.consumer_name
         for key in {'ENVIRONMENT', 'SERVICE'}:
@@ -979,15 +1087,18 @@ class Process(multiprocessing.Process, state.State):
                 base_tags[key.lower()] = os.environ[key]
         influxdb.install(
             '{}://{}:{}/write'.format(
-                config.get('scheme',
-                           os.environ.get('INFLUXDB_SCHEME', 'http')),
-                config.get('host',
-                           os.environ.get('INFLUXDB_HOST', 'localhost')),
-                config.get('port', os.environ.get('INFLUXDB_PORT', '8086'))
+                config.get(
+                    'scheme', os.environ.get('INFLUXDB_SCHEME', 'http')
+                ),
+                config.get(
+                    'host', os.environ.get('INFLUXDB_HOST', 'localhost')
+                ),
+                config.get('port', os.environ.get('INFLUXDB_PORT', '8086')),
             ),
             config.get('user', os.environ.get('INFLUXDB_USER')),
             config.get('password', os.environ.get('INFLUXDB_PASSWORD')),
-            base_tags=base_tags)
+            base_tags=base_tags,
+        )
         return config.get('database', 'rejected'), measurement
 
     def setup_instrumentation(self):
@@ -1003,40 +1114,55 @@ class Process(multiprocessing.Process, state.State):
 
         # Backwards compatible statsd config support
         if self.config.get('statsd'):
-            warnings.warn('Deprecated statsd configuration detected',
-                          DeprecationWarning)
-            self.config['stats'].setdefault('statsd',
-                                            self.config.get('statsd'))
+            warnings.warn(
+                'Deprecated statsd configuration detected',
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            self.config['stats'].setdefault(
+                'statsd', self.config.get('statsd')
+            )
 
         if self.config['stats'].get('statsd'):
             if self.config['stats']['statsd'].get('enabled', True):
-                self.statsd = statsd.Client(self.consumer_name,
-                                            self.config['stats']['statsd'],
-                                            self.stop)
+                self.statsd = statsd.Client(
+                    self.consumer_name,
+                    self.config['stats']['statsd'],
+                    self.stop,
+                )
             LOGGER.debug('statsd measurements configured')
 
         # InfluxDB support
         if influxdb and self.config['stats'].get('influxdb'):
             if self.config['stats']['influxdb'].get('enabled', True):
                 self.influxdb = self.setup_influxdb(
-                    self.config['stats']['influxdb'])
+                    self.config['stats']['influxdb']
+                )
             LOGGER.debug('InfluxDB measurements configured: %r', self.influxdb)
 
     def setup_sentry(self, cfg, consumer_name):
         # Setup the Sentry client if configured and installed
-        sentry_dsn = cfg['Consumers'][consumer_name].get('sentry_dsn',
-                                                         cfg.get('sentry_dsn'))
+        sentry_dsn = cfg['Consumers'][consumer_name].get(
+            'sentry_dsn', cfg.get('sentry_dsn')
+        )
         if not raven or not sentry_dsn:
             return
         consumer = cfg['Consumers'][consumer_name]['consumer'].split('.')[0]
         kwargs = {
             'exclude_paths': [],
-            'include_paths':
-                ['pika', 'rejected', 'raven', 'tornado', consumer],
-            'ignore_exceptions': ['rejected.consumer.ConsumerException',
-                                  'rejected.consumer.MessageException',
-                                  'rejected.consumer.ProcessingException'],
-            'processors': ['raven.processors.SanitizePasswordsProcessor']
+            'include_paths': [
+                'pika',
+                'rejected',
+                'raven',
+                'tornado',
+                consumer,
+            ],
+            'ignore_exceptions': [
+                'rejected.consumer.ConsumerException',
+                'rejected.consumer.MessageException',
+                'rejected.consumer.ProcessingException',
+            ],
+            'processors': ['raven.processors.SanitizePasswordsProcessor'],
         }
 
         if os.environ.get('ENVIRONMENT'):
@@ -1045,9 +1171,15 @@ class Process(multiprocessing.Process, state.State):
         if self.consumer_version:
             kwargs['version'] = self.consumer_version
 
-        for logger in {'pika', 'pika.channel', 'pika.connection',
-                       'pika.callback', 'pika.heartbeat',
-                       'rejected.process', 'rejected.state'}:
+        for logger in {
+            'pika',
+            'pika.channel',
+            'pika.connection',
+            'pika.callback',
+            'pika.heartbeat',
+            'rejected.process',
+            'rejected.state',
+        }:
             breadcrumbs.ignore_logger(logger)
 
         return AsyncSentryClient(sentry_dsn, **kwargs)
@@ -1128,14 +1260,17 @@ class Process(multiprocessing.Process, state.State):
             if len(values) == 1:
                 measurement.set_field(key, values[0])
             elif len(values) > 1:
-                measurement.set_field('{}-average'.format(key),
-                                      sum(values) / len(values))
-                measurement.set_field('{}-max'.format(key), max(values))
-                measurement.set_field('{}-min'.format(key), min(values))
-                measurement.set_field('{}-median'.format(key),
-                                      utils.percentile(values, 50))
-                measurement.set_field('{}-95th'.format(key),
-                                      utils.percentile(values, 95))
+                measurement.set_field(
+                    f'{key}-average', sum(values) / len(values)
+                )
+                measurement.set_field(f'{key}-max', max(values))
+                measurement.set_field(f'{key}-min', min(values))
+                measurement.set_field(
+                    f'{key}-median', utils.percentile(values, 50)
+                )
+                measurement.set_field(
+                    f'{key}-95th', utils.percentile(values, 95)
+                )
 
         influxdb.add_measurement(measurement)
         LOGGER.debug('InfluxDB Measurement: %r', measurement.marshall())
@@ -1155,17 +1290,23 @@ class Process(multiprocessing.Process, state.State):
                     self.statsd.incr(key)
             elif isinstance(value, str):
                 if value:
-                    self.statsd.incr('{}.{}'.format(key, value))
+                    self.statsd.incr(f'{key}.{value}')
             elif isinstance(value, int):
                 self.statsd.incr(key, value)
             else:
-                LOGGER.warning('The %s value type of %s is unsupported',
-                               key, type(value))
+                LOGGER.warning(
+                    'The %s value type of %s is unsupported', key, type(value)
+                )
 
     @property
     def active_consumers(self):
-        return len([c for c in self.connections.values()
-                    if c.should_consume and c.is_active()])
+        return len(
+            [
+                c
+                for c in self.connections.values()
+                if c.should_consume and c.is_active()
+            ]
+        )
 
     @property
     def config(self):
@@ -1189,8 +1330,9 @@ class Process(multiprocessing.Process, state.State):
 
     @property
     def max_error_count(self):
-        return int(self.consumer_config.get('max_errors',
-                                            self.MAX_ERROR_COUNT))
+        return int(
+            self.consumer_config.get('max_errors', self.MAX_ERROR_COUNT)
+        )
 
     @property
     def no_ack(self):
@@ -1205,11 +1347,13 @@ class Process(multiprocessing.Process, state.State):
         """
         if not self._kwargs['profile']:
             return None
-        if os.path.exists(self._kwargs['profile']) and \
-                os.path.isdir(self._kwargs['profile']):
-            return '%s/%s-%s.prof' % (path.normpath(self._kwargs['profile']),
-                                      os.getpid(),
-                                      self._kwargs['consumer_name'])
+        if os.path.exists(self._kwargs['profile']) and os.path.isdir(
+            self._kwargs['profile']
+        ):
+            return (
+                f'{path.normpath(self._kwargs["profile"])}'
+                f'/{os.getpid()}-{self._kwargs["consumer_name"]}.prof'
+            )
         return None
 
     @property
@@ -1220,7 +1364,8 @@ class Process(multiprocessing.Process, state.State):
 
         """
         return self.consumer_config.get(
-            'qos_prefetch', self.QOS_PREFETCH_COUNT)
+            'qos_prefetch', self.QOS_PREFETCH_COUNT
+        )
 
     @property
     def queue_name(self):

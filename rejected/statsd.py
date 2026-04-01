@@ -9,6 +9,7 @@ Environment Variables:
  - STATSD_PREFIX
 
 """
+
 import logging
 import os
 import socket
@@ -18,11 +19,12 @@ from tornado import iostream
 LOGGER = logging.getLogger(__name__)
 
 
-class Client(object):
+class Client:
     """A simple statsd client that buffers counters to emit fewer UDP packets
     than once per incr.
 
     """
+
     DEFAULT_HOST = 'localhost'
     DEFAULT_PORT = 8125
     DEFAULT_PREFIX = 'rejected'
@@ -43,8 +45,10 @@ class Client(object):
         self._settings_in = settings
         self._settings = {}
 
-        self._address = (self._setting('host', self.DEFAULT_HOST),
-                         int(self._setting('port', self.DEFAULT_PORT)))
+        self._address = (
+            self._setting('host', self.DEFAULT_HOST),
+            int(self._setting('port', self.DEFAULT_PORT)),
+        )
         self._prefix = self._setting('prefix', self.DEFAULT_PREFIX)
         self._tcp_sock, self._udp_sock = None, None
         if self._setting('tcp', False):
@@ -85,14 +89,19 @@ class Client(object):
             self._tcp_sock.close()
 
     def _build_payload(self, key, value, metric_type):
-        """Return the """
+        """Return the"""
         if self._setting('include_hostname', True):
             return self.PAYLOAD_HOSTNAME.format(
-                self._prefix, self._hostname, self._consumer_name, key, value,
-                metric_type)
+                self._prefix,
+                self._hostname,
+                self._consumer_name,
+                key,
+                value,
+                metric_type,
+            )
         return self.PAYLOAD_NO_HOSTNAME.format(
-            self._prefix, self._consumer_name, key, value,
-            metric_type)
+            self._prefix, self._consumer_name, key, value, metric_type
+        )
 
     def _send(self, key, value, metric_type):
         """Send the specified value to the statsd daemon via UDP without a
@@ -109,7 +118,7 @@ class Client(object):
                 return self._tcp_sock.write(payload.encode('utf-8'))
             else:
                 self._udp_sock.sendto(payload.encode('utf-8'), self._address)
-        except (OSError, socket.error) as error:  # pragma: nocover
+        except OSError as error:  # pragma: nocover
             if self._connected:
                 LOGGER.exception('Error sending statsd metric: %s', error)
                 self._connected = False
@@ -127,7 +136,8 @@ class Client(object):
         """
         if key not in self._settings:
             value = self._settings_in.get(
-                key, os.environ.get('STATSD_{}'.format(key).upper(), default))
+                key, os.environ.get(f'STATSD_{key}'.upper(), default)
+            )
             self._settings[key] = value
         return self._settings[key]
 
@@ -148,14 +158,18 @@ class Client(object):
         :rtype: iostream.IOStream
 
         """
-        sock = iostream.IOStream(socket.socket(
-            socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP))
+        sock = iostream.IOStream(
+            socket.socket(
+                socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP
+            )
+        )
         sock.set_close_callback(self._tcp_on_closed)
         try:
             sock.connect(self._address, self._tcp_on_connected)
-        except (OSError, socket.error) as error:
-            LOGGER.error('Failed to connect via TCP, triggering shutdown: %s',
-                         error)
+        except OSError as error:
+            LOGGER.error(
+                'Failed to connect via TCP, triggering shutdown: %s', error
+            )
             self._failure_callback()
         else:
             self._connected = True
@@ -168,5 +182,6 @@ class Client(object):
         :rtype: socket.socket
 
         """
-        return socket.socket(socket.AF_INET, socket.SOCK_DGRAM,
-                             socket.IPPROTO_UDP)
+        return socket.socket(
+            socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP
+        )

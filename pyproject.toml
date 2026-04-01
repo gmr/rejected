@@ -1,0 +1,128 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "rejected"
+version = "3.23.1"
+description = "Rejected is a Python RabbitMQ Consumer Framework and Controller Daemon"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "BSD-3-Clause"
+license-files = ["LICENSE"]
+authors = [
+    {name = "Gavin M. Roy", email = "gavinmroy@gmail.com"}
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Natural Language :: English",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Topic :: Software Development :: Libraries :: Application Frameworks",
+    "Topic :: System :: Networking",
+    "Typing :: Typed",
+]
+keywords = ["amqp", "rabbitmq", "consumer", "messaging"]
+dependencies = [
+    "helper>=2.5.0,<3",
+    "pika>=1.2.0,<3",
+    "psutil",
+    "pyyaml>=5.3.1,<7",
+    "tornado",
+]
+
+[project.optional-dependencies]
+html = ["beautifulsoup4"]
+msgpack = ["u-msgpack-python"]
+
+[project.scripts]
+rejected = "rejected.controller:main"
+
+[project.urls]
+Homepage = "https://github.com/gmr/rejected"
+Documentation = "https://rejected.readthedocs.io"
+"Bug Tracker" = "https://github.com/gmr/rejected/issues"
+"Source Code" = "https://github.com/gmr/rejected"
+
+[dependency-groups]
+dev = [
+    "build",
+    "coverage[toml]",
+    "pre-commit",
+    "ruff",
+]
+docs = [
+    "mkdocs>=1.5,<2",
+    "mkdocs-material>9.5,<10",
+    "mkdocstrings[python]",
+]
+
+[tool.coverage.run]
+branch = true
+command_line = "-m unittest discover -s tests -t . --buffer --verbose"
+data_file = "build/.coverage"
+source = ["rejected"]
+
+[tool.coverage.report]
+show_missing = true
+exclude_also = [
+    "typing.TYPE_CHECKING",
+]
+
+[tool.coverage.html]
+directory = "build/coverage"
+
+[tool.coverage.xml]
+output = "build/coverage.xml"
+
+[tool.hatch.build.targets.wheel]
+include = ["rejected"]
+
+[tool.ruff]
+line-length = 79
+target-version = "py311"
+
+[tool.ruff.format]
+quote-style = "single"
+
+[tool.ruff.lint]
+select = [
+    "BLE",
+    "C4",
+    "C90",
+    "E", "W",
+    "F",
+    "G",
+    "I",
+    "N",
+    "Q",
+    "S",
+    "ASYNC",
+    "B",
+    "DTZ",
+    "FURB",
+    "RUF",
+    "T20",
+    "UP",
+]
+ignore = [
+    "N818",
+    "RSE",
+    "UP040",
+]
+flake8-quotes = {inline-quotes = "single"}
+
+[tool.ruff.lint.mccabe]
+max-complexity = 15
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S"]
+"rejected/consumer.py" = ["B904", "BLE001", "C901", "S301", "S506"]
+"examples.py" = ["S311"]
+"utils/**/*.py" = ["S311"]

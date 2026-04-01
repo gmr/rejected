@@ -2,6 +2,7 @@
 OS Level controlling class invokes startup, shutdown and handles signals.
 
 """
+
 import logging
 import os
 import signal
@@ -9,6 +10,7 @@ import sys
 
 import helper
 from helper import controller, parser
+
 try:
     import raven
 except ImportError:
@@ -24,20 +26,22 @@ class Controller(controller.Controller):
     of the OS level concerns.
 
     """
+
     def __init__(self, *args, **kwargs):
-        super(Controller, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         self._mcp = None
         self._sentry_client = None
         if raven and self.config.application.get('sentry_dsn'):
             kwargs = {
                 'exclude_paths': ['tornado'],
                 'include_paths': ['pika', 'helper', 'rejected'],
-                'processors': ['raven.processors.SanitizePasswordsProcessor']
+                'processors': ['raven.processors.SanitizePasswordsProcessor'],
             }
             if os.environ.get('ENVIRONMENT'):
                 kwargs['environment'] = os.environ['ENVIRONMENT']
             self._sentry_client = raven.Client(
-                self.config.application['sentry_dsn'], **kwargs)
+                self.config.application['sentry_dsn'], **kwargs
+            )
 
     def _master_control_program(self):
         """Return an instance of the MasterControlProgram.
@@ -45,10 +49,12 @@ class Controller(controller.Controller):
         :rtype: rejected.mcp.MasterControlProgram
 
         """
-        return mcp.MasterControlProgram(self.config,
-                                        consumer=self.args.consumer,
-                                        profile=self.args.profile,
-                                        quantity=self.args.quantity)
+        return mcp.MasterControlProgram(
+            self.config,
+            consumer=self.args.consumer,
+            profile=self.args.profile,
+            quantity=self.args.quantity,
+        )
 
     @staticmethod
     def _prepend_python_path(path):  # pragma: no cover
@@ -116,31 +122,45 @@ class Controller(controller.Controller):
 def add_parser_arguments():
     """Add options to the parser"""
     argparser = parser.get()
-    argparser.add_argument('-P', '--profile',
-                           action='store',
-                           default=None,
-                           dest='profile',
-                           help='Profile the consumer modules, specifying '
-                           'the output directory.')
-    argparser.add_argument('-o', '--only',
-                           action='store',
-                           default=None,
-                           dest='consumer',
-                           help='Only run the consumer specified')
-    argparser.add_argument('-p', '--prepend-path',
-                           action='store',
-                           default=None,
-                           dest='prepend_path',
-                           help='Prepend the python path with the value.')
-    argparser.add_argument('-q', '--qty',
-                           action='store',
-                           type=int,
-                           default=None,
-                           dest='quantity',
-                           help='Run the specified quantity of consumer '
-                           'processes when used in conjunction with -o')
-    argparser.add_argument('--version', action='version',
-                           version='%(prog)s {}'.format(__version__))
+    argparser.add_argument(
+        '-P',
+        '--profile',
+        action='store',
+        default=None,
+        dest='profile',
+        help='Profile the consumer modules, specifying the output directory.',
+    )
+    argparser.add_argument(
+        '-o',
+        '--only',
+        action='store',
+        default=None,
+        dest='consumer',
+        help='Only run the consumer specified',
+    )
+    argparser.add_argument(
+        '-p',
+        '--prepend-path',
+        action='store',
+        default=None,
+        dest='prepend_path',
+        help='Prepend the python path with the value.',
+    )
+    argparser.add_argument(
+        '-q',
+        '--qty',
+        action='store',
+        type=int,
+        default=None,
+        dest='quantity',
+        help='Run the specified quantity of consumer '
+        'processes when used in conjunction with -o',
+    )
+    argparser.add_argument(
+        '--version',
+        action='version',
+        version=f'%(prog)s {__version__}',
+    )
 
 
 def main():

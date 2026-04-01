@@ -2,13 +2,15 @@
 Logging Related Things
 
 """
+
 import logging
 
 
 class CorrelationFilter(logging.Formatter):
     """Filter records that have a correlation_id"""
+
     def __init__(self, exists=None):
-        super(CorrelationFilter, self).__init__()
+        super().__init__()
         self.exists = exists
 
     def filter(self, record):
@@ -29,10 +31,11 @@ class CorrelationAdapter(logging.LoggerAdapter):
     record properties.
 
     """
+
     def __init__(self, logger, consumer, **extra):
         self.logger = logger
         self.consumer = consumer
-        super(CorrelationAdapter, self).__init__(logger, extra)
+        super().__init__(logger, extra)
 
     def process(self, msg, kwargs):
         """Process the logging message and keyword arguments passed in to
@@ -43,6 +46,8 @@ class CorrelationAdapter(logging.LoggerAdapter):
         :rtype: (str, dict)
 
         """
-        kwargs['extra'] = {'correlation_id': self.consumer.correlation_id,
-                           'consumer': self.consumer.name}
+        kwargs['extra'] = {
+            'correlation_id': self.consumer.correlation_id,
+            'consumer': self.consumer.name,
+        }
         return msg, kwargs

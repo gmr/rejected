@@ -2,14 +2,12 @@
 Master Control Program
 
 """
+
 import collections
 import logging
 import multiprocessing
 import os
-try:
-    import Queue as queue
-except ImportError:
-    import queue
+import queue
 import signal
 import sys
 import time
@@ -23,12 +21,8 @@ LOGGER = logging.getLogger(__name__)
 _PROCESS_RUNNING = [psutil.STATUS_RUNNING, psutil.STATUS_SLEEPING]
 _PROCESS_STOPPED_OR_DEAD = [psutil.STATUS_STOPPED, psutil.STATUS_DEAD]
 
-if sys.version_info < (3, 0, 0):
-    FileNotFoundError = psutil.NoSuchProcess
-    ProcessLookupError = OSError
 
-
-class Consumer(object):
+class Consumer:
     """Class used for keeping track of each consumer type being managed by
     the MCP
 
@@ -63,7 +57,7 @@ class MasterControlProgram(state.State):
         """
         self.set_process_name()
         LOGGER.info('rejected v%s initializing', __version__)
-        super(MasterControlProgram, self).__init__()
+        super().__init__()
 
         # Default values
         self._active_cache = None
@@ -85,12 +79,14 @@ class MasterControlProgram(state.State):
 
         # Carry for logging internal stats collection data
         self.log_stats_enabled = config.application.get('stats', {}).get(
-            'log', config.application.get('log_stats', False))
+            'log', config.application.get('log_stats', False)
+        )
         LOGGER.debug('Stats logging enabled: %s', self.log_stats_enabled)
 
         # Setup the poller related threads
-        self.poll_interval = config.application.get('poll_interval',
-                                                    self.POLL_INTERVAL)
+        self.poll_interval = config.application.get(
+            'poll_interval', self.POLL_INTERVAL
+        )
         LOGGER.debug('Set process poll interval to %.2f', self.poll_interval)
 
     def active_processes(self, use_cache=True):
@@ -100,8 +96,11 @@ class MasterControlProgram(state.State):
 
         """
         LOGGER.debug('Checking active processes (cache: %s)', use_cache)
-        if use_cache and self._active_cache and \
-                self._active_cache[0] > time.time() - self.poll_interval:
+        if (
+            use_cache
+            and self._active_cache
+            and self._active_cache[0] > time.time() - self.poll_interval
+        ):
             return self._active_cache[1]
         active_processes, dead_processes = [], []
         for consumer in self.consumers:
@@ -122,8 +121,11 @@ class MasterControlProgram(state.State):
 
                 if self.unresponsive[name] >= self.MAX_UNRESPONSIVE_COUNT:
                     LOGGER.info(
-                        'Killing unresponsive consumer %s (%i): '
-                        '%i misses', name, proc.pid, self.unresponsive[name])
+                        'Killing unresponsive consumer %s (%i): %i misses',
+                        name,
+                        proc.pid,
+                        self.unresponsive[name],
+                    )
                     try:
                         os.kill(child.pid, signal.SIGABRT)
                     except OSError:
@@ -169,7 +171,7 @@ class MasterControlProgram(state.State):
             'last_poll': timestamp,
             'consumers': consumer_stats,
             'process_data': data,
-            'counts': stats
+            'counts': stats,
         }
 
     def check_process_counts(self):
@@ -181,8 +183,9 @@ class MasterControlProgram(state.State):
         for name in self.consumers:
             processes_needed = self.process_spawn_qty(name)
             if processes_needed:
-                LOGGER.info('Need to spawn %i processes for %s',
-                            processes_needed, name)
+                LOGGER.info(
+                    'Need to spawn %i processes for %s', processes_needed, name
+                )
                 self.start_processes(name, processes_needed)
 
     def collect_results(self, data_values):
@@ -228,7 +231,7 @@ class MasterControlProgram(state.State):
         return {
             process.Process.ERROR: 0,
             process.Process.PROCESSED: 0,
-            process.Process.REDELIVERED: 0
+            process.Process.REDELIVERED: 0,
         }
 
     def get_consumer_process(self, consumer, name):
@@ -277,8 +280,13 @@ class MasterControlProgram(state.State):
             LOGGER.debug('NoSuchProcess: %s (%r)', name, proc)
             return True
 
-        LOGGER.debug('Process %s (%s) status: %r (Unresponsive Count: %s)',
-                     name, proc.pid, status, self.unresponsive[name])
+        LOGGER.debug(
+            'Process %s (%s) status: %r (Unresponsive Count: %s)',
+            name,
+            proc.pid,
+            status,
+            self.unresponsive[name],
+        )
         if status in _PROCESS_RUNNING:
             return False
         elif status == psutil.STATUS_ZOMBIE:
@@ -311,8 +319,11 @@ class MasterControlProgram(state.State):
                     except OSError:
                         pass
                 else:
-                    LOGGER.warning('Cowardly refusing kill self (%s, %s)',
-                                   proc.pid, os.getpid())
+                    LOGGER.warning(
+                        'Cowardly refusing kill self (%s, %s)',
+                        proc.pid,
+                        os.getpid(),
+                    )
             time.sleep(0.5)
             processes = self.active_processes(False)
 
@@ -326,22 +337,29 @@ class MasterControlProgram(state.State):
             return
 
         if self.poll_data['processes']:
-            LOGGER.warning('%i process(es) did not respond with stats: %r',
-                           len(self.poll_data['processes']),
-                           self.poll_data['processes'])
+            LOGGER.warning(
+                '%i process(es) did not respond with stats: %r',
+                len(self.poll_data['processes']),
+                self.poll_data['processes'],
+            )
 
         if self.stats['counts']['processes'] > 1:
-            LOGGER.info('%i consumers processed %i messages with %i errors',
-                        self.stats['counts']['processes'],
-                        self.stats['counts']['processed'],
-                        self.stats['counts']['failed'])
+            LOGGER.info(
+                '%i consumers processed %i messages with %i errors',
+                self.stats['counts']['processes'],
+                self.stats['counts']['processed'],
+                self.stats['counts']['failed'],
+            )
 
         for key in self.stats['consumers'].keys():
-            LOGGER.info('%i %s %s processed %i messages with %i errors',
-                        self.stats['consumers'][key]['processes'], key,
-                        self.consumer_keyword(self.stats['consumers'][key]),
-                        self.stats['consumers'][key]['processed'],
-                        self.stats['consumers'][key]['failed'])
+            LOGGER.info(
+                '%i %s %s processed %i messages with %i errors',
+                self.stats['consumers'][key]['processes'],
+                key,
+                self.consumer_keyword(self.stats['consumers'][key]),
+                self.stats['consumers'][key]['processed'],
+                self.stats['consumers'][key]['failed'],
+            )
 
     def new_consumer(self, config, consumer_name):
         """Return a consumer dict for the given name and configuration.
@@ -351,8 +369,12 @@ class MasterControlProgram(state.State):
         :rtype: dict
 
         """
-        return Consumer(0, {}, config.get('qty', self.DEFAULT_CONSUMER_QTY),
-                        config.get('queue', consumer_name))
+        return Consumer(
+            0,
+            {},
+            config.get('qty', self.DEFAULT_CONSUMER_QTY),
+            config.get('queue', consumer_name),
+        )
 
     def new_process(self, consumer_name):
         """Create a new consumer instances
@@ -361,15 +383,15 @@ class MasterControlProgram(state.State):
         :return tuple: (str, process.Process)
 
         """
-        process_name = '%s-%s' % (consumer_name,
-                                  self.new_process_number(consumer_name))
+        proc_num = self.new_process_number(consumer_name)
+        process_name = f'{consumer_name}-{proc_num}'
         kwargs = {
             'config': self.config.application,
             'consumer_name': consumer_name,
             'profile': self.profile,
             'daemon': False,
             'stats_queue': self.stats_queue,
-            'logging_config': self.config.logging
+            'logging_config': self.config.logging,
         }
         return process_name, process.Process(name=process_name, kwargs=kwargs)
 
@@ -454,8 +476,9 @@ class MasterControlProgram(state.State):
             try:
                 os.kill(int(proc.pid), signal.SIGPROF)
             except ProcessLookupError as error:
-                LOGGER.warning('Error sending SIGPROF to %s: %s',
-                               proc.pid, error)
+                LOGGER.warning(
+                    'Error sending SIGPROF to %s: %s', proc.pid, error
+                )
             else:
                 self.poll_data['processes'].append(proc.name)
 
@@ -468,8 +491,9 @@ class MasterControlProgram(state.State):
         :rtype: bool
 
         """
-        return ((time.time() - self.poll_data['timestamp']) >=
-                self.poll_interval)
+        return (
+            time.time() - self.poll_data['timestamp']
+        ) >= self.poll_interval
 
     def poll_results_check(self):
         """Check the polling results by checking to see if the stats queue is
@@ -490,8 +514,9 @@ class MasterControlProgram(state.State):
             self.collect_results(stats)
 
         if self.poll_data['processes']:
-            LOGGER.warning('Did not receive results from %r',
-                           self.poll_data['processes'])
+            LOGGER.warning(
+                'Did not receive results from %r', self.poll_data['processes']
+            )
 
     def process(self, name, process_name):
         """Return the process handle for the given consumer name and process
@@ -538,8 +563,11 @@ class MasterControlProgram(state.State):
             try:
                 alive = child.is_alive()
             except AssertionError:
-                LOGGER.debug('Tried to test non-child process (%r to %r)',
-                             os.getpid(), child.pid)
+                LOGGER.debug(
+                    'Tried to test non-child process (%r to %r)',
+                    os.getpid(),
+                    child.pid,
+                )
             else:
                 if child.pid == my_pid:
                     LOGGER.debug('Child has my pid? %r, %r', my_pid, child.pid)
@@ -612,8 +640,9 @@ class MasterControlProgram(state.State):
 
         """
         for name in self.consumer_cfg.keys():
-            self.consumers[name] = self.new_consumer(self.consumer_cfg[name],
-                                                     name)
+            self.consumers[name] = self.new_consumer(
+                self.consumer_cfg[name], name
+            )
             self.start_processes(name, self.consumers[name].qty)
 
     def start_process(self, name):
@@ -631,9 +660,10 @@ class MasterControlProgram(state.State):
         # Start the process
         try:
             proc.start()
-        except (OSError, IOError) as error:
-            LOGGER.critical('Failed to start %s for %s: %r',
-                            process_name, name, error)
+        except OSError as error:
+            LOGGER.critical(
+                'Failed to start %s for %s: %r', process_name, name, error
+            )
             try:
                 del self.consumers[name].process[process_name]
             except AttributeError as error:
@@ -675,8 +705,12 @@ class MasterControlProgram(state.State):
             if not processes:
                 break
 
-            LOGGER.info('Waiting on %i active processes to shut down (%i/%i)',
-                        processes, iteration, self.MAX_SHUTDOWN_WAIT)
+            LOGGER.info(
+                'Waiting on %i active processes to shut down (%i/%i)',
+                processes,
+                iteration,
+                self.MAX_SHUTDOWN_WAIT,
+            )
             try:
                 time.sleep(0.5)
             except KeyboardInterrupt:

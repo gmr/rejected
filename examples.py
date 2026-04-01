@@ -1,14 +1,15 @@
 """Example Rejected Consumer"""
+
 import random
 
-from rejected import consumer
 from tornado import gen, httpclient
+
+from rejected import consumer
 
 __version__ = '1.0.0'
 
 
 class ExampleConsumer(consumer.SmartConsumer):
-
     def process(self):
         self.logger.info('Message: %r', self.body)
         action = random.randint(0, 100)
@@ -22,12 +23,13 @@ class ExampleConsumer(consumer.SmartConsumer):
 
 
 class AsyncExampleConsumer(consumer.Consumer):
-
     @gen.coroutine
     def process(self):
         self.logger.info('Message: %r', self.body)
         http_client = httpclient.AsyncHTTPClient()
         with self.stats_track_duration('async_fetch'):
-            results = yield [http_client.fetch('http://www.google.com'),
-                             http_client.fetch('http://www.bing.com')]
+            results = yield [
+                http_client.fetch('http://www.google.com'),
+                http_client.fetch('http://www.bing.com'),
+            ]
         self.logger.info('Length: %r', [len(r.body) for r in results])

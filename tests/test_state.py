@@ -1,15 +1,16 @@
 """Tests for the State Class"""
+
 import unittest
+
 try:
     from unittest import mock
 except ImportError:
-    import mock
+    from unittest import mock
 
 from rejected import state
 
 
 class TestState(unittest.TestCase):
-
     def setUp(self):
         self._obj = state.State()
 
@@ -30,38 +31,51 @@ class TestState(unittest.TestCase):
 
     def test_state_initializing_desc(self):
         self._obj.state = self._obj.STATE_INITIALIZING
-        self.assertEqual(self._obj.state_description,
-                         self._obj.STATES[self._obj.STATE_INITIALIZING])
+        self.assertEqual(
+            self._obj.state_description,
+            self._obj.STATES[self._obj.STATE_INITIALIZING],
+        )
 
     def test_state_connecting_desc(self):
         self._obj.state = self._obj.STATE_CONNECTING
-        self.assertEqual(self._obj.state_description,
-                         self._obj.STATES[self._obj.STATE_CONNECTING])
+        self.assertEqual(
+            self._obj.state_description,
+            self._obj.STATES[self._obj.STATE_CONNECTING],
+        )
 
     def test_state_idle_desc(self):
         self._obj.state = self._obj.STATE_IDLE
-        self.assertEqual(self._obj.state_description,
-                         self._obj.STATES[self._obj.STATE_IDLE])
+        self.assertEqual(
+            self._obj.state_description, self._obj.STATES[self._obj.STATE_IDLE]
+        )
 
     def test_state_active_desc(self):
         self._obj.state = self._obj.STATE_ACTIVE
-        self.assertEqual(self._obj.state_description,
-                         self._obj.STATES[self._obj.STATE_ACTIVE])
+        self.assertEqual(
+            self._obj.state_description,
+            self._obj.STATES[self._obj.STATE_ACTIVE],
+        )
 
     def test_state_stop_requested_desc(self):
         self._obj.state = self._obj.STATE_STOP_REQUESTED
-        self.assertEqual(self._obj.state_description,
-                         self._obj.STATES[self._obj.STATE_STOP_REQUESTED])
+        self.assertEqual(
+            self._obj.state_description,
+            self._obj.STATES[self._obj.STATE_STOP_REQUESTED],
+        )
 
     def test_state_shutting_down_desc(self):
         self._obj.state = self._obj.STATE_SHUTTING_DOWN
-        self.assertEqual(self._obj.state_description,
-                         self._obj.STATES[self._obj.STATE_SHUTTING_DOWN])
+        self.assertEqual(
+            self._obj.state_description,
+            self._obj.STATES[self._obj.STATE_SHUTTING_DOWN],
+        )
 
     def test_state_stopped_desc(self):
         self._obj.state = self._obj.STATE_STOPPED
-        self.assertEqual(self._obj.state_description,
-                         self._obj.STATES[self._obj.STATE_STOPPED])
+        self.assertEqual(
+            self._obj.state_description,
+            self._obj.STATES[self._obj.STATE_STOPPED],
+        )
 
     def test_is_idle_state_initializing(self):
         self._obj.state = self._obj.STATE_INITIALIZING

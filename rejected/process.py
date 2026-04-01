@@ -4,6 +4,7 @@ connection state and collects stats about the consuming process.
 
 """
 
+import asyncio
 import collections
 import logging
 import logging.config
@@ -16,12 +17,6 @@ import ssl
 import time
 import typing
 from os import path
-
-try:
-    import sprockets_influxdb as influxdb
-except ImportError:
-    influxdb = None
-import asyncio
 
 import pika
 from pika import exceptions
@@ -483,7 +478,6 @@ class Process(multiprocessing.Process, state.State):
         self.counters = collections.Counter()
 
         self.delivery_time = None
-        self.influxdb = None
         self.ioloop = None
         self.last_failure = 0
         self.last_stats_time = None
@@ -704,8 +698,6 @@ class Process(multiprocessing.Process, state.State):
         """
         if self.statsd:
             self.submit_statsd_measurements()
-        if self.influxdb:
-            self.submit_influxdb_measurement()
 
     def on_connection_closed(self, name):
         if self.is_running:
@@ -1101,52 +1093,15 @@ class Process(multiprocessing.Process, state.State):
         self.setup_sighandlers()
         self.create_connections()
 
-    def setup_influxdb(self, config):
-        """Configure the InfluxDB module for measurement submission.
-
-        :param dict config: The InfluxDB configuration stanza
-
-        """
-        base_tags = {'version': self.consumer_version}
-        measurement = (
-            self.consumer_config.influxdb_measurement
-            or os.environ.get('SERVICE')
-        )
-        if measurement != self.consumer_name:
-            base_tags['consumer'] = self.consumer_name
-        for key in {'ENVIRONMENT', 'SERVICE'}:
-            if key in os.environ:
-                base_tags[key.lower()] = os.environ[key]
-        scheme = os.environ.get('INFLUXDB_SCHEME', config.scheme)
-        host = os.environ.get('INFLUXDB_HOST', config.host)
-        port = os.environ.get('INFLUXDB_PORT', str(config.port))
-        influxdb.install(
-            f'{scheme}://{host}:{port}/write',
-            config.user or os.environ.get('INFLUXDB_USER'),
-            config.password or os.environ.get('INFLUXDB_PASSWORD'),
-            base_tags=base_tags,
-        )
-        return config.database, measurement
-
     def setup_instrumentation(self):
-        """Configure instrumentation for submission per message measurements
-        to statsd and/or InfluxDB.
-
-        """
-        stats = self.config.stats
-
-        if stats.statsd.enabled:
+        """Configure statsd instrumentation for per-message measurements."""
+        if self.config.stats.statsd.enabled:
             self.statsd = statsd.Client(
                 self.consumer_name,
-                stats.statsd.model_dump(),
+                self.config.stats.statsd.model_dump(),
                 self.stop,
             )
             LOGGER.debug('statsd measurements configured')
-
-        # InfluxDB support
-        if influxdb and stats.influxdb.enabled:
-            self.influxdb = self.setup_influxdb(stats.influxdb)
-            LOGGER.debug('InfluxDB measurements configured: %r', self.influxdb)
 
     def setup_sentry(self, cfg, consumer_name):
         # Setup Sentry if configured and sentry_sdk is installed
@@ -1232,36 +1187,6 @@ class Process(multiprocessing.Process, state.State):
             self.consumer.shutdown()
         except AttributeError:
             LOGGER.debug('Consumer does not have a shutdown method')
-
-    def submit_influxdb_measurement(self):
-        """Submit a measurement for a message to InfluxDB"""
-        measurement = influxdb.Measurement(*self.influxdb)
-        measurement.set_timestamp(time.time())
-        for key, value in self.measurement.counters.items():
-            measurement.set_field(key, value)
-        for key, value in self.measurement.tags.items():
-            measurement.set_tag(key, value)
-        for key, value in self.measurement.values.items():
-            measurement.set_field(key, value)
-
-        for key, values in self.measurement.durations.items():
-            if len(values) == 1:
-                measurement.set_field(key, values[0])
-            elif len(values) > 1:
-                measurement.set_field(
-                    f'{key}-average', sum(values) / len(values)
-                )
-                measurement.set_field(f'{key}-max', max(values))
-                measurement.set_field(f'{key}-min', min(values))
-                measurement.set_field(
-                    f'{key}-median', utils.percentile(values, 50)
-                )
-                measurement.set_field(
-                    f'{key}-95th', utils.percentile(values, 95)
-                )
-
-        influxdb.add_measurement(measurement)
-        LOGGER.debug('InfluxDB Measurement: %r', measurement.marshall())
 
     def submit_statsd_measurements(self):
         """Submit a measurement for a message to statsd as individual items."""

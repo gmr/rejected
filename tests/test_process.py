@@ -22,7 +22,6 @@ from . import mocks, test_state
 # Raw config dict for building pydantic Config objects
 _CONFIG_RAW: typing.ClassVar[dict] = {
     'stats': {
-        'influxdb': {'enabled': False},
         'statsd': {'enabled': False},
     },
     'Connections': {

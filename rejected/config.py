@@ -43,20 +43,9 @@ class StatsdConfig(pydantic.BaseModel):
     include_hostname: bool = True
 
 
-class InfluxDBConfig(pydantic.BaseModel):
-    enabled: bool = False
-    scheme: str = 'http'
-    host: str = 'localhost'
-    port: int = 8086
-    user: str | None = None
-    password: str | None = None
-    database: str = 'rejected'
-
-
 class StatsConfig(pydantic.BaseModel):
     log: bool = False
     statsd: StatsdConfig = pydantic.Field(default_factory=StatsdConfig)
-    influxdb: InfluxDBConfig = pydantic.Field(default_factory=InfluxDBConfig)
 
 
 class ConsumerConfig(pydantic.BaseModel):
@@ -71,7 +60,6 @@ class ConsumerConfig(pydantic.BaseModel):
     max_errors: int = 5
     error_exchange: str | None = None
     sentry_dsn: str | None = None
-    influxdb_measurement: str | None = None
     drop_exchange: str | None = None
     drop_invalid_messages: bool | None = None
     message_type: str | None = None
@@ -158,9 +146,11 @@ def load(path: str | pathlib.Path) -> Config:
                 )
             with open(path, 'rb') as f:
                 raw = tomllib.load(f)
-        else:
+        elif path.suffix in ('.yaml', '.yml'):
             with open(path) as f:
                 raw = yaml.safe_load(f) or {}
+        else:
+            raise ValueError(f'Unsupported config file type: {path.suffix}')
     except (OSError, yaml.YAMLError) as exc:
         raise ValueError(f'Failed to read configuration: {exc}') from exc
 

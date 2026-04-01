@@ -5,14 +5,6 @@ Application:
   # sentry_dsn: https://[YOUR-SENTRY-DSN]
   stats:
     log: True
-    influxdb:
-      enabled: False
-      scheme: http
-      host: influxdb
-      port: 8086
-      user: influxdb
-      password: foo
-      database: bar
     statsd:
       enabled: False
       host: localhost
@@ -43,11 +35,10 @@ Application:
         - name: rabbitmq2
           consume: False
           confirm: False
-      # sentry_dsn: sentry_dsn: https://[YOUR-SENTRY-DSN]
+      # sentry_dsn: https://[YOUR-SENTRY-DSN]
       qty: 1
       queue: test
       ack: True
-      influxdb_measurement: async_consumer
       qos_prefetch: 100
       max_errors: 100
 
@@ -63,7 +54,6 @@ Application:
       ack: True
       max_errors: 100
       error_exchange: errors
-      influxdb_measurement: sync_consumer
       qos_prefetch: 1
       config:
         foo: True

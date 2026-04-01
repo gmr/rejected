@@ -1574,17 +1574,57 @@ class Consumer:
     def _load_avro_schema(self, message_type: str) -> dict:
         """Load and return the Avro schema for the given message type.
 
-        Override this method (or use :class:`LocalSchemaConsumer` or
-        :class:`RemoteSchemaConsumer`) to provide schema loading.
+        If ``schema_uri_format`` is set in the consumer's config, the URI
+        is built by calling ``schema_uri_format.format(message_type)`` and
+        the scheme determines how the schema is fetched:
+
+        - ``file:///path/to/schemas/{0}.avsc`` — read from disk
+        - ``http://`` / ``https://`` — fetched via HTTP GET
+
+        If ``schema_uri_format`` is not set, override this method to provide
+        your own schema loading logic.
 
         :param str message_type: The AMQP ``type`` property value
         :rtype: dict
-        :raises: NotImplementedError
+        :raises: NotImplementedError if schema_uri_format is not configured
+                 and this method has not been overridden
 
         """
-        raise NotImplementedError(
-            'Override _load_avro_schema to provide Avro schemas, '
-            'or use LocalSchemaConsumer/RemoteSchemaConsumer'
+        uri_format = self.settings.get('schema_uri_format')
+        if not uri_format:
+            raise NotImplementedError(
+                'Set schema_uri_format in consumer config or override '
+                '_load_avro_schema to provide Avro schemas'
+            )
+        uri = uri_format.format(message_type)
+        self.logger.debug(
+            'Loading Avro schema for %s from %s', message_type, uri
+        )
+        if uri.startswith('file://'):
+            import pathlib
+
+            file_path = pathlib.Path(uri[7:])
+            if not file_path.exists():
+                raise ConsumerException(
+                    f'Missing Avro schema file: {file_path}'
+                )
+            return json.loads(file_path.read_text())
+        if uri.startswith(('http://', 'https://')):
+            if not _requests:
+                raise ConsumerException(
+                    'requests is required for HTTP schema loading; '
+                    'install rejected[avro]'
+                )
+            response = _requests.get(uri)
+            if not response.ok:
+                raise ConsumerException(
+                    f'Failed to fetch Avro schema for {message_type}: '
+                    f'HTTP {response.status_code}'
+                )
+            return response.json()
+        raise ConsumerException(
+            f'Unsupported schema URI scheme in {uri!r}; '
+            f'use file:// or http(s)://'
         )
 
     @staticmethod
@@ -1610,102 +1650,6 @@ class Consumer:
         stream = io.BytesIO()
         fastavro.schemaless_writer(stream, avro_schema, data)
         return stream.getvalue()
-
-
-class LocalSchemaConsumer(Consumer):
-    """Consumer that loads Avro schemas from ``.avsc`` files on disk.
-
-    Configure ``schema_path`` in the consumer's ``config`` section:
-
-    .. code:: yaml
-
-        Consumers:
-          my-consumer:
-            consumer: myapp.MyConsumer
-            config:
-              schema_path: /etc/schemas
-
-    The schema file is resolved as ``{schema_path}/{message_type}.avsc``.
-
-    Requires ``rejected[avro]`` to be installed.
-
-    """
-
-    async def initialize(self):
-        self.require_setting('schema_path', 'LocalSchemaConsumer')
-        import pathlib
-
-        schema_path = pathlib.Path(self.settings['schema_path']).resolve()
-        if not schema_path.is_dir():
-            raise RuntimeError(
-                f'schema_path {str(schema_path)!r} does not exist '
-                f'or is not a directory'
-            )
-        await super().initialize()
-
-    def _load_avro_schema(self, message_type: str) -> dict:
-        """Load the Avro schema file from disk.
-
-        :param str message_type: The AMQP ``type`` property value
-        :rtype: dict
-        :raises: ConsumerException if the schema file is not found
-
-        """
-        import pathlib
-
-        schema_path = pathlib.Path(self.settings['schema_path']).resolve()
-        file_path = schema_path / f'{message_type}.avsc'
-        if not file_path.exists():
-            raise ConsumerException(f'Missing Avro schema file: {file_path}')
-        return json.loads(file_path.read_text())
-
-
-class RemoteSchemaConsumer(Consumer):
-    """Consumer that loads Avro schemas from a remote HTTP endpoint.
-
-    Configure ``schema_uri_format`` in the consumer's ``config`` section,
-    using ``{0}`` as a placeholder for the message type:
-
-    .. code:: yaml
-
-        Consumers:
-          my-consumer:
-            consumer: myapp.MyConsumer
-            config:
-              schema_uri_format: http://schema-registry/schemas/{0}.avsc
-
-    Requires ``rejected[avro]`` to be installed.
-
-    """
-
-    async def initialize(self):
-        self.require_setting('schema_uri_format', 'RemoteSchemaConsumer')
-        await super().initialize()
-
-    def _load_avro_schema(self, message_type: str) -> dict:
-        """Fetch the Avro schema from the configured URI.
-
-        :param str message_type: The AMQP ``type`` property value
-        :rtype: dict
-        :raises: ConsumerException on HTTP error
-
-        """
-        if not _requests:
-            raise ConsumerException(
-                'requests is required for RemoteSchemaConsumer; '
-                'install rejected[avro]'
-            )
-        url = self.settings['schema_uri_format'].format(message_type)
-        self.logger.debug(
-            'Fetching Avro schema for %s from %s', message_type, url
-        )
-        response = _requests.get(url)
-        if not response.ok:
-            raise ConsumerException(
-                f'Failed to fetch Avro schema for {message_type}: '
-                f'HTTP {response.status_code}'
-            )
-        return response.json()
 
 
 class SmartConsumer(Consumer):

@@ -438,7 +438,7 @@ class Consumer:
         :param str value: The context value
 
         """
-        if self.sentry_client and sentry_sdk:
+        if sentry_sdk and self._process and self._process.sentry_client:
             self.logger.debug(
                 'Setting sentry context for %s to %s', tag, value
             )
@@ -588,7 +588,7 @@ class Consumer:
         :param str tag: The context tag to remove
 
         """
-        if self.sentry_client and sentry_sdk:
+        if sentry_sdk and self._process and self._process.sentry_client:
             sentry_sdk.set_tag(tag, None)
 
     async def yield_to_ioloop(self):
@@ -801,21 +801,6 @@ class Consumer:
         if not self._message:
             return None
         return self._message.properties.type
-
-    @property
-    def sentry_client(self):
-        """Indicates whether Sentry is enabled.
-
-        Returns ``True`` if ``sentry_sdk`` is installed and a ``sentry_dsn``
-        is configured, ``None`` otherwise. Use :meth:`set_sentry_context`
-        and :meth:`unset_sentry_context` to tag events, or call
-        ``sentry_sdk`` directly for additional reporting.
-
-        :rtype: bool or None
-
-        """
-        if hasattr(self._process, 'sentry_client'):
-            return self._process.sentry_client
 
     @property
     def settings(self):

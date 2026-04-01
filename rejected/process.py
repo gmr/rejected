@@ -1048,7 +1048,14 @@ class Process(multiprocessing.Process, state.State):
         LOGGER.debug('Sending exception to sentry')
         with sentry_sdk.new_scope() as scope:
             scope.set_extra('consumer_name', self.consumer_name)
-            scope.set_extra('env', dict(os.environ))
+            scope.set_extra('env', {
+                k: v for k, v in os.environ.items()
+                if not any(
+                    s in k.upper()
+                    for s in ('KEY', 'SECRET', 'TOKEN', 'PASSWORD', 'DSN',
+                              'CREDENTIAL', 'AUTH', 'PRIVATE')
+                )
+            })
             scope.set_extra('message', message)
             scope.set_extra('time_spent', duration)
             sentry_sdk.capture_exception(exc_info, scope=scope)

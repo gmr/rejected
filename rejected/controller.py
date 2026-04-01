@@ -13,8 +13,10 @@ from helper import controller, parser
 
 try:
     import sentry_sdk
+    from sentry_sdk.integrations.logging import LoggingIntegration
 except ImportError:
     sentry_sdk = None
+    LoggingIntegration = None
 
 from . import __version__, mcp
 
@@ -35,6 +37,9 @@ class Controller(controller.Controller):
             kwargs = {
                 'dsn': self.config.application['sentry_dsn'],
                 'send_default_pii': False,
+                'integrations': [
+                    LoggingIntegration(level=None, event_level=None),
+                ],
             }
             if os.environ.get('ENVIRONMENT'):
                 kwargs['environment'] = os.environ['ENVIRONMENT']

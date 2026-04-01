@@ -586,7 +586,7 @@ class Consumer:
 
         """
         if sentry_sdk and self._process and self._process.sentry_client:
-            sentry_sdk.get_current_scope().remove_tag(tag)
+            sentry_sdk.get_isolation_scope().remove_tag(tag)
 
     async def yield_to_ioloop(self):
         """Function that will allow Rejected to process IOLoop events while

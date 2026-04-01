@@ -1400,7 +1400,7 @@ class Consumer:
             raise ConsumerException('BeautifulSoup4 is not enabled')
         if isinstance(value, bytes):
             value = value.decode('utf-8')
-        return bs4.BeautifulSoup(value)
+        return bs4.BeautifulSoup(value, 'html.parser')
 
     @staticmethod
     def _load_csv_value(value):
@@ -1484,7 +1484,7 @@ class Consumer:
         :raises: ConsumerException
 
         """
-        return yaml.load(value)
+        return yaml.safe_load(value)
 
     def _republish_dropped_message(self, reason):
         """Republish the original message that was received it is being dropped

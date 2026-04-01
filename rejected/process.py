@@ -13,6 +13,7 @@ import profile
 import signal
 import ssl
 import time
+import typing
 import warnings
 from os import path
 
@@ -78,6 +79,10 @@ class Callbacks:
 class Connection(state.State):
     HB_INTERVAL = 300
     STATE_CLOSED = 0x08
+    STATES: typing.ClassVar[dict[int, str]] = {
+        **state.State.STATES,
+        STATE_CLOSED: 'Closed',
+    }
 
     def __init__(
         self,
@@ -100,9 +105,6 @@ class Connection(state.State):
         self.name = name
         self.publisher_confirm = publisher_confirmations
         self.connection = self.connect()
-
-        # Override STOPPED with CLOSED
-        self.STATES[0x08] = 'CLOSED'
 
     @property
     def is_closed(self):
@@ -427,6 +429,10 @@ class Process(multiprocessing.Process, state.State):
 
     # Additional State constants
     STATE_PROCESSING = 0x04
+    STATES: typing.ClassVar[dict[int, str]] = {
+        **state.State.STATES,
+        STATE_PROCESSING: 'Processing',
+    }
 
     # Counter constants
     ACKED = 'acked'
@@ -481,7 +487,7 @@ class Process(multiprocessing.Process, state.State):
         self.last_stats_time = None
         self.measurement = None
         self.message_connection_id = None
-        self.pending = collections.deque()
+        self.pending = collections.deque(maxlen=self.qos_prefetch)
         self.prepend_path = None
         self.previous = None
         self.sentry_client = None
@@ -489,9 +495,6 @@ class Process(multiprocessing.Process, state.State):
         self._tasks: set[asyncio.Task] = set()
         self.state_start = time.time()
         self.statsd = None
-
-        # Override ACTIVE with PROCESSING
-        self.STATES[0x04] = 'Processing'
 
     def ack_message(self, message):
         """Acknowledge the message on the broker and log the ack

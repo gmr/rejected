@@ -23,16 +23,16 @@ class ConsumerInitializationTests(unittest.TestCase):
         obj = consumer.Consumer({}, None)
         self.assertIsNone(obj._message)
 
-    def test_initialize_is_invoked(self):
-        with mock.patch('rejected.consumer.Consumer.initialize') as init:
-            consumer.Consumer({}, None)
-            init.assert_called_once_with()
-
-
-class ConsumerDefaultProcessTests(unittest.TestCase):
-    def test_process_raises_exception(self):
+    def test_initialized_flag_is_false(self):
         obj = consumer.Consumer({}, None)
-        self.assertRaises(NotImplementedError, obj.process)
+        self.assertFalse(obj._initialized)
+
+
+class ConsumerDefaultProcessTests(unittest.IsolatedAsyncioTestCase):
+    async def test_process_raises_exception(self):
+        obj = consumer.Consumer({}, None)
+        with self.assertRaises(NotImplementedError):
+            await obj.process()
 
 
 class ConsumerSetChannelTests(unittest.TestCase):
@@ -44,7 +44,7 @@ class ConsumerSetChannelTests(unittest.TestCase):
 
 
 class TestConsumer(consumer.Consumer):
-    def process(self):
+    async def process(self):
         pass
 
 
@@ -67,7 +67,9 @@ class ConsumerReceiveTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.obj._message, self.message)
 
     async def test_receive_invokes_process(self):
-        with mock.patch.object(self.obj, 'process') as process:
+        with mock.patch.object(
+            self.obj, 'process', new_callable=mock.AsyncMock
+        ) as process:
             await self.obj.execute(self.message, self.measurement)
             process.assert_called_once_with()
 
@@ -75,7 +77,9 @@ class ConsumerReceiveTests(unittest.IsolatedAsyncioTestCase):
         obj = TestConsumer(
             {}, None, drop_invalid_messages=True, message_type='foo'
         )
-        with mock.patch.object(obj, 'process') as process:
+        with mock.patch.object(
+            obj, 'process', new_callable=mock.AsyncMock
+        ) as process:
             await self.obj.execute(self.message, self.measurement)
             process.assert_not_called()
 
@@ -189,7 +193,7 @@ class ConsumerPropertyTests(unittest.IsolatedAsyncioTestCase):
 
 
 class TestSmartConsumer(consumer.SmartConsumer):
-    def process(self):
+    async def process(self):
         pass
 
 

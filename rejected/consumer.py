@@ -214,17 +214,16 @@ class Consumer:
         # Set a Sentry context for the consumer
         self.set_sentry_context('consumer', self.name)
 
-        # Run any child object specified initialization
-        self.initialize()
+        self._initialized = False
 
-    def initialize(self):
+    async def initialize(self):
         """Extend this method for any initialization tasks that occur only when
         the :class:`~rejected.consumer.Consumer` class is created.
 
         """
         pass
 
-    def prepare(self):
+    async def prepare(self):
         """Called when a message is received before
         :meth:`~rejected.consumer.Consumer.process`.
 
@@ -237,7 +236,7 @@ class Consumer:
         """
         pass
 
-    def process(self):
+    async def process(self):
         """Extend this method for implementing your Consumer logic.
 
         If the message can not be processed and the Consumer should stop after
@@ -266,7 +265,7 @@ class Consumer:
         """
         return self.MESSAGE_AGE_KEY
 
-    def on_finish(self):
+    async def on_finish(self):
         """Called after a message has been processed.
 
         Override this method to perform cleanup, logging, etc.
@@ -278,13 +277,10 @@ class Consumer:
         If an exception is raised during the processing of a message,
         :meth:`~rejected.consumer.Consumer.prepare` is not invoked.
 
-        .. note:: Asynchronous support: Define this method as ``async def``
-            to make it asynchronous.
-
         """
         self.logger.debug('on_finished invoked')
 
-    def on_blocked(self, name):
+    async def on_blocked(self, name):
         """Called when a connection for this consumer is blocked.
 
         Override this method to respond to being blocked.
@@ -296,7 +292,7 @@ class Consumer:
         """
         self.logger.debug('Connection %s has been blocked', name)
 
-    def on_unblocked(self, name):
+    async def on_unblocked(self, name):
         """Called when a connection for this consumer is unblocked.
 
         Override this method to respond to being blocked.
@@ -319,7 +315,7 @@ class Consumer:
 
     """Utility Methods for use by Consumer Code"""
 
-    def finish(self):
+    async def finish(self):
         """Finishes message processing for the current message. If this is
         called in :meth:`~rejected.consumer.Consumer.prepare`, the
         :meth:`~rejected.consumer.Consumer.process` method is not invoked
@@ -330,7 +326,7 @@ class Consumer:
             self.logger.warning('Finished called when already finished')
             return
         self._finished = True
-        self.on_finish()
+        await self.on_finish()
 
     def publish_message(
         self, exchange, routing_key, properties, body, channel=None
@@ -697,18 +693,6 @@ class Consumer:
         return self._message.properties.headers or {}
 
     @property
-    def io_loop(self):
-        """Access the :py:class:`asyncio.AbstractEventLoop` instance for the
-        current message.
-
-        .. versionadded:: 3.18.4
-
-        :rtype: asyncio.AbstractEventLoop
-
-        """
-        return asyncio.get_event_loop()
-
-    @property
     def message_id(self):
         """Access the current message's ``message-id`` AMQP message property as
         an attribute of the consumer class.
@@ -878,6 +862,9 @@ class Consumer:
 
         """
         LOGGER.debug('Received: %r', message_in)
+        if not self._initialized:
+            await self.initialize()
+            self._initialized = True
         self._clear()
         self._message = message_in
         self._measurement = measurement
@@ -932,16 +919,10 @@ class Consumer:
                     )
                 return data.MESSAGE_DROP
 
-        result = None
         try:
-            result = self.prepare()
-            if asyncio.isfuture(result) or asyncio.iscoroutine(result):
-                await result
+            await self.prepare()
             if not self._finished:
-                result = self.process()
-                if asyncio.isfuture(result) or asyncio.iscoroutine(result):
-                    await result
-                    self.logger.debug('Post await of coroutine/future process')
+                await self.process()
         except KeyboardInterrupt:
             self.logger.debug('CTRL-C')
             self._process.reject(message_in.delivery_tag, True)
@@ -1007,7 +988,7 @@ class Consumer:
                 'NotImplementedError processing delivery %s: %s',
                 message_in.delivery_tag,
                 error,
-                exc_info=self._get_exc_info(result),
+                exc_info=sys.exc_info(),
             )
             self._measurement.set_tag('exception', 'UnhandledException')
             return data.UNHANDLED_EXCEPTION
@@ -1017,13 +998,13 @@ class Consumer:
                 'Exception processing delivery %s: %s',
                 message_in.delivery_tag,
                 str(error),
-                exc_info=self._get_exc_info(result),
+                exc_info=sys.exc_info(),
             )
             self._measurement.set_tag('exception', 'UnhandledException')
             return data.UNHANDLED_EXCEPTION
 
         if not self._finished:
-            self.finish()
+            await self.finish()
         self.logger.debug('Post finish')
         return data.MESSAGE_ACK
 

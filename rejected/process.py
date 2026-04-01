@@ -731,12 +731,12 @@ class Process(multiprocessing.Process, state.State):
     def on_connection_blocked(self, name):
         LOGGER.warning('Connection %s blocked', name)
         if self.is_processing:
-            self.consumer.on_blocked(name)
+            asyncio.ensure_future(self.consumer.on_blocked(name))  # noqa: RUF006
 
     def on_connection_unblocked(self, name):
         LOGGER.info('Connection %s unblocked', name)
         if self.is_processing:
-            self.consumer.on_blocked(name)
+            asyncio.ensure_future(self.consumer.on_unblocked(name))  # noqa: RUF006
 
     def on_confirmation(self, name, delivered, delivery_tag):
         """Invoked on delivery confirmation

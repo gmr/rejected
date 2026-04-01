@@ -40,9 +40,9 @@ class GarbageCollectorMixin:
             self._collection_cycle = value
             self._cycles_left = min(self._cycles_left, self._collection_cycle)
 
-    def on_finish(self):
+    async def on_finish(self):
         """Used to initiate the garbage collection"""
-        super().on_finish()
+        await super().on_finish()
         self._cycles_left -= 1
         if self._cycles_left <= 0:
             num_collected = gc.collect()

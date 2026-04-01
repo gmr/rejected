@@ -82,7 +82,7 @@ class AsyncTestCase(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self):
         await super().asyncTearDown()
         if not self.consumer._finished:
-            self.consumer.finish()
+            await self.consumer.finish()
 
     @property
     def published_messages(self):

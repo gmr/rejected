@@ -117,7 +117,7 @@ class Client:
         LOGGER.debug('Sending statsd payload: %r', payload)
         try:
             if self._tcp_writer:
-                self._tcp_writer.sendall(payload.encode('utf-8'))
+                self._tcp_writer.send(payload.encode('utf-8'))
             else:
                 self._udp_sock.sendto(payload.encode('utf-8'), self._address)
         except OSError as error:  # pragma: nocover
@@ -166,6 +166,7 @@ class Client:
             )
             self._failure_callback()
             return None
+        sock.setblocking(False)
         LOGGER.debug('Connected to statsd at %s via TCP', self._address)
         self._connected = True
         return sock

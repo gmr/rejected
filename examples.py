@@ -9,7 +9,7 @@ from rejected import consumer
 __version__ = '1.0.0'
 
 
-class ExampleConsumer(consumer.SmartConsumer):
+class ExampleConsumer(consumer.Consumer):
     def process(self):
         self.logger.info('Message: %r', self.body)
         action = random.randint(0, 100)

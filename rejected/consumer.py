@@ -1,18 +1,17 @@
 """
-The :py:class:`Consumer`, and :py:class:`SmartConsumer` provide base
-classes to extend for consumer applications.
+The :py:class:`Consumer` provides the base class for consumer applications.
 
-While the :py:class:`Consumer` class provides all the structure required for
-implementing a rejected consumer, the :py:class:`SmartConsumer` adds
-functionality designed to make writing consumers even easier. When messages
-are received by consumers extending :py:class:`SmartConsumer`, if the message's
-``content_type`` property contains one of the supported mime-types, the message
-body will automatically be deserialized, making the deserialized message body
-available via the ``body`` attribute. Additionally, should one of the supported
-``content_encoding`` types (``gzip`` or ``bzip2``) be specified in the
-message's property, it will automatically be decoded.
+When messages are received, if the message's ``content_type`` property contains
+one of the supported mime-types, the message body will automatically be
+deserialized, making the deserialized message body available via the ``body``
+attribute. Additionally, should one of the supported ``content_encoding`` types
+(``gzip`` or ``bzip2``) be specified in the message's property, it will
+automatically be decoded.
 
-Supported `SmartConsumer` MIME types are:
+When publishing a message, the body can be automatically serialized and encoded
+based on the ``content_type`` and ``content_encoding`` properties.
+
+Supported MIME types are:
 
  - application/msgpack (with u-msgpack-python installed)
  - application/json
@@ -37,6 +36,7 @@ import datetime
 import io
 import json
 import logging
+import pathlib
 import pickle
 import plistlib
 import sys
@@ -71,10 +71,20 @@ try:
 except ImportError:
     sentry_sdk = None
 
+try:
+    import fastavro
+    import requests as _requests
+except ImportError:
+    fastavro = None
+    _requests = None
+
 DEFAULT_CHANNEL = 'default'
+AVRO_DATUM_MIME_TYPE = 'application/vnd.apache.avro.datum'
 _DROPPED_MESSAGE = 'X-Rejected-Dropped'
 _PROCESSING_EXCEPTIONS = 'X-Processing-Exceptions'
 _EXCEPTION_FROM = 'X-Exception-From'
+
+_UNSET = object()
 
 BS4_MIME_TYPES = ('text/html', 'text/xml')
 PICKLE_MIME_TYPES = (
@@ -201,11 +211,12 @@ class Consumer:
             if error_max_retry is None
             else error_max_retry
         )
+        self._avro_schemas: dict = {}
         self._finished = False
         self._message = None
         self._message_type = message_type or self.MESSAGE_TYPE
         self._measurement = None
-        self._message_body = None
+        self._message_body = _UNSET
         self._process = process
         self._settings = settings
 
@@ -333,31 +344,73 @@ class Consumer:
         await self.on_finish()
 
     def publish_message(
-        self, exchange, routing_key, properties, body, channel=None
+        self,
+        exchange,
+        routing_key,
+        properties,
+        body,
+        no_serialization=False,
+        no_encoding=False,
+        channel=None,
     ):
         """Publish a message to RabbitMQ on the same channel the original
         message was received on.
 
+        By default, if you pass a non-string object to the body and the
+        properties have a supported content-type set, the body will be
+        auto-serialized in the specified content-type.
+
+        If the properties do not have a timestamp set, it will be set to the
+        current time.
+
+        If you specify a content-encoding in the properties and the encoding is
+        supported, the body will be auto-encoded.
+
+        Both of these behaviors can be disabled by setting no_serialization or
+        no_encoding to True.
+
         :param str exchange: The exchange to publish to
         :param str routing_key: The routing key to publish with
         :param dict properties: The message properties
-        :param str body: The message body
+        :param mixed body: The message body to publish
+        :param bool no_serialization: Turn off auto-serialization of the body
+        :param bool no_encoding: Turn off auto-encoding of the body
         :param str channel: The channel/connection name to use. If it is not
             specified, the channel that the message was delivered on is used.
 
         """
-        self.logger.debug(
-            'Publishing message to %s:%s (%s)', exchange, routing_key, channel
+        # Auto-serialize the content if needed
+        is_string = isinstance(body, (str, bytes))
+        if not no_serialization and not is_string:
+            content_type = properties.get('content_type')
+            if (
+                fastavro
+                and content_type == AVRO_DATUM_MIME_TYPE
+                and properties.get('type')
+            ):
+                self.logger.debug(
+                    'Auto-serializing message body as Avro datum'
+                )
+                body = self._serialize_avro(
+                    self._avro_schema(properties['type']), body
+                )
+            elif content_type:
+                self.logger.debug('Auto-serializing message body')
+                body = self._auto_serialize(content_type, body)
+
+        content_encoding = properties.get('content_encoding')
+        if not no_encoding and content_encoding:
+            self.logger.debug('Auto-encoding message body')
+            body = self._auto_encode(content_encoding, body)
+
+        # Publish the message
+        self.logger.debug('Publishing message to %s:%s', exchange, routing_key)
+        self._publish_channel(channel).basic_publish(
+            exchange=exchange,
+            routing_key=routing_key,
+            properties=self._get_pika_properties(properties),
+            body=body,
         )
-        with self._measurement.track_duration(
-            f'publish.{exchange}.{routing_key}'
-        ):
-            self._publish_channel(channel).basic_publish(
-                exchange=exchange,
-                routing_key=routing_key,
-                properties=self._get_pika_properties(properties),
-                body=body,
-            )
 
     def reply(
         self,
@@ -611,14 +664,59 @@ class Consumer:
 
     @property
     def body(self):
-        """Access the opaque body from the current message.
+        """Return the message body, unencoded if needed,
+        deserialized if possible.
 
-        :rtype: str
+        :rtype: any
 
         """
         if not self._message:
             return None
-        return self._message.body
+
+        if self._message_body is not _UNSET:
+            return self._message_body
+
+        if self.content_encoding == 'bzip2':
+            self._message_body = self._decode_bz2(self._message.body)
+        elif self.content_encoding == 'gzip':
+            self._message_body = self._decode_gzip(self._message.body)
+        else:
+            self._message_body = self._message.body
+
+        if fastavro and self.content_type == AVRO_DATUM_MIME_TYPE:
+            if self.message_type:
+                self._message_body = self._deserialize_avro(
+                    self._avro_schema(self.message_type), self._message_body
+                )
+            else:
+                self.logger.warning(
+                    'Avro datum received without message_type; '
+                    'returning raw bytes'
+                )
+
+        elif self.content_type == 'application/json':
+            self._message_body = self._load_json_value(self._message_body)
+
+        elif umsgpack and self.content_type == 'application/msgpack':
+            self._message_body = self._load_msgpack_value(self._message_body)
+
+        elif self.content_type in PICKLE_MIME_TYPES:
+            self._message_body = self._load_pickle_value(self._message_body)
+
+        elif self.content_type == 'application/x-plist':
+            self._message_body = self._load_plist_value(self._message_body)
+
+        elif self.content_type == 'text/csv':
+            self._message_body = self._load_csv_value(self._message_body)
+
+        elif bs4 and self.content_type in BS4_MIME_TYPES:
+            self._message_body = self._load_bs4_value(self._message_body)
+
+        elif self.content_type in YAML_MIME_TYPES:
+            self._message_body = self._load_yaml_value(self._message_body)
+
+        # Return the message body
+        return self._message_body
 
     @property
     def content_encoding(self):
@@ -1068,7 +1166,7 @@ class Consumer:
         """Resets all assigned data for the current message."""
         self._finished = False
         self._message = None
-        self._message_body = None
+        self._message_body = _UNSET
 
     @staticmethod
     def _get_pika_properties(properties_in):
@@ -1099,241 +1197,6 @@ class Consumer:
             return self._channels[name]
         except KeyError:
             raise ValueError(f'Channel {name} not found')
-
-    def _republish_dropped_message(self, reason):
-        """Republish the original message that was received it is being dropped
-        by the consumer.
-
-        This for internal use and should not be extended or used directly.
-
-        :param str reason: The reason the message was dropped
-
-        """
-        self.logger.debug('Republishing due to ProcessingException')
-        properties = dict(self._message.properties) or {}
-        if 'headers' not in properties or not properties['headers']:
-            properties['headers'] = {}
-        properties['headers']['X-Dropped-By'] = self.name
-        properties['headers']['X-Dropped-Reason'] = reason
-        properties['headers']['X-Dropped-Timestamp'] = datetime.datetime.now(
-            tz=datetime.UTC
-        ).isoformat()
-        properties['headers']['X-Original-Exchange'] = self._message.exchange
-        properties['headers']['X-Original-Queue'] = self._process.queue_name
-
-        self._message.channel.basic_publish(
-            exchange=self._drop_exchange,
-            routing_key=self._message.routing_key,
-            body=self._message.body,
-            properties=pika.BasicProperties(**properties),
-        )
-
-    def _republish_processing_error(self, error):
-        """Republish the original message that was received because a
-        :exc:`~rejected.consumer.ProcessingException` was raised.
-
-        This for internal use and should not be extended or used directly.
-
-        Add a header that keeps track of how many times this has happened
-        for this message.
-
-        :param str error: The string value for the exception
-
-        """
-        self.logger.debug('Republishing due to ProcessingException')
-        properties = dict(self._message.properties) or {}
-        if 'headers' not in properties or not properties['headers']:
-            properties['headers'] = {}
-
-        properties['headers']['X-Original-Exchange'] = self._message.exchange
-        properties['headers']['X-Original-Queue'] = self._process.queue_name
-
-        if error:
-            properties['headers']['X-Processing-Exception'] = error
-
-        if _PROCESSING_EXCEPTIONS not in properties['headers']:
-            properties['headers'][_PROCESSING_EXCEPTIONS] = 1
-        else:
-            try:
-                properties['headers'][_PROCESSING_EXCEPTIONS] += 1
-            except TypeError:
-                properties['headers'][_PROCESSING_EXCEPTIONS] = 1
-
-        self._message.channel.basic_publish(
-            exchange=self._error_exchange,
-            routing_key=self._message.routing_key,
-            body=self._message.body,
-            properties=pika.BasicProperties(**properties),
-        )
-
-
-class PublishingConsumer(Consumer):
-    """Deprecated, functionality moved to :class:`rejected.consumer.Consumer`
-
-    .. deprecated:: 3.17.0
-
-    """
-
-    def __init__(self, *args, **kwargs):
-        warnings.warn(
-            'PublishingConsumer deprecated, all functionality moved'
-            'to Consumer',
-            category=DeprecationWarning,
-            stacklevel=2,
-        )
-        super().__init__(*args, **kwargs)
-
-
-class SmartConsumer(Consumer):
-    """Base class to ease the implementation of strongly typed message
-    consumers that validate and automatically decode and deserialize the
-    inbound message body based upon the message properties. Additionally,
-    should one of the supported ``content_encoding`` types (``gzip`` or
-    ``bzip2``) be specified in the message's property, it will automatically
-    be decoded.
-
-    When publishing a message, the message can be automatically serialized
-    and encoded. If the ``content_type`` property is specified, the consumer
-    will attempt to automatically serialize the message body. If the
-    ``content_encoding`` property is specified using a supported encoding
-    (``gzip`` or ``bzip2``), it will automatically be encoded as well.
-
-    *Supported MIME types for automatic serialization and deserialization are:*
-
-     - application/json
-     - application/pickle
-     - application/x-pickle
-     - application/x-plist
-     - application/x-vnd.python.pickle
-     - application/vnd.python.pickle
-     - text/csv
-     - text/html (with beautifulsoup4 installed)
-     - text/xml (with beautifulsoup4 installed)
-     - text/yaml
-     - text/x-yaml
-
-    In any of the consumer base classes, if the ``MESSAGE_TYPE`` attribute is
-    set, the ``type`` property of incoming messages will be validated against
-    when a message is received, checking for string equality against the
-    ``MESSAGE_TYPE`` attribute. If they are not matched, the consumer will not
-    process the message and will drop the message without an exception if the
-    ``DROP_INVALID_MESSAGES`` attribute is set to ``True``. If it is ``False``,
-    a :py:class:`ConsumerException` is raised.
-
-    .. note:: Since 3.17, :class:`~rejected.consumer.SmartConsumer` and
-        :class:`~rejected.consumer.SmartPublishingConsumer` have been combined
-        into the same class.
-
-    """
-
-    def publish_message(
-        self,
-        exchange,
-        routing_key,
-        properties,
-        body,
-        no_serialization=False,
-        no_encoding=False,
-        channel=None,
-    ):
-        """Publish a message to RabbitMQ on the same channel the original
-        message was received on.
-
-        By default, if you pass a non-string object to the body and the
-        properties have a supported content-type set, the body will be
-        auto-serialized in the specified content-type.
-
-        If the properties do not have a timestamp set, it will be set to the
-        current time.
-
-        If you specify a content-encoding in the properties and the encoding is
-        supported, the body will be auto-encoded.
-
-        Both of these behaviors can be disabled by setting no_serialization or
-        no_encoding to True.
-
-        :param str exchange: The exchange to publish to
-        :param str routing_key: The routing key to publish with
-        :param dict properties: The message properties
-        :param mixed body: The message body to publish
-        :param bool no_serialization: Turn off auto-serialization of the body
-        :param bool no_encoding: Turn off auto-encoding of the body
-        :param str channel: The channel/connection name to use. If it is not
-            specified, the channel that the message was delivered on is used.
-
-        """
-        # Auto-serialize the content if needed
-        is_string = isinstance(body, (str, bytes))
-        if (
-            not no_serialization
-            and not is_string
-            and properties.get('content_type')
-        ):
-            self.logger.debug('Auto-serializing message body')
-            body = self._auto_serialize(properties.get('content_type'), body)
-
-        # Auto-encode the message body if needed
-        if not no_encoding and properties.get('content_encoding'):
-            self.logger.debug('Auto-encoding message body')
-            body = self._auto_encode(properties.get('content_encoding'), body)
-
-        # Publish the message
-        self.logger.debug('Publishing message to %s:%s', exchange, routing_key)
-        self._publish_channel(channel).basic_publish(
-            exchange=exchange,
-            routing_key=routing_key,
-            properties=self._get_pika_properties(properties),
-            body=body,
-        )
-
-    @property
-    def body(self):
-        """Return the message body, unencoded if needed,
-        deserialized if possible.
-
-        :rtype: any
-
-        """
-        # Return a materialized view of the body if it has been previously set
-        if self._message_body:
-            return self._message_body
-
-        # Handle bzip2 compressed content
-        elif self.content_encoding == 'bzip2':
-            self._message_body = self._decode_bz2(self._message.body)
-
-        # Handle zlib compressed content
-        elif self.content_encoding == 'gzip':
-            self._message_body = self._decode_gzip(self._message.body)
-
-        # Else we want to assign self._message.body to self._message_body
-        else:
-            self._message_body = self._message.body
-
-        # Handle the auto-deserialization
-        if self.content_type == 'application/json':
-            self._message_body = self._load_json_value(self._message_body)
-
-        elif umsgpack and self.content_type == 'application/msgpack':
-            self._message_body = self._load_msgpack_value(self._message_body)
-
-        elif self.content_type in PICKLE_MIME_TYPES:
-            self._message_body = self._load_pickle_value(self._message_body)
-
-        elif self.content_type == 'application/x-plist':
-            self._message_body = self._load_plist_value(self._message_body)
-
-        elif self.content_type == 'text/csv':
-            self._message_body = self._load_csv_value(self._message_body)
-
-        elif bs4 and self.content_type in BS4_MIME_TYPES:
-            self._message_body = self._load_bs4_value(self._message_body)
-
-        elif self.content_type in YAML_MIME_TYPES:
-            self._message_body = self._load_yaml_value(self._message_body)
-
-        # Return the message body
-        return self._message_body
 
     def _auto_encode(self, content_encoding, value):
         """Based upon the value of the content_encoding, encode the value.
@@ -1382,17 +1245,14 @@ class SmartConsumer(Consumer):
             self.logger.debug('Auto-serializing content as csv')
             return self._dump_csv_value(value)
 
-        # If it's XML or HTML auto
         elif (
             bs4
             and isinstance(value, bs4.BeautifulSoup)
-            and content_type in ('text/html', 'text/xml')
+            and content_type in BS4_MIME_TYPES
         ):
-            self.logger.debug('Dumping BS4 object into HTML or XML')
             return self._dump_bs4_value(value)
 
-        # If it's YAML, load the content via pyyaml into a dict
-        elif self.content_type in YAML_MIME_TYPES:
+        elif content_type in YAML_MIME_TYPES:
             self.logger.debug('Auto-serializing content as YAML')
             return self._dump_yaml_value(value)
 
@@ -1540,7 +1400,7 @@ class SmartConsumer(Consumer):
             raise ConsumerException('BeautifulSoup4 is not enabled')
         if isinstance(value, bytes):
             value = value.decode('utf-8')
-        return bs4.BeautifulSoup(value)
+        return bs4.BeautifulSoup(value, 'html.parser')
 
     @staticmethod
     def _load_csv_value(value):
@@ -1624,25 +1484,173 @@ class SmartConsumer(Consumer):
         :raises: ConsumerException
 
         """
-        return yaml.load(value)
+        return yaml.safe_load(value)
 
+    def _republish_dropped_message(self, reason):
+        """Republish the original message that was received it is being dropped
+        by the consumer.
 
-class SmartPublishingConsumer(SmartConsumer):
-    """Deprecated, functionality moved to
-    :class:`rejected.consumer.SmartConsumer`
+        This for internal use and should not be extended or used directly.
 
-        .. deprecated:: 3.17.0
+        :param str reason: The reason the message was dropped
 
-    """
+        """
+        self.logger.debug('Republishing dropped message: %s', reason)
+        properties = dict(self._message.properties) or {}
+        if 'headers' not in properties or not properties['headers']:
+            properties['headers'] = {}
+        properties['headers']['X-Dropped-By'] = self.name
+        properties['headers']['X-Dropped-Reason'] = reason
+        properties['headers']['X-Dropped-Timestamp'] = datetime.datetime.now(
+            tz=datetime.UTC
+        ).isoformat()
+        properties['headers']['X-Original-Exchange'] = self._message.exchange
+        properties['headers']['X-Original-Queue'] = self._process.queue_name
 
-    def __init__(self, *args, **kwargs):
-        warnings.warn(
-            'SmartPublishingConsumer deprecated, all functionality '
-            'moved to SmartConsumer',
-            category=DeprecationWarning,
-            stacklevel=2,
+        self._message.channel.basic_publish(
+            exchange=self._drop_exchange,
+            routing_key=self._message.routing_key,
+            body=self._message.body,
+            properties=pika.BasicProperties(**properties),
         )
-        super().__init__(*args, **kwargs)
+
+    def _republish_processing_error(self, error):
+        """Republish the original message that was received because a
+        :exc:`~rejected.consumer.ProcessingException` was raised.
+
+        This for internal use and should not be extended or used directly.
+
+        Add a header that keeps track of how many times this has happened
+        for this message.
+
+        :param str error: The string value for the exception
+
+        """
+        self.logger.debug('Republishing due to ProcessingException')
+        properties = dict(self._message.properties) or {}
+        if 'headers' not in properties or not properties['headers']:
+            properties['headers'] = {}
+
+        properties['headers']['X-Original-Exchange'] = self._message.exchange
+        properties['headers']['X-Original-Queue'] = self._process.queue_name
+
+        if error:
+            properties['headers']['X-Processing-Exception'] = error
+
+        if _PROCESSING_EXCEPTIONS not in properties['headers']:
+            properties['headers'][_PROCESSING_EXCEPTIONS] = 1
+        else:
+            try:
+                properties['headers'][_PROCESSING_EXCEPTIONS] += 1
+            except TypeError:
+                properties['headers'][_PROCESSING_EXCEPTIONS] = 1
+
+        self._message.channel.basic_publish(
+            exchange=self._error_exchange,
+            routing_key=self._message.routing_key,
+            body=self._message.body,
+            properties=pika.BasicProperties(**properties),
+        )
+
+    # Avro support
+
+    def _avro_schema(self, message_type: str) -> dict:
+        """Return the parsed Avro schema for the given message type, loading
+        and caching it on first access.
+
+        :param str message_type: The AMQP ``type`` property value
+        :rtype: dict
+
+        """
+        if message_type not in self._avro_schemas:
+            self.logger.debug('Loading Avro schema for %s', message_type)
+            self._avro_schemas[message_type] = self._load_avro_schema(
+                message_type
+            )
+        return self._avro_schemas[message_type]
+
+    def _load_avro_schema(self, message_type: str) -> dict:
+        """Load and return the Avro schema for the given message type.
+
+        If ``schema_uri_format`` is set in the consumer's config, the URI
+        is built by calling ``schema_uri_format.format(message_type)`` and
+        the scheme determines how the schema is fetched:
+
+        - ``file:///path/to/schemas/{0}.avsc`` — read from disk
+        - ``http://`` / ``https://`` — fetched via HTTP GET
+
+        If ``schema_uri_format`` is not set, override this method to provide
+        your own schema loading logic.
+
+        :param str message_type: The AMQP ``type`` property value
+        :rtype: dict
+        :raises: NotImplementedError if schema_uri_format is not configured
+                 and this method has not been overridden
+
+        """
+        uri_format = (
+            self._process.consumer_config.schema_uri_format
+            if self._process
+            else None
+        )
+        if not uri_format:
+            raise NotImplementedError(
+                'Set schema_uri_format in consumer config or override '
+                '_load_avro_schema to provide Avro schemas'
+            )
+        uri = uri_format.format(message_type)
+        self.logger.debug(
+            'Loading Avro schema for %s from %s', message_type, uri
+        )
+        if uri.startswith('file://'):
+            file_path = pathlib.Path(uri[7:])
+            try:
+                return json.loads(file_path.read_text())
+            except FileNotFoundError:
+                raise ConsumerException(
+                    f'Missing Avro schema file: {file_path}'
+                ) from None
+        if uri.startswith(('http://', 'https://')):
+            if not _requests:
+                raise ConsumerException(
+                    'requests is required for HTTP schema loading; '
+                    'install rejected[avro]'
+                )
+            response = _requests.get(uri, timeout=30)
+            if not response.ok:
+                raise ConsumerException(
+                    f'Failed to fetch Avro schema for {message_type}: '
+                    f'HTTP {response.status_code}'
+                )
+            return response.json()
+        raise ConsumerException(
+            f'Unsupported schema URI scheme in {uri!r}; '
+            f'use file:// or http(s)://'
+        )
+
+    @staticmethod
+    def _deserialize_avro(avro_schema: dict, data: bytes) -> dict:
+        """Deserialize an Avro datum using the provided schema.
+
+        :param dict avro_schema: The parsed Avro schema
+        :param bytes data: The Avro-encoded bytes to deserialize
+        :rtype: dict
+
+        """
+        return fastavro.schemaless_reader(io.BytesIO(data), avro_schema)
+
+    @staticmethod
+    def _serialize_avro(avro_schema: dict, data: dict) -> bytes:
+        """Serialize a data structure into an Avro datum.
+
+        :param dict avro_schema: The parsed Avro schema
+        :param dict data: The value to serialize
+        :rtype: bytes
+
+        """
+        stream = io.BytesIO()
+        fastavro.schemaless_writer(stream, avro_schema, data)
+        return stream.getvalue()
 
 
 class RejectedException(Exception):

@@ -37,6 +37,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+avro = ["fastavro>=1.7", "requests>=2.28"]
 html = ["beautifulsoup4"]
 msgpack = ["u-msgpack-python"]
 sentry = ["sentry-sdk>=2,<3"]

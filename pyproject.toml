@@ -141,5 +141,10 @@ warn_return_any = true
 warn_unused_configs = true
 
 [[tool.mypy.overrides]]
-module = ["pika.*", "bs4", "umsgpack", "fastavro", "yaml"]
+module = [
+    "pika.*", "bs4", "umsgpack", "fastavro", "yaml",
+    "prometheus_client",
+    "sentry_sdk", "sentry_sdk.integrations",
+    "sentry_sdk.integrations.logging"
+]
 ignore_missing_imports = true

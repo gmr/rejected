@@ -340,11 +340,10 @@ class Connection(state.State):
             * ciphers
 
         """
-        ssl_options = self.config.ssl_options or None
-        if not ssl_options:
+        if not self.config.ssl_options:
             return None
 
-        protocol = ssl_options.get('protocol', ssl.PROTOCOL_TLS_CLIENT)
+        protocol = self.config.ssl_options.protot, ssl.PROTOCOL_TLS_CLIENT)
         if isinstance(protocol, str):
             protocol = getattr(ssl, protocol)
         context = ssl.SSLContext(protocol)

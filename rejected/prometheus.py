@@ -7,6 +7,7 @@ Requires ``rejected[prometheus]`` to be installed.
 
 import logging
 import re
+import typing
 
 try:
     import prometheus_client
@@ -15,7 +16,7 @@ except ImportError:
 
 LOGGER = logging.getLogger(__name__)
 
-_metrics: dict = {}
+_metrics: dict[str, typing.Any] = {}
 _previous: dict[str, dict[str, float]] = {}
 _started = False
 
@@ -240,7 +241,7 @@ def observe(
         _get_custom_gauge(key).labels(consumer=consumer_name).set(value)
 
 
-def update(stats: dict) -> None:
+def update(stats: dict[str, typing.Any]) -> None:
     """Update Prometheus counters and gauges from the MCP stats dict.
 
     :param dict stats: The stats dict from MCP.calculate_stats()

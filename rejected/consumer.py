@@ -40,7 +40,7 @@ import warnings
 import pika
 from pika import channel, exceptions
 
-from . import codecs, data, log, models
+from . import codecs, log, models
 
 LOGGER = logging.getLogger(__name__)
 
@@ -48,7 +48,6 @@ try:
     import sentry_sdk
 except ImportError:
     sentry_sdk = None
-
 
 # Re-export for backward compatibility
 AVRO_DATUM_MIME_TYPE = codecs.AVRO_DATUM_MIME_TYPE
@@ -73,14 +72,14 @@ class _Consumer:
     ACK_PROCESSING_EXCEPTIONS = False
 
     def __init__(
-        self,
-        settings,
-        process,
-        drop_invalid_messages=None,
-        message_type=None,
-        error_exchange=None,
-        error_max_retry=None,
-        drop_exchange=None,
+            self,
+            settings,
+            process,
+            drop_invalid_messages=None,
+            message_type=None,
+            error_exchange=None,
+            error_max_retry=None,
+            drop_exchange=None,
     ):
         """Creates a new instance of the consumer class. To perform
         initialization tasks, extend
@@ -234,14 +233,14 @@ class _Consumer:
         return self.MESSAGE_AGE_KEY
 
     def publish_message(
-        self,
-        exchange,
-        routing_key,
-        properties,
-        body,
-        no_serialization=False,
-        no_encoding=False,
-        channel=None,
+            self,
+            exchange,
+            routing_key,
+            properties,
+            body,
+            no_serialization=False,
+            no_encoding=False,
+            channel=None,
     ):
         """Publish a message to RabbitMQ on the same channel the original
         message was received on.
@@ -276,9 +275,9 @@ class _Consumer:
 
         if not no_serialization and not is_string:
             if (
-                codecs.fastavro
-                and content_type == codecs.AVRO_DATUM_MIME_TYPE
-                and properties.get('type')
+                    codecs.fastavro
+                    and content_type == codecs.AVRO_DATUM_MIME_TYPE
+                    and properties.get('type')
             ):
                 self.logger.debug(
                     'Auto-serializing message body as Avro datum'
@@ -450,7 +449,7 @@ class _Consumer:
         :param message_in: The message to process
         :type message_in: :class:`rejected.data.Message`
         :param measurement: For collecting per-message instrumentation
-        :type measurement: :class:`rejected.data.Measurement`
+        :type measurement: :class:`rejected.measurement.Measurement`
         :rtype: bool
 
         """
@@ -487,9 +486,9 @@ class _Consumer:
 
         # Ensure there is a correlation ID
         self._correlation_id = (
-            message_in.properties.correlation_id
-            or message_in.properties.message_id
-            or str(uuid.uuid4())
+                message_in.properties.correlation_id
+                or message_in.properties.message_id
+                or str(uuid.uuid4())
         )
 
         if self.message_type:
@@ -883,12 +882,12 @@ class Consumer(_Consumer):
     """
 
     def reply(
-        self,
-        response_body,
-        properties,
-        auto_id=True,
-        exchange=None,
-        reply_to=None,
+            self,
+            response_body,
+            properties,
+            auto_id=True,
+            exchange=None,
+            reply_to=None,
     ):
         """Reply to the received message.
 
@@ -980,8 +979,8 @@ class Consumer(_Consumer):
             raise MessageException(str(err)) from err
 
         if (
-            codecs.fastavro
-            and self.content_type == codecs.AVRO_DATUM_MIME_TYPE
+                codecs.fastavro
+                and self.content_type == codecs.AVRO_DATUM_MIME_TYPE
         ):
             if self.message_type:
                 self._message_body = codecs.decode_avro(
@@ -1014,7 +1013,7 @@ class Consumer(_Consumer):
         if not self._message:
             return None
         return (
-            self._message.properties.content_encoding or ''
+                self._message.properties.content_encoding or ''
         ).lower() or None
 
     @property

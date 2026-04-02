@@ -1,40 +1,8 @@
-"""Rejected data objects.
-
-The pydantic models (:class:`~rejected.models.Properties`,
-:class:`~rejected.models.InternalMessage`, :class:`~rejected.models.Result`)
-live in :mod:`rejected.models`. This module re-exports the result code
-constants for backward compatibility and provides :class:`Measurement`.
-
-"""
+"""Rejected data objects."""
 
 import collections
 import contextlib
 import time
-
-from . import models
-
-# Re-export result codes as module-level constants for backward compat
-MESSAGE_ACK = models.Result.MESSAGE_ACK
-MESSAGE_DROP = models.Result.MESSAGE_DROP
-MESSAGE_REQUEUE = models.Result.MESSAGE_REQUEUE
-CONSUMER_EXCEPTION = models.Result.CONSUMER_EXCEPTION
-MESSAGE_EXCEPTION = models.Result.MESSAGE_EXCEPTION
-PROCESSING_EXCEPTION = models.Result.PROCESSING_EXCEPTION
-UNHANDLED_EXCEPTION = models.Result.UNHANDLED_EXCEPTION
-
-
-def Message(  # noqa: N802
-    connection, channel, method, properties, body, returned=False
-):
-    """Create an InternalMessage from pika callback arguments."""
-    return models.InternalMessage.from_pika(
-        connection, channel, method, properties, body, returned=returned
-    )
-
-
-def Properties(properties=None):  # noqa: N802
-    """Create a Properties model from a pika BasicProperties."""
-    return models.Properties.from_pika(properties)
 
 
 class Measurement:

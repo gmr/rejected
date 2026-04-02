@@ -58,7 +58,7 @@ except ImportError:
     sentry_sdk = None
 
 from . import config as config_module
-from . import consumer, data, process
+from . import consumer, process
 
 LOGGER = logging.getLogger(__name__)
 
@@ -127,7 +127,8 @@ class AsyncTestCase(unittest.IsolatedAsyncioTestCase):
         return {}
 
     def create_message(
-        self, message, properties=None, exchange='rejected', routing_key='test'
+            self, message, properties=None, exchange='rejected',
+            routing_key='test'
     ):
         """Create a message instance for use with the consumer in testing.
 
@@ -141,8 +142,8 @@ class AsyncTestCase(unittest.IsolatedAsyncioTestCase):
         if not properties:
             properties = {}
         if (
-            isinstance(message, dict)
-            and properties.get('content_type') == 'application/json'
+                isinstance(message, dict)
+                and properties.get('content_type') == 'application/json'
         ):
             message = json.dumps(message)
         return data.Message(
@@ -194,19 +195,19 @@ class AsyncTestCase(unittest.IsolatedAsyncioTestCase):
         """Return the :py:class:`rejected.data.Measurement` for the currently
         assigned measurement object to the consumer.
 
-        :rtype: :class:`rejected.data.Measurement`
+        :rtype: :class:`rejected.measurement.Measurement`
 
         """
         return self.consumer._measurement
 
     async def process_message(
-        self,
-        message_body=None,
-        content_type='application/json',
-        message_type=None,
-        properties=None,
-        exchange='rejected',
-        routing_key='routing-key',
+            self,
+            message_body=None,
+            content_type='application/json',
+            message_type=None,
+            properties=None,
+            exchange='rejected',
+            routing_key='routing-key',
     ):
         """Process a message as if it were being delivered by RabbitMQ. When
         invoked, an AMQP message will be locally created and passed into the
@@ -241,7 +242,7 @@ class AsyncTestCase(unittest.IsolatedAsyncioTestCase):
         :raises: :exc:`rejected.consumer.ConsumerException`
         :raises: :exc:`rejected.consumer.MessageException`
         :raises: :exc:`rejected.consumer.ProcessingException`
-        :rtype: :class:`rejected.data.Measurement`
+        :rtype: :class:`rejected.measurement.Measurement`
 
         """
         properties = properties or {}

@@ -13,404 +13,19 @@ import multiprocessing
 import os
 import profile
 import signal
-import ssl
 import time
 import typing
 from os import path
 
-import pika
-from pika import exceptions
-from pika.adapters import asyncio_connection
-
 try:
     import sentry_sdk
-    from sentry_sdk.integrations.logging import LoggingIntegration
+    from sentry_sdk import logging as sentry_logging
 except ImportError:
-    sentry_sdk = None
-    LoggingIntegration = None
+    sentry_sdk, sentry_logging = None, None
 
-from . import __version__, data, state, statsd, utils
-from . import config as config_module
+from . import __version__, connection, models, state, statsd, utils
 
 LOGGER = logging.getLogger(__name__)
-
-
-class Callbacks:
-    """Slotted callback classes to fix namedtuple issue in 3.9"""
-
-    __slots__ = [
-        'on_blocked',
-        'on_closed',
-        'on_confirmation',
-        'on_connection_failure',
-        'on_delivery',
-        'on_ready',
-        'on_return',
-        'on_unblocked',
-    ]
-
-    def __init__(
-        self,
-        on_ready,
-        on_connection_failure,
-        on_closed,
-        on_blocked,
-        on_unblocked,
-        on_confirmation,
-        on_delivery,
-        on_return,
-    ):
-        self.on_ready = on_ready
-        self.on_connection_failure = on_connection_failure
-        self.on_closed = on_closed
-        self.on_blocked = on_blocked
-        self.on_unblocked = on_unblocked
-        self.on_confirmation = on_confirmation
-        self.on_delivery = on_delivery
-        self.on_return = on_return
-
-
-class Connection(state.State):
-    HB_INTERVAL = 300
-    STATE_CLOSED = 0x08
-    STATES: typing.ClassVar[dict[int, str]] = {
-        **state.State.STATES,
-        STATE_CLOSED: 'Closed',
-    }
-
-    def __init__(
-        self,
-        name,
-        config,
-        consumer_name,
-        should_consume,
-        publisher_confirmations,
-        io_loop,
-        callbacks,
-    ):
-        super().__init__()
-        self.blocked = False
-        self.callbacks = callbacks
-        self.channel = None
-        self.config = config
-        self.should_consume = should_consume
-        self.consumer_tag = f'{consumer_name}-{os.getpid()}'
-        self.io_loop = io_loop
-        self.name = name
-        self.publisher_confirm = publisher_confirmations
-        self.connection = self.connect()
-
-    @property
-    def is_closed(self):
-        return self.is_stopped
-
-    def connect(self):
-        """Setup the AsyncioConnection which connects to RabbitMQ
-        automatically with connection callbacks for when the connection is
-        opened, when there is an error opening a connection or when a
-        previously opened connection is closed.
-
-        """
-        self.set_state(self.STATE_CONNECTING)
-        return asyncio_connection.AsyncioConnection(
-            self._connection_parameters,
-            on_open_callback=self.on_open,
-            on_open_error_callback=self.on_open_error,
-            on_close_callback=self.on_closed,
-            custom_ioloop=self.io_loop,
-        )
-
-    def shutdown(self):
-        if self.is_shutting_down:
-            LOGGER.debug('Connection %s is already shutting down', self.name)
-            return
-
-        self.set_state(self.STATE_SHUTTING_DOWN)
-        LOGGER.debug('Connection %s is shutting down', self.name)
-        if self.is_active:
-            LOGGER.debug(
-                'Connection %s is sending a Basic.Cancel to RabbitMQ',
-                self.name,
-            )
-            self.channel.basic_cancel(
-                self.on_consumer_cancelled, self.consumer_tag
-            )
-        else:
-            self.channel.close()
-
-    def on_open(self, connection):
-        """Invoked when the connection is opened
-
-        :type connection: pika.adapters.asyncio_connection.AsyncioConnection
-
-        """
-        LOGGER.debug('Connection %s is open (%r)', self.name, connection)
-        self.connection = connection
-        try:
-            self.connection.channel(on_open_callback=self.on_channel_open)
-        except exceptions.ConnectionClosed:
-            LOGGER.warning('Channel open on closed connection')
-            self.set_state(self.STATE_CLOSED)
-            self.callbacks.on_closed(self.name)
-            return
-        self.connection.add_on_connection_blocked_callback(self.on_blocked)
-        self.connection.add_on_connection_unblocked_callback(self.on_unblocked)
-
-    def on_open_error(self, *args, **kwargs):
-        LOGGER.error('Connection %s failure %r %r', self.name, args, kwargs)
-        self.on_failure()
-
-    def on_closed(self, *args, **kwargs):
-        if self.is_connecting:
-            LOGGER.error(
-                'Connection %s failure while connecting: (%r %r)',
-                self.name,
-                args,
-                kwargs,
-            )
-            self.on_failure()
-        elif not self.is_closed:
-            self.set_state(self.STATE_CLOSED)
-            LOGGER.info(
-                'Connection %s closed (%r %r)', self.name, args, kwargs
-            )
-            self.callbacks.on_closed(self.name)
-
-    def on_blocked(self, *args, **kwargs):
-        LOGGER.warning(
-            'Connection %s is blocked: (%r %r)', self.name, args, kwargs
-        )
-        self.blocked = True
-        self.callbacks.on_blocked(self.name)
-
-    def on_unblocked(self, *args, **kwargs):
-        LOGGER.warning(
-            'Connection %s is unblocked: (%r %r)', self.name, args, kwargs
-        )
-        self.blocked = False
-        self.callbacks.on_unblocked(self.name)
-
-    def on_channel_open(self, channel):
-        """This method is invoked by pika when the channel has been opened. It
-        will change the state to IDLE, add the callbacks and setup the channel
-        to start consuming.
-
-        :param pika.channel.Channel channel: The channel object
-
-        """
-        LOGGER.debug('Connection %s channel is now open', self.name)
-        self.set_state(self.STATE_IDLE)
-        self.channel = channel
-        self.channel.add_on_close_callback(self.on_channel_closed)
-        self.channel.add_on_cancel_callback(self.on_consumer_cancelled)
-        self.channel.add_on_return_callback(self.on_return)
-        if self.publisher_confirm:
-            self.channel.confirm_delivery(callback=self.on_confirmation)
-        self.callbacks.on_ready(self.name)
-
-    def on_channel_closed(self, _channel, closing_reason):
-        """Invoked by pika when RabbitMQ unexpectedly closes the channel.
-        Channels are usually closed if you attempt to do something that
-        violates the protocol, such as re-declare an exchange or queue with
-        different parameters. In this case, we'll close the connection
-        to shutdown the object.
-
-        :param pika.channel.Channel _channel: The AMQP Channel
-        :param pika.exceptions.ChannelClosed closing_reason: The channel
-            closed exception
-
-        """
-        del self.channel
-
-        try:
-            reply_code = closing_reason.reply_code
-            reply_text = closing_reason.reply_text
-        except AttributeError:
-            reply_code = 0
-            reply_text = 'unknown'
-
-        if reply_code <= 0 or reply_code == 404:
-            LOGGER.error(
-                'Channel Error (%r): %s', reply_code, reply_text or 'unknown'
-            )
-            self.on_failure()
-        elif self.is_shutting_down:
-            LOGGER.debug('Connection %s closing', self.name)
-            self.connection.close()
-        elif self.is_running:
-            LOGGER.warning(
-                'Connection %s channel was closed: (%s) %s',
-                self.name,
-                reply_code,
-                reply_text,
-            )
-
-            try:
-                self.connection.channel(on_open_callback=self.on_channel_open)
-            except (
-                exceptions.ConnectionWrongStateError,
-                exceptions.ConnectionClosed,
-            ) as error:
-                LOGGER.warning(
-                    'Error raised while creating new channel: %s', error
-                )
-                self.on_failure()
-            else:
-                self.set_state(self.STATE_CONNECTING)
-
-    def on_failure(self):
-        LOGGER.info('Connection failure, terminating connection')
-        self.set_state(self.STATE_CLOSED)
-        try:
-            self.connection.close()
-        except (AttributeError, exceptions.ConnectionWrongStateError):
-            pass
-        del self.connection
-        self.callbacks.on_connection_failure(self.name)
-
-    def consume(self, queue_name, no_ack, prefetch_count):
-        """Configure quality of service and issue Basic.Consume command
-
-        :param str queue_name: The queue to consume from. Use the empty string
-            to specify the most recent server-named queue for this channel
-        :param bool no_ack: if set to True, automatic acknowledgement mode
-            will be used (see http://www.rabbitmq.com/confirms.html).
-            This corresponds with the 'no_ack' parameter in the basic.consume
-            AMQP 0.9.1 method
-        :param int prefetch_count: Specifies a prefetch window in terms of
-            whole messages.
-
-        """
-        self.set_state(self.STATE_ACTIVE)
-        self.channel.basic_qos(
-            callback=self.on_qos_set,
-            prefetch_size=0,
-            prefetch_count=prefetch_count,
-            global_qos=False,
-        )
-        self.channel.basic_consume(
-            queue=queue_name,
-            on_message_callback=self.on_delivery,
-            auto_ack=no_ack,
-            consumer_tag=self.consumer_tag,
-        )
-
-    def on_qos_set(self, frame):
-        """Invoked by pika when the QoS is set
-
-        :param pika.frame.Frame frame: The QoS Frame
-
-        """
-        LOGGER.debug('Connection %s QoS was set: %r', self.name, frame)
-
-    def on_consumer_cancelled(self, *args, **kwargs):
-        """Invoked by pika when a ``Basic.Cancel`` or ``Basic.CancelOk``
-        is received.
-
-        """
-        LOGGER.info('Connection %s consumer has been cancelled', self.name)
-        if not self.is_shutting_down:
-            self.set_state(self.STATE_SHUTTING_DOWN)
-        self.channel.close()
-
-    def on_confirmation(self, frame):
-        """Invoked by pika when RabbitMQ responds to a Basic.Publish RPC
-        command, passing in either a Basic.Ack or Basic.Nack frame with
-        the delivery tag of the message that was published. The delivery tag
-        is an integer counter indicating the message number that was sent
-        on the channel via Basic.Publish.
-
-        :param pika.frame.Method frame: Basic.Ack or Basic.Nack frame
-
-        """
-        delivered = frame.method.NAME.split('.')[1].lower() == 'ack'
-        LOGGER.debug(
-            'Connection %s received delivery confirmation (Delivered: %s)',
-            self.name,
-            delivered,
-        )
-        self.callbacks.on_confirmation(
-            self.name, delivered, frame.method.delivery_tag
-        )
-
-    def on_delivery(self, channel, method, properties, body):
-        self.callbacks.on_delivery(
-            self.name, channel, method, properties, body
-        )
-
-    def on_return(self, channel, method, properties, body):
-        self.callbacks.on_return(self.name, channel, method, properties, body)
-
-    @property
-    def _connection_parameters(self):
-        """Return connection parameters for a pika connection.
-
-        :rtype: pika.ConnectionParameters
-
-        """
-        return pika.ConnectionParameters(
-            self.config.host,
-            self.config.port,
-            self.config.vhost,
-            pika.PlainCredentials(self.config.user, self.config.password),
-            ssl_options=self._ssl_options,
-            frame_max=self.config.frame_max,
-            socket_timeout=self.config.socket_timeout,
-            heartbeat=self.config.heartbeat_interval,
-        )
-
-    @property
-    def _ssl_options(self):
-        """Return the `pika.SSLOptions` parameter for the pika connection
-
-        The expected ssl_options values in the config are:
-            * ca_certs
-            * ca_path
-            * ca_data
-            * prototcol
-            * certfile
-            * keyfile
-            * password
-            * ciphers
-
-        :rtype: `pika.SSLOptions`|None
-
-        """
-        ssl_options = self.config.ssl_options or None
-        if not ssl_options:
-            return
-
-        protocol = ssl_options.get('protocol', ssl.PROTOCOL_TLS_CLIENT)
-        if isinstance(protocol, str):
-            protocol = getattr(ssl, protocol)
-        context = ssl.SSLContext(protocol)
-
-        # Load a set of certification authority (CA) certificates
-        if any(
-            [
-                ssl_options.get('ca_certs'),
-                ssl_options.get('ca_path'),
-                ssl_options.get('ca_data'),
-            ]
-        ):
-            context.load_verify_locations(
-                ssl_options.get('ca_certs'),
-                ssl_options.get('ca_path'),
-                ssl_options.get('ca_data'),
-            )
-
-        # Load a private key and the corresponding certificate
-        if ssl_options.get('certfile'):
-            certfile = ssl_options['certfile']
-            keyfile = ssl_options.get('keyfile')
-            password = ssl_options.get('password')
-            context.load_cert_chain(certfile, keyfile, password)
-
-        # Set the available ciphers for sockets created with this context
-        if ssl_options.get('ciphers'):
-            context.set_ciphers(ssl_options['ciphers'])
-
-        return pika.SSLOptions(context=context)
 
 
 class Process(multiprocessing.Process, state.State):
@@ -458,15 +73,15 @@ class Process(multiprocessing.Process, state.State):
             kwargs = {}
         super().__init__(group, target, name, args, kwargs)
         self.active_message = None
-        self.callbacks = Callbacks(
-            self.on_connection_ready,
-            self.on_connection_failure,
-            self.on_connection_closed,
-            self.on_connection_blocked,
-            self.on_connection_unblocked,
-            self.on_confirmation,
-            self.on_delivery,
-            self.on_returned,
+        self.callbacks = models.Callbacks(
+            on_ready=self.on_connection_ready,
+            on_connection_failure=self.on_connection_failure,
+            on_closed=self.on_connection_closed,
+            on_blocked=self.on_connection_blocked,
+            on_unblocked=self.on_connection_unblocked,
+            on_confirmation=self.on_confirmation,
+            on_delivery=self.on_delivery,
+            on_return=self.on_returned,
         )
         self.connections = {}
         self.consumer = None
@@ -475,7 +90,6 @@ class Process(multiprocessing.Process, state.State):
         self.counters = collections.Counter()
 
         self.delivery_time = None
-        self.ioloop = None
         self.last_failure = 0
         self.last_stats_time = None
         self.measurement = None
@@ -494,7 +108,7 @@ class Process(multiprocessing.Process, state.State):
         self.state_start = time.time()
         self.statsd = None
 
-    def ack_message(self, message):
+    def ack_message(self, message: models.Message) -> None:
         """Acknowledge the message on the broker and log the ack
 
         :param message: The message to acknowledge
@@ -539,12 +153,15 @@ class Process(multiprocessing.Process, state.State):
 
         """
         self.set_state(self.STATE_CONNECTING)
-        for connection in self.consumer_config.connections:
-            name, confirm, consume = connection, False, True
-            if isinstance(connection, config_module.ConnectionRef):
-                name = connection.name
-                confirm = connection.confirm
-                consume = connection.consume
+        for conn in self.consumer_config.connections:
+            name = conn.name
+            confirm = conn.confirm
+
+            name, confirm, consume = conn, False, True
+            if isinstance(conn, models.ConnectionRef):
+                name = conn.name
+                confirm = conn.confirm
+                consume = conn.consume
 
             if name not in self.config.connections:
                 LOGGER.critical(
@@ -554,13 +171,12 @@ class Process(multiprocessing.Process, state.State):
                 )
                 continue
 
-            self.connections[name] = Connection(
+            self.connections[name] = connection.Connection(
                 name,
                 self.config.connections[name],
                 self.consumer_name,
                 consume,
                 confirm,
-                self.ioloop,
                 self.callbacks,
             )
 
@@ -768,7 +384,7 @@ class Process(multiprocessing.Process, state.State):
         :param str body: The message body
 
         """
-        message = data.Message(name, channel, method, properties, body)
+        message = models.Message(name, channel, method, properties, body)
         if self.is_processing:
             self.pending.append(message)
         else:
@@ -1156,7 +772,9 @@ class Process(multiprocessing.Process, state.State):
                 'rejected.consumer.MessageException',
                 'rejected.consumer.ProcessingException',
             ],
-            'integrations': [LoggingIntegration(level=None, event_level=None)],
+            'integrations': [
+                sentry_logging.LoggingIntegration(level=None, event_level=None)
+            ],
         }
         if os.environ.get('ENVIRONMENT'):
             kwargs['environment'] = os.environ['ENVIRONMENT']

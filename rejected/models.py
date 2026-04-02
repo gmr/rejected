@@ -1,9 +1,98 @@
-"""Pydantic message model for the FunctionalConsumer."""
+"""Pydantic models for rejected configuration and messages."""
 
 import datetime
 import typing
 
 import pydantic
+
+# Configuration models
+
+
+class ConnectionRef(pydantic.BaseModel):
+    """A named connection reference used in a consumer's connections list."""
+
+    name: str
+    consume: bool = True
+    confirm: bool = False
+
+
+class ConnectionConfig(pydantic.BaseModel):
+    """A single RabbitMQ connection configuration."""
+
+    model_config = pydantic.ConfigDict(populate_by_name=True)
+
+    host: str = 'localhost'
+    port: int = 5672
+    user: str = 'guest'
+    password: str = pydantic.Field('guest', alias='pass')
+    ssl: bool = False
+    vhost: str = '/'
+    heartbeat_interval: int = 300
+    frame_max: int = 131072
+    socket_timeout: int = 10
+    ssl_options: dict[str, typing.Any] = pydantic.Field(default_factory=dict)
+
+
+class StatsdConfig(pydantic.BaseModel):
+    enabled: bool = False
+    host: str = 'localhost'
+    port: int = 8125
+    prefix: str = 'rejected'
+    tcp: bool = False
+    include_hostname: bool = True
+
+
+class PrometheusConfig(pydantic.BaseModel):
+    enabled: bool = False
+    port: int = 9090
+
+
+class StatsConfig(pydantic.BaseModel):
+    log: bool = False
+    prometheus: PrometheusConfig = pydantic.Field(
+        default_factory=PrometheusConfig
+    )
+    statsd: StatsdConfig = pydantic.Field(default_factory=StatsdConfig)
+
+
+class ConsumerConfig(pydantic.BaseModel):
+    consumer: str | None = None
+    connections: list[str | ConnectionRef] = pydantic.Field(
+        default_factory=list
+    )
+    qty: int = 1
+    queue: str | None = None
+    ack: bool = True
+    qos_prefetch: int = 1
+    max_errors: int = 5
+    error_exchange: str | None = None
+    schema_uri_format: str | None = None
+    sentry_dsn: str | None = None
+    drop_exchange: str | None = None
+    drop_invalid_messages: bool | None = None
+    message_type: str | None = None
+    error_max_retry: int | None = None
+    config: dict[str, typing.Any] = pydantic.Field(default_factory=dict)
+
+
+class Config(pydantic.BaseModel):
+    """Application configuration."""
+
+    model_config = pydantic.ConfigDict(populate_by_name=True)
+
+    poll_interval: float = 60.0
+    sentry_dsn: str | None = None
+    stats: StatsConfig = pydantic.Field(default_factory=StatsConfig)
+    connections: dict[str, ConnectionConfig] = pydantic.Field(
+        default_factory=dict, alias='Connections'
+    )
+    consumers: dict[str, ConsumerConfig] = pydantic.Field(
+        default_factory=dict, alias='Consumers'
+    )
+    logging: dict[str, typing.Any] = pydantic.Field(default_factory=dict)
+
+
+# Message model
 
 
 class Message(pydantic.BaseModel):

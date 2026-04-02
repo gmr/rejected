@@ -5,7 +5,7 @@ YAML's format, like Python code, is whitespace dependent for control structure i
 blocks. If you're having problems with your rejected configuration, the first
 thing you should do is ensure that the YAML syntax is correct.
 
-The configuration file is split into three main sections: `Application`, `Daemon`, and `Logging`.
+The configuration file is split into two main sections: `Application` and `Logging`.
 
 ## Application
 
@@ -15,7 +15,7 @@ The application section of the configuration is broken down into multiple top-le
 |--------|-------------|
 | `poll_interval` | How often rejected should poll consumer processes for status in seconds (int/float) |
 | `sentry_dsn` | If Sentry support is installed, optionally set a global DSN for all consumers (str) |
-| `stats` | Enable and configure statsd metric submission (obj) |
+| `stats` | Enable and configure metrics submission via statsd and/or Prometheus (obj) |
 | `Connections` | A subsection with RabbitMQ connection information for consumers (obj) |
 | `Consumers` | Where each consumer type is configured (obj) |
 
@@ -24,19 +24,19 @@ The application section of the configuration is broken down into multiple top-le
 | Option | Description |
 |--------|-------------|
 | `log` | Toggle top-level logging of consumer process stats (bool) |
-| `influxdb` | Configure the submission of per-message measurements to InfluxDB (obj) |
+| `prometheus` | Configure the Prometheus metrics exporter (obj) |
 | `statsd` | Configure the submission of per-message measurements to statsd (obj) |
 
-#### influxdb
+#### prometheus
+
+Requires `rejected[prometheus]` to be installed.
 
 | Option | Description |
 |--------|-------------|
-| `scheme` | The scheme to use when submitting metrics to the InfluxDB server. Default: `http` (str) |
-| `host` | The hostname or ip address of the InfluxDB server. Default: `localhost` (str) |
-| `port` | The port of the influxdb server. Default: `8086` (int) |
-| `user` | An optional username to use when submitting measurements. (str) |
-| `password` | An optional password to use when submitting measurements. (str) |
-| `database` | The InfluxDB database to submit measurements to. Default: `rejected` (str) |
+| `enabled` | Toggle the Prometheus metrics HTTP endpoint on and off (bool) |
+| `port` | The port to serve the `/metrics` endpoint on. Default: `9090` (int) |
+
+See [Prometheus Metrics](#prometheus-metrics) below for the full list of exposed metrics.
 
 #### statsd
 
@@ -94,7 +94,7 @@ Each consumer entry should be a nested object with a unique name with consumer a
 | `message_type` | Used to validate the message type of a message before processing (str or list) |
 | `error_exchange` | The exchange to publish messages that raise `ProcessingException` to (str) |
 | `error_max_retry` | The number of `ProcessingException` raised on a message before dropping it (int) |
-| `influxdb_measurement` | When using InfluxDB, the measurement name for per-message measurements (str) |
+| `schema_uri_format` | Avro schema URI format with `{0}` placeholder for message type. Supports `file://` and `http(s)://` schemes. Requires `rejected[avro]` (str) |
 | `config` | Free-form key-value configuration section for the consumer (obj) |
 
 #### Consumer Connections
@@ -129,16 +129,6 @@ Structured connection options:
 | `name` | The connection name, as specified in the Connections section |
 | `consume` | Specify if the connection should consume on the connection (bool) |
 | `publisher_confirmation` | Enable publisher confirmations (bool) |
-
-## Daemon
-
-This section contains the settings required to run the application as a daemon:
-
-| Option | Description |
-|--------|-------------|
-| `user` | The username to run as when the process is daemonized (str) |
-| `group` | Optional group name to switch to when the process is daemonized (str) |
-| `pidfile` | The pidfile to write when the process is daemonized (str) |
 
 ## Logging
 
@@ -181,3 +171,59 @@ If your application is not logging anything, ensure that you have created a
 logger section in your configuration for your consumer package. For example, if
 your Consumer instance is named `myconsumer.MyConsumer`, make sure there is a
 `myconsumer` logger in the logging configuration.
+
+## Prometheus Metrics
+
+When `stats.prometheus.enabled` is `true` and `rejected[prometheus]` is installed,
+rejected exposes a `/metrics` HTTP endpoint on the configured port for Prometheus
+to scrape.
+
+### Built-in Counters
+
+All labeled by `consumer` name.
+
+| Metric | Description |
+|--------|-------------|
+| `rejected_messages_acked_total` | Messages acknowledged |
+| `rejected_messages_dropped_total` | Messages dropped |
+| `rejected_messages_failed_total` | Messages that resulted in errors |
+| `rejected_messages_nacked_total` | Messages negatively acknowledged |
+| `rejected_messages_processed_total` | Messages processed |
+| `rejected_messages_redelivered_total` | Redelivered messages |
+| `rejected_messages_requeued_total` | Messages requeued |
+| `rejected_processing_seconds_total` | Total processing time in seconds |
+| `rejected_exceptions_total` | Exceptions (labeled by `consumer` and `type`) |
+
+Exception `type` values: `consumer_exception`, `message_exception`,
+`processing_exception`, `unhandled_exception`.
+
+### Built-in Histograms
+
+All labeled by `consumer` name.
+
+| Metric | Description |
+|--------|-------------|
+| `rejected_processing_duration_seconds` | Per-message processing duration |
+| `rejected_message_age_seconds` | Age of messages at time of processing |
+
+### Built-in Gauges
+
+| Metric | Description |
+|--------|-------------|
+| `rejected_consumer_processes` | Number of active consumer processes |
+
+### Custom Metrics
+
+Metrics created via `Consumer.stats_add_duration`, `Consumer.stats_incr`, and
+`Consumer.stats_set_value` are automatically forwarded to Prometheus as
+dynamically created metrics:
+
+| Consumer Method | Prometheus Type | Metric Name Pattern |
+|----------------|----------------|---------------------|
+| `stats_add_duration(key, value)` | Histogram | `rejected_custom_{key}_seconds` |
+| `stats_track_duration(key)` | Histogram | `rejected_custom_{key}_seconds` |
+| `stats_incr(key, value)` | Counter | `rejected_custom_{key}_total` |
+| `stats_set_value(key, value)` | Gauge | `rejected_custom_{key}` |
+
+Metric names are sanitized: any characters not in `[a-zA-Z0-9_]` are replaced
+with underscores.

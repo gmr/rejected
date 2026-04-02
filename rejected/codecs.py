@@ -5,6 +5,8 @@ of message bodies. Avro schema loading is async via file I/O or HTTP.
 
 """
 
+from __future__ import annotations
+
 import asyncio
 import bz2
 import csv

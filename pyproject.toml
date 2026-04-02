@@ -40,6 +40,7 @@ dependencies = [
 avro = ["fastavro>=1.7", "requests>=2.28"]
 html = ["beautifulsoup4"]
 msgpack = ["u-msgpack-python"]
+prometheus = ["prometheus-client>=0.20"]
 sentry = ["sentry-sdk>=2,<3"]
 
 [project.scripts]

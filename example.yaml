@@ -5,6 +5,9 @@ Application:
   # sentry_dsn: https://[YOUR-SENTRY-DSN]
   stats:
     log: True
+    prometheus:
+      enabled: False
+      port: 9090
     statsd:
       enabled: False
       host: localhost

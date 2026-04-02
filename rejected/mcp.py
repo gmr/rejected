@@ -14,7 +14,7 @@ import time
 
 import psutil
 
-from . import __version__, process, state
+from . import __version__, process, prometheus, state
 
 LOGGER = logging.getLogger(__name__)
 
@@ -199,6 +199,16 @@ class MasterControlProgram(state.State):
         process_name = data_values['name']
         del data_values['name']
 
+        # Forward per-message observations to Prometheus
+        prometheus.observe(
+            consumer_name,
+            data_values.pop('durations', []),
+            data_values.pop('message_ages', []),
+            data_values.pop('custom_durations', {}),
+            data_values.pop('custom_counters', {}),
+            data_values.pop('custom_gauges', {}),
+        )
+
         # Add it to our last poll global data
         if consumer_name not in self.last_poll_results:
             self.last_poll_results[consumer_name] = {}
@@ -206,6 +216,7 @@ class MasterControlProgram(state.State):
 
         # Calculate the stats
         self.stats = self.calculate_stats(self.last_poll_results)
+        prometheus.update(self.stats)
 
     @staticmethod
     def consumer_keyword(counts):
@@ -225,9 +236,18 @@ class MasterControlProgram(state.State):
 
         """
         return {
+            process.Process.ACKED: 0,
+            process.Process.CONSUMER_EXCEPTION: 0,
+            process.Process.DROPPED: 0,
             process.Process.ERROR: 0,
+            process.Process.MESSAGE_EXCEPTION: 0,
+            process.Process.NACKED: 0,
             process.Process.PROCESSED: 0,
+            process.Process.PROCESSING_EXCEPTION: 0,
             process.Process.REDELIVERED: 0,
+            process.Process.REQUEUED: 0,
+            process.Process.TIME_SPENT: 0,
+            process.Process.UNHANDLED_EXCEPTION: 0,
         }
 
     def get_consumer_process(self, consumer, name):
@@ -587,6 +607,9 @@ class MasterControlProgram(state.State):
         """
         self.set_state(self.STATE_ACTIVE)
         self.setup_consumers()
+
+        if self.config.stats.prometheus.enabled:
+            prometheus.start(self.config.stats.prometheus.port)
 
         # Set the SIGCHLD handler for child creation errors
         signal.signal(signal.SIGCHLD, self.on_sigchld)

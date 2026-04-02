@@ -13,7 +13,7 @@ data from the consumer processes and report on it.
 
 - Automatic exception handling including connection management and consumer restarting
 - Smart consumer classes that can automatically decode and deserialize message bodies based upon message headers
-- Metrics logging and submission to statsd and InfluxDB
+- Metrics via statsd and/or Prometheus
 - Built-in profiling of consumer code
 - Ability to write asynchronous code in consumers allowing for parallel communication with external resources
 
@@ -26,8 +26,11 @@ pip install rejected
 For optional features:
 
 ```bash
-pip install rejected[html]     # HTML message body support
-pip install rejected[msgpack]  # MessagePack support
+pip install rejected[avro]        # Avro datum serialization
+pip install rejected[html]        # HTML message body support
+pip install rejected[msgpack]     # MessagePack support
+pip install rejected[prometheus]  # Prometheus metrics exporter
+pip install rejected[sentry]      # Sentry error reporting
 ```
 
 ## Quick Start

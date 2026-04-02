@@ -58,6 +58,7 @@ dev = [
     "coverage[toml]",
     "pre-commit",
     "ruff",
+    "types-pika"
 ]
 docs = [
     "mkdocs>=1.5,<2",
@@ -126,8 +127,17 @@ isort = {split-on-trailing-comma = false}
 max-complexity = 15
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**/*.py" = ["S"]
-"rejected/consumer.py" = ["B904", "BLE001", "C901", "S301", "S506"]
-"rejected/codecs.py" = ["S301"]
+"*.py" = ["S101", "S301"]
+"rejected/consumer.py" = ["B904", "BLE001", "C901", "S506"]
 "examples.py" = ["S311"]
+"tests/**/*.py" = ["S"]
 "utils/**/*.py" = ["S311"]
+
+[tool.mypy]
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+
+[[tool.mypy.overrides]]
+module = "pika.*"
+ignore_missing_imports = true

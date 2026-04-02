@@ -333,7 +333,7 @@ class Connection(state.State):
             * ca_certs
             * ca_path
             * ca_data
-            * prototcol
+            * protocol
             * certfile
             * keyfile
             * password

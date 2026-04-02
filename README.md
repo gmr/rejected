@@ -41,7 +41,7 @@ Full documentation is available at [https://rejected.readthedocs.io](https://rej
 ## Example Consumer
 
 ```python
-from rejected import consumer, models
+from rejected import consumer
 import logging
 
 LOGGER = logging.getLogger(__name__)
@@ -49,6 +49,6 @@ LOGGER = logging.getLogger(__name__)
 
 class Test(consumer.Consumer):
 
-    async def process(self, message: models.Message) -> None:
-        LOGGER.debug('In Test.process: %s', message.body)
+    async def process(self) -> None:
+        LOGGER.debug('In Test.process: %s', self.body)
 ```

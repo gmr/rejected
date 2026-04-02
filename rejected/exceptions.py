@@ -29,9 +29,8 @@ class RejectedException(Exception):
         else:
             self.args = args
         self.metric: str | None = kwargs.pop('metric', None)
-        self.value: str = kwargs.pop(
-            'value', '{!r} {!r}' if not args else args[0]
-        )
+        raw_value = kwargs.pop('value', '{!r} {!r}' if not args else args[0])
+        self.value: str = str(raw_value)
         self.kwargs = kwargs
 
     def __str__(self) -> str:

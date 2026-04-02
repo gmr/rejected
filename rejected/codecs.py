@@ -12,6 +12,7 @@ import json
 import logging
 import pickle
 import plistlib
+import typing
 import zlib
 
 import yaml
@@ -54,26 +55,28 @@ class EncodeError(Exception):
     """Raised when a message body cannot be serialized or encoded."""
 
 
-def decode(body, content_type, content_encoding):
+def decode(
+    body: bytes,
+    content_type: str | None,
+    content_encoding: str | None,
+) -> typing.Any:
     """Decode and deserialize a message body.
 
     Handles content_encoding (gzip, bzip2) first, then content_type dispatch.
     Returns the raw body if no matching codec is found.
 
-    :param bytes body: The raw message body
-    :param str|None content_type: MIME content type
-    :param str|None content_encoding: Content encoding (gzip, bzip2)
+    :param body: The raw message body
+    :param content_type: MIME content type
+    :param content_encoding: Content encoding (gzip, bzip2)
     :returns: The decoded/deserialized body
     :raises DecodeError: When deserialization fails
 
     """
-    # Handle content encoding first
     if content_encoding == 'bzip2':
         body = bz2.decompress(body)
     elif content_encoding == 'gzip':
         body = zlib.decompress(body)
 
-    # Handle content type
     if content_type == 'application/json':
         return _load_json(body)
     if umsgpack and content_type == 'application/msgpack':
@@ -81,7 +84,7 @@ def decode(body, content_type, content_encoding):
     if content_type in PICKLE_MIME_TYPES:
         return pickle.loads(body)
     if content_type == 'application/x-plist':
-        return _load_plist(body)
+        return plistlib.loads(body)
     if content_type == 'text/csv':
         return _load_csv(body)
     if bs4 and content_type in BS4_MIME_TYPES:
@@ -92,7 +95,11 @@ def decode(body, content_type, content_encoding):
     return body
 
 
-def encode(body, content_type, content_encoding):
+def encode(
+    body: typing.Any,
+    content_type: str | None,
+    content_encoding: str | None,
+) -> typing.Any:
     """Serialize and encode a message body.
 
     Handles content_type serialization first (if body is not str/bytes),
@@ -100,13 +107,12 @@ def encode(body, content_type, content_encoding):
     Returns body unchanged if no matching codec is found.
 
     :param body: The message body to serialize
-    :param str|None content_type: MIME content type
-    :param str|None content_encoding: Content encoding (gzip, bzip2)
+    :param content_type: MIME content type
+    :param content_encoding: Content encoding (gzip, bzip2)
     :returns: The serialized/encoded body
     :raises EncodeError: When serialization fails
 
     """
-    # Serialize by content type if body is not already str/bytes
     if not isinstance(body, (str, bytes)):
         if content_type == 'application/json':
             body = json.dumps(body, ensure_ascii=True).encode('utf-8')
@@ -115,7 +121,7 @@ def encode(body, content_type, content_encoding):
         elif content_type in PICKLE_MIME_TYPES:
             body = pickle.dumps(body)
         elif content_type == 'application/x-plist':
-            body = _dump_plist(body)
+            body = plistlib.dumps(body)
         elif content_type == 'text/csv':
             body = _dump_csv(body)
         elif (
@@ -127,11 +133,9 @@ def encode(body, content_type, content_encoding):
         elif content_type in YAML_MIME_TYPES:
             body = yaml.dump(body)
 
-    # Handle content encoding
     if content_encoding:
-        if not isinstance(body, bytes):
-            if isinstance(body, str):
-                body = body.encode('utf-8')
+        if isinstance(body, str):
+            body = body.encode('utf-8')
         if content_encoding == 'gzip':
             body = zlib.compress(body)
         elif content_encoding == 'bzip2':
@@ -140,13 +144,13 @@ def encode(body, content_type, content_encoding):
     return body
 
 
-def decode_avro(body, schema):
+def decode_avro(body: bytes, schema: dict[str, typing.Any]) -> typing.Any:
     """Deserialize an Avro datum.
 
-    :param bytes body: The Avro-encoded bytes
-    :param dict schema: The parsed Avro schema
+    :param body: The Avro-encoded bytes
+    :param schema: The parsed Avro schema
     :returns: The deserialized data
-    :rtype: dict
+    :raises DecodeError: If fastavro is not installed
 
     """
     if not fastavro:
@@ -156,13 +160,15 @@ def decode_avro(body, schema):
     return fastavro.schemaless_reader(io.BytesIO(body), schema)
 
 
-def encode_avro(body, schema):
+def encode_avro(
+    body: dict[str, typing.Any], schema: dict[str, typing.Any]
+) -> bytes:
     """Serialize to an Avro datum.
 
-    :param dict body: The data to serialize
-    :param dict schema: The parsed Avro schema
+    :param body: The data to serialize
+    :param schema: The parsed Avro schema
     :returns: The Avro-encoded bytes
-    :rtype: bytes
+    :raises EncodeError: If fastavro is not installed
 
     """
     if not fastavro:
@@ -174,13 +180,10 @@ def encode_avro(body, schema):
     return stream.getvalue()
 
 
-# --- Internal helpers ---
-
-
-def _load_json(value):
+def _load_json(value: bytes | str) -> typing.Any:
     """Deserialize a JSON value.
 
-    :param str|bytes value: The JSON string or bytes
+    :param value: The JSON string or bytes
     :returns: The deserialized Python object
     :raises DecodeError: If the value is not valid JSON
 
@@ -193,10 +196,10 @@ def _load_json(value):
         raise DecodeError(str(error)) from error
 
 
-def _load_msgpack(value):
+def _load_msgpack(value: bytes) -> typing.Any:
     """Deserialize a MessagePack value.
 
-    :param bytes value: The msgpack bytes
+    :param value: The msgpack bytes
     :returns: The deserialized Python object
     :raises DecodeError: If the value cannot be unpacked
 
@@ -207,29 +210,13 @@ def _load_msgpack(value):
         raise DecodeError(str(error)) from error
 
 
-def _load_plist(value):
-    """Deserialize a plist value.
-
-    :param bytes value: The plist bytes
-    :returns: The deserialized Python object (typically a dict)
-
-    """
-    if hasattr(plistlib, 'loads'):
-        return plistlib.loads(value)
-    try:
-        return plistlib.readPlistFromString(value)
-    except AttributeError:
-        return plistlib.readPlistFromBytes(value)
-
-
-def _load_csv(value):
+def _load_csv(value: bytes | str) -> csv.DictReader[str]:
     """Deserialize a CSV value into a :class:`csv.DictReader`.
 
     The dialect is auto-detected from the first 1024 bytes.
 
-    :param str|bytes value: The CSV string or bytes
+    :param value: The CSV string or bytes
     :returns: A DictReader over the parsed rows
-    :rtype: csv.DictReader
 
     """
     if isinstance(value, bytes):
@@ -240,12 +227,11 @@ def _load_csv(value):
     return csv.DictReader(csv_buffer, dialect=dialect)
 
 
-def _load_bs4(value):
+def _load_bs4(value: bytes | str) -> typing.Any:
     """Parse an HTML or XML string into a BeautifulSoup object.
 
-    :param str|bytes value: The HTML or XML string
+    :param value: The HTML or XML string
     :returns: The parsed document
-    :rtype: bs4.BeautifulSoup
     :raises DecodeError: If BeautifulSoup is not installed
 
     """
@@ -256,28 +242,11 @@ def _load_bs4(value):
     return bs4.BeautifulSoup(value, 'html.parser')
 
 
-def _dump_plist(value):
-    """Serialize a dict to plist format.
-
-    :param dict value: The value to serialize
-    :returns: The plist bytes
-    :rtype: bytes
-
-    """
-    if hasattr(plistlib, 'dumps'):
-        return plistlib.dumps(value)
-    try:
-        return plistlib.writePlistToString(value).encode('utf-8')
-    except AttributeError:
-        return plistlib.writePlistToBytes(value)
-
-
-def _dump_csv(value):
+def _dump_csv(value: list[list[typing.Any]]) -> str:
     """Serialize a list of rows to CSV format.
 
-    :param list value: A list of lists (rows) to serialize
+    :param value: A list of lists (rows) to serialize
     :returns: The CSV string
-    :rtype: str
 
     """
     buff = io.StringIO()

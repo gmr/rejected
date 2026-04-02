@@ -98,10 +98,10 @@ class Connection(state.State):
             self.callbacks.on_closed(self.name)
             return
         self.connection.add_on_connection_blocked_callback(
-            self.on_blocked  # type: ignore[arg-type]
+            self.on_blocked,  # type: ignore[arg-type]
         )
         self.connection.add_on_connection_unblocked_callback(
-            self.on_unblocked  # type: ignore[arg-type]
+            self.on_unblocked,  # type: ignore[arg-type]
         )
 
     def on_open_error(

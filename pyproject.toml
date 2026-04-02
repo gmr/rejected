@@ -56,9 +56,11 @@ Documentation = "https://rejected.readthedocs.io"
 dev = [
     "build",
     "coverage[toml]",
+    "mypy",
     "pre-commit",
     "ruff",
-    "types-pika"
+    "types-pika",
+    "types-PyYAML"
 ]
 docs = [
     "mkdocs>=1.5,<2",
@@ -139,5 +141,5 @@ warn_return_any = true
 warn_unused_configs = true
 
 [[tool.mypy.overrides]]
-module = "pika.*"
+module = ["pika.*", "bs4", "umsgpack", "fastavro"]
 ignore_missing_imports = true

@@ -79,7 +79,7 @@ def decode(body, content_type, content_encoding):
     if umsgpack and content_type == 'application/msgpack':
         return _load_msgpack(body)
     if content_type in PICKLE_MIME_TYPES:
-        return pickle.loads(body)  # noqa: S301
+        return pickle.loads(body)
     if content_type == 'application/x-plist':
         return _load_plist(body)
     if content_type == 'text/csv':
@@ -151,8 +151,7 @@ def decode_avro(body, schema):
     """
     if not fastavro:
         raise DecodeError(
-            'fastavro is required for Avro support; '
-            'install rejected[avro]'
+            'fastavro is required for Avro support; install rejected[avro]'
         )
     return fastavro.schemaless_reader(io.BytesIO(body), schema)
 
@@ -168,8 +167,7 @@ def encode_avro(body, schema):
     """
     if not fastavro:
         raise EncodeError(
-            'fastavro is required for Avro support; '
-            'install rejected[avro]'
+            'fastavro is required for Avro support; install rejected[avro]'
         )
     stream = io.BytesIO()
     fastavro.schemaless_writer(stream, schema, body)
@@ -180,6 +178,13 @@ def encode_avro(body, schema):
 
 
 def _load_json(value):
+    """Deserialize a JSON value.
+
+    :param str|bytes value: The JSON string or bytes
+    :returns: The deserialized Python object
+    :raises DecodeError: If the value is not valid JSON
+
+    """
     if isinstance(value, bytes):
         value = value.decode('utf-8')
     try:
@@ -189,6 +194,13 @@ def _load_json(value):
 
 
 def _load_msgpack(value):
+    """Deserialize a MessagePack value.
+
+    :param bytes value: The msgpack bytes
+    :returns: The deserialized Python object
+    :raises DecodeError: If the value cannot be unpacked
+
+    """
     try:
         return umsgpack.unpackb(value)
     except ValueError as error:
@@ -196,6 +208,12 @@ def _load_msgpack(value):
 
 
 def _load_plist(value):
+    """Deserialize a plist value.
+
+    :param bytes value: The plist bytes
+    :returns: The deserialized Python object (typically a dict)
+
+    """
     if hasattr(plistlib, 'loads'):
         return plistlib.loads(value)
     try:
@@ -205,6 +223,15 @@ def _load_plist(value):
 
 
 def _load_csv(value):
+    """Deserialize a CSV value into a :class:`csv.DictReader`.
+
+    The dialect is auto-detected from the first 1024 bytes.
+
+    :param str|bytes value: The CSV string or bytes
+    :returns: A DictReader over the parsed rows
+    :rtype: csv.DictReader
+
+    """
     if isinstance(value, bytes):
         value = value.decode('utf-8')
     csv_buffer = io.StringIO(value)
@@ -214,6 +241,14 @@ def _load_csv(value):
 
 
 def _load_bs4(value):
+    """Parse an HTML or XML string into a BeautifulSoup object.
+
+    :param str|bytes value: The HTML or XML string
+    :returns: The parsed document
+    :rtype: bs4.BeautifulSoup
+    :raises DecodeError: If BeautifulSoup is not installed
+
+    """
     if not bs4:
         raise DecodeError('BeautifulSoup4 is not enabled')
     if isinstance(value, bytes):
@@ -222,6 +257,13 @@ def _load_bs4(value):
 
 
 def _dump_plist(value):
+    """Serialize a dict to plist format.
+
+    :param dict value: The value to serialize
+    :returns: The plist bytes
+    :rtype: bytes
+
+    """
     if hasattr(plistlib, 'dumps'):
         return plistlib.dumps(value)
     try:
@@ -231,6 +273,13 @@ def _dump_plist(value):
 
 
 def _dump_csv(value):
+    """Serialize a list of rows to CSV format.
+
+    :param list value: A list of lists (rows) to serialize
+    :returns: The CSV string
+    :rtype: str
+
+    """
     buff = io.StringIO()
     writer = csv.writer(buff, quotechar='"', quoting=csv.QUOTE_ALL)
     writer.writerows(value)

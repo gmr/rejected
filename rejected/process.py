@@ -352,10 +352,7 @@ class Connection(state.State):
             self.config.host,
             self.config.port,
             self.config.vhost,
-            pika.PlainCredentials(
-                self.config.user,
-                self.config.password,
-            ),
+            pika.PlainCredentials(self.config.user, self.config.password),
             ssl_options=self._ssl_options,
             frame_max=self.config.frame_max,
             socket_timeout=self.config.socket_timeout,
@@ -1157,9 +1154,7 @@ class Process(multiprocessing.Process, state.State):
                 'rejected.consumer.MessageException',
                 'rejected.consumer.ProcessingException',
             ],
-            'integrations': [
-                LoggingIntegration(level=None, event_level=None),
-            ],
+            'integrations': [LoggingIntegration(level=None, event_level=None)],
         }
         if os.environ.get('ENVIRONMENT'):
             kwargs['environment'] = os.environ['ENVIRONMENT']

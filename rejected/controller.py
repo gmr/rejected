@@ -110,8 +110,7 @@ class Controller:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog='rejected',
-        description='RabbitMQ consumer framework',
+        prog='rejected', description='RabbitMQ consumer framework'
     )
     parser.add_argument(
         '-c',
@@ -155,9 +154,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help='Override the consumer quantity (use with -o)',
     )
     parser.add_argument(
-        '--version',
-        action='version',
-        version=f'%(prog)s {__version__}',
+        '--version', action='version', version=f'%(prog)s {__version__}'
     )
     return parser
 

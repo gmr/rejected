@@ -168,8 +168,7 @@ class ControllerReloadTests(unittest.TestCase):
             )
         else:
             load_target = mock.patch(
-                'rejected.controller.config_module.load',
-                return_value=new_cfg,
+                'rejected.controller.config_module.load', return_value=new_cfg
             )
 
         with mock.patch(

@@ -11,10 +11,7 @@ from . import test_state
 
 
 class TestMCP(test_state.TestState):
-    CONFIG: typing.ClassVar[dict] = {
-        'poll_interval': 30.0,
-        'Consumers': {},
-    }
+    CONFIG: typing.ClassVar[dict] = {'poll_interval': 30.0, 'Consumers': {}}
 
     @mock.patch.object(multiprocessing, 'Queue')
     def setUp(self, _mock_queue_unused):

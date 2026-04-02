@@ -388,12 +388,7 @@ class MasterControlProgram(state.State):
         :rtype: dict
 
         """
-        return Consumer(
-            0,
-            {},
-            config.qty,
-            config.queue or consumer_name,
-        )
+        return Consumer(0, {}, config.qty, config.queue or consumer_name)
 
     def new_process(self, consumer_name):
         """Create a new consumer instances

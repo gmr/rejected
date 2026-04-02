@@ -92,6 +92,7 @@ target-version = "py311"
 
 [tool.ruff.format]
 quote-style = "single"
+skip-magic-trailing-comma = true
 
 [tool.ruff.lint]
 select = [
@@ -119,6 +120,7 @@ ignore = [
     "UP040",
 ]
 flake8-quotes = {inline-quotes = "single"}
+isort = {split-on-trailing-comma = false}
 
 [tool.ruff.lint.mccabe]
 max-complexity = 15

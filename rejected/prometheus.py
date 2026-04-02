@@ -190,9 +190,7 @@ def _get_custom_gauge(key: str) -> 'prometheus_client.Gauge':
     if metric_key not in _metrics:
         safe = _safe_name(key)
         _metrics[metric_key] = prometheus_client.Gauge(
-            f'rejected_custom_{safe}',
-            f'Custom gauge: {key}',
-            ['consumer'],
+            f'rejected_custom_{safe}', f'Custom gauge: {key}', ['consumer']
         )
     return _metrics[metric_key]
 

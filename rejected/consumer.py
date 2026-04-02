@@ -70,6 +70,178 @@ _EXCEPTION_FROM = 'X-Exception-From'
 _UNSET = object()
 
 
+class _Consumer:
+    DROP_EXCHANGE = None
+    DROP_INVALID_MESSAGES = False
+    MESSAGE_TYPE = None
+    ERROR_EXCHANGE = 'errors'
+    ERROR_MAX_RETRY = None
+    MESSAGE_AGE_KEY = 'message_age'
+    ACK_PROCESSING_EXCEPTIONS = False
+
+    def __init__(
+        self,
+        settings,
+        process,
+        drop_invalid_messages=None,
+        message_type=None,
+        error_exchange=None,
+        error_max_retry=None,
+        drop_exchange=None,
+    ):
+        """Creates a new instance of the consumer class. To perform
+        initialization tasks, extend
+        :meth:`~rejected.consumer.BaseConsumer.initialize`.
+
+        """
+        self._channels = {}
+        self._correlation_id = None
+        self._drop_exchange = drop_exchange or self.DROP_EXCHANGE
+        self._drop_invalid = (
+            self.DROP_INVALID_MESSAGES
+            if drop_invalid_messages is None
+            else drop_invalid_messages
+        )
+        self._error_exchange = error_exchange or self.ERROR_EXCHANGE
+        self._error_max_retry = (
+            self.ERROR_MAX_RETRY
+            if error_max_retry is None
+            else error_max_retry
+        )
+        self._avro_schemas: dict = {}
+        self._finished = False
+        self._message = None
+        self._message_type = message_type or self.MESSAGE_TYPE
+        self._measurement = None
+        self._message_body = _UNSET
+        self._process = process
+        self._settings = settings
+
+        # Create a logger that attaches correlation ID to the record
+        self._logger = logging.getLogger(
+            settings.get('_import_module', __name__)
+        )
+        self.logger = log.CorrelationAdapter(self._logger, self)
+
+        # Set a Sentry context for the consumer
+        self.set_sentry_context('consumer', self.name)
+
+        self._initialized = False
+
+    async def on_finish(self):
+        """Called after a message has been processed.
+
+        Override this method to perform cleanup, logging, etc.
+        This method is a counterpart to
+        :meth:`~rejected.consumer.Consumer.prepare`.  ``on_finish`` may
+        not produce any output, as it is called after all processing has
+        taken place.
+
+        If an exception is raised during the processing of a message,
+        :meth:`~rejected.consumer.Consumer.prepare` is not invoked.
+
+        """
+        self.logger.debug('on_finished invoked')
+
+    async def on_blocked(self, name):
+        """Called when a connection for this consumer is blocked.
+
+        Override this method to respond to being blocked.
+
+        .. versionadded:: 3.17
+
+        :param str name: The connection name that is blocked
+
+        """
+        self.logger.debug('Connection %s has been blocked', name)
+
+    async def on_unblocked(self, name):
+        """Called when a connection for this consumer is unblocked.
+
+        Override this method to respond to being blocked.
+
+        .. versionadded:: 3.17
+
+        :param str name: The connection name that is blocked
+
+        """
+        self.logger.debug('Connection %s has been unblocked', name)
+
+    def shutdown(self):
+        """Override to cleanly shutdown when rejected is stopping the consumer.
+
+        This could be used for closing database connections or other such
+        activities.
+
+        """
+        self.logger.debug('shutdown invoked')
+
+    # Utility Methods for use by Consumer Code
+
+    async def finish(self):
+        """Finishes message processing for the current message. If this is
+        called in :meth:`~rejected.consumer.Consumer.prepare`, the
+        :meth:`~rejected.consumer.Consumer.process` method is not invoked
+        for the current message.
+
+        """
+        if self._finished:
+            self.logger.warning('Finished called when already finished')
+            return
+        self._finished = True
+        await self.on_finish()
+
+    async def initialize(self):
+        """Extend this method for any initialization tasks that occur only when
+        the consumer class is created.
+
+        """
+        pass
+
+    async def prepare(self):
+        """Called when a message is received before
+        :meth:`~rejected.consumer.Consumer.process`.
+
+        .. note:: Asynchronous support: Define this method as ``async def``
+            to make it asynchronous.
+
+        If this method returns a coroutine or :class:`asyncio.Future`,
+        execution will not proceed until the Future has completed.
+
+        """
+        pass
+
+    async def process(self):
+        """Extend this method for implementing your Consumer logic.
+
+        If the message can not be processed and the Consumer should stop after
+        n failures to process messages, raise the
+        :exc:`~rejected.consumer.ConsumerException`.
+
+        .. note:: Asynchronous support: Define this method as ``async def``
+            to make it asynchronous.
+
+        :raises: :exc:`rejected.consumer.ConsumerException`
+        :raises: :exc:`rejected.consumer.MessageException`
+        :raises: :exc:`rejected.consumer.ProcessingException`
+
+        """
+        raise NotImplementedError
+
+    def set_sentry_context(self, tag, value):
+        """Set a context tag in Sentry for the given key and value.
+
+        :param str tag: The context tag name
+        :param str value: The context value
+
+        """
+        if sentry_sdk and self._process and self._process.sentry_client:
+            self.logger.debug(
+                'Setting sentry context for %s to %s', tag, value
+            )
+            sentry_sdk.set_tag(tag, value)
+
+
 class BaseConsumer:
     """Base consumer class that defines the contract between rejected and
     consumer applications.
@@ -148,100 +320,6 @@ class BaseConsumer:
 
     """
 
-    DROP_EXCHANGE = None
-    DROP_INVALID_MESSAGES = False
-    MESSAGE_TYPE = None
-    ERROR_EXCHANGE = 'errors'
-    ERROR_MAX_RETRY = None
-    MESSAGE_AGE_KEY = 'message_age'
-    ACK_PROCESSING_EXCEPTIONS = False
-
-    def __init__(
-        self,
-        settings,
-        process,
-        drop_invalid_messages=None,
-        message_type=None,
-        error_exchange=None,
-        error_max_retry=None,
-        drop_exchange=None,
-    ):
-        """Creates a new instance of the consumer class. To perform
-        initialization tasks, extend
-        :meth:`~rejected.consumer.BaseConsumer.initialize`.
-
-        """
-        self._channels = {}
-        self._correlation_id = None
-        self._drop_exchange = drop_exchange or self.DROP_EXCHANGE
-        self._drop_invalid = (
-            self.DROP_INVALID_MESSAGES
-            if drop_invalid_messages is None
-            else drop_invalid_messages
-        )
-        self._error_exchange = error_exchange or self.ERROR_EXCHANGE
-        self._error_max_retry = (
-            self.ERROR_MAX_RETRY
-            if error_max_retry is None
-            else error_max_retry
-        )
-        self._avro_schemas: dict = {}
-        self._finished = False
-        self._message = None
-        self._message_type = message_type or self.MESSAGE_TYPE
-        self._measurement = None
-        self._message_body = _UNSET
-        self._process = process
-        self._settings = settings
-
-        # Create a logger that attaches correlation ID to the record
-        self._logger = logging.getLogger(
-            settings.get('_import_module', __name__)
-        )
-        self.logger = log.CorrelationAdapter(self._logger, self)
-
-        # Set a Sentry context for the consumer
-        self.set_sentry_context('consumer', self.name)
-
-        self._initialized = False
-
-    async def initialize(self):
-        """Extend this method for any initialization tasks that occur only when
-        the consumer class is created.
-
-        """
-        pass
-
-    async def prepare(self):
-        """Called when a message is received before
-        :meth:`~rejected.consumer.Consumer.process`.
-
-        .. note:: Asynchronous support: Define this method as ``async def``
-            to make it asynchronous.
-
-        If this method returns a coroutine or :class:`asyncio.Future`,
-        execution will not proceed until the Future has completed.
-
-        """
-        pass
-
-    async def process(self):
-        """Extend this method for implementing your Consumer logic.
-
-        If the message can not be processed and the Consumer should stop after
-        n failures to process messages, raise the
-        :exc:`~rejected.consumer.ConsumerException`.
-
-        .. note:: Asynchronous support: Define this method as ``async def``
-            to make it asynchronous.
-
-        :raises: :exc:`rejected.consumer.ConsumerException`
-        :raises: :exc:`rejected.consumer.MessageException`
-        :raises: :exc:`rejected.consumer.ProcessingException`
-
-        """
-        raise NotImplementedError
-
     def message_age_key(self):
         """Return the key part that is used in submitting message age stats.
         Override this method to change the key part. This could be used to
@@ -253,69 +331,6 @@ class BaseConsumer:
 
         """
         return self.MESSAGE_AGE_KEY
-
-    async def on_finish(self):
-        """Called after a message has been processed.
-
-        Override this method to perform cleanup, logging, etc.
-        This method is a counterpart to
-        :meth:`~rejected.consumer.Consumer.prepare`.  ``on_finish`` may
-        not produce any output, as it is called after all processing has
-        taken place.
-
-        If an exception is raised during the processing of a message,
-        :meth:`~rejected.consumer.Consumer.prepare` is not invoked.
-
-        """
-        self.logger.debug('on_finished invoked')
-
-    async def on_blocked(self, name):
-        """Called when a connection for this consumer is blocked.
-
-        Override this method to respond to being blocked.
-
-        .. versionadded:: 3.17
-
-        :param str name: The connection name that is blocked
-
-        """
-        self.logger.debug('Connection %s has been blocked', name)
-
-    async def on_unblocked(self, name):
-        """Called when a connection for this consumer is unblocked.
-
-        Override this method to respond to being blocked.
-
-        .. versionadded:: 3.17
-
-        :param str name: The connection name that is blocked
-
-        """
-        self.logger.debug('Connection %s has been unblocked', name)
-
-    def shutdown(self):
-        """Override to cleanly shutdown when rejected is stopping the consumer.
-
-        This could be used for closing database connections or other such
-        activities.
-
-        """
-        self.logger.debug('shutdown invoked')
-
-    # Utility Methods for use by Consumer Code
-
-    async def finish(self):
-        """Finishes message processing for the current message. If this is
-        called in :meth:`~rejected.consumer.Consumer.prepare`, the
-        :meth:`~rejected.consumer.Consumer.process` method is not invoked
-        for the current message.
-
-        """
-        if self._finished:
-            self.logger.warning('Finished called when already finished')
-            return
-        self._finished = True
-        await self.on_finish()
 
     def publish_message(
         self,
@@ -466,19 +481,6 @@ class BaseConsumer:
 
         """
         self._process.send_exception_to_sentry(exc_info)
-
-    def set_sentry_context(self, tag, value):
-        """Set a context tag in Sentry for the given key and value.
-
-        :param str tag: The context tag name
-        :param str value: The context value
-
-        """
-        if sentry_sdk and self._process and self._process.sentry_client:
-            self.logger.debug(
-                'Setting sentry context for %s to %s', tag, value
-            )
-            sentry_sdk.set_tag(tag, value)
 
     def stats_add_duration(self, key, duration):
         """Add a duration to the per-message measurements
@@ -673,8 +675,7 @@ class BaseConsumer:
         ):
             if self.message_type:
                 self._message_body = codecs_module.decode_avro(
-                    self._message_body,
-                    self._avro_schema(self.message_type),
+                    self._message_body, self._avro_schema(self.message_type)
                 )
             else:
                 self.logger.warning(

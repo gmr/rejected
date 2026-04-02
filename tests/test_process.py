@@ -7,23 +7,14 @@ import typing
 import unittest
 from unittest import mock
 
-from rejected import (
-    __version__,
-    consumer,
-    data,
-    process,
-)
-from rejected import (
-    config as config_module,
-)
+from rejected import __version__, consumer, data, process
+from rejected import config as config_module
 
 from . import mocks, test_state
 
 # Raw config dict for building pydantic Config objects
 _CONFIG_RAW: typing.ClassVar[dict] = {
-    'stats': {
-        'statsd': {'enabled': False},
-    },
+    'stats': {'statsd': {'enabled': False}},
     'Connections': {
         'MockConnection': {
             'host': 'localhost',
@@ -45,9 +36,7 @@ _CONFIG_RAW: typing.ClassVar[dict] = {
             'user': 'guest',
             'pass': 'guest',
             'vhost': '/',
-            'ssl_options': {
-                'protocol': 2,
-            },
+            'ssl_options': {'protocol': 2},
         },
     },
     'Consumers': {
@@ -140,8 +129,7 @@ class TestProcess(unittest.IsolatedAsyncioTestCase, test_state.TestState):
         }
         with mock.patch('os.getpid', return_value=pid):
             self.assertEqual(
-                self._obj.get_config(cfg, number, name, conn),
-                expectation,
+                self._obj.get_config(cfg, number, name, conn), expectation
             )
 
     def test_get_consumer_with_invalid_consumer(self):
@@ -153,9 +141,7 @@ class TestProcess(unittest.IsolatedAsyncioTestCase, test_state.TestState):
         with mock.patch('logging.Logger.info') as info:
             self._obj.get_consumer(cfg)
             info.assert_called_with(
-                'Creating consumer %s v%s',
-                cfg.consumer,
-                mocks.__version__,
+                'Creating consumer %s v%s', cfg.consumer, mocks.__version__
             )
 
     @mock.patch.object(consumer.Consumer, '__init__', side_effect=ImportError)

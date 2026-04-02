@@ -46,7 +46,7 @@ latex_documents = [
         'rejected Documentation',
         'Gavin M. Roy',
         'manual',
-    ),
+    )
 ]
 
 man_pages = [
@@ -62,5 +62,5 @@ texinfo_documents = [
         'rejected',
         'One line description of project.',
         'Miscellaneous',
-    ),
+    )
 ]

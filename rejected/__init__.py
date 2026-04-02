@@ -11,14 +11,13 @@ logging.getLogger(__name__).addHandler(logging.NullHandler())
 
 from rejected.codecs import AVRO_DATUM_MIME_TYPE  # noqa: E402
 from rejected.consumer import (  # noqa: E402
-    BaseConsumer,
     Consumer,
     ConsumerException,
     FunctionalConsumer,
     MessageException,
     ProcessingException,
 )
-from rejected.models import Message  # noqa: E402
+from rejected.models import Message, Result  # noqa: E402
 
 __author__ = 'Gavin M. Roy <gavinmroy@gmail.com>'
 __since__ = '2009-09-10'
@@ -29,13 +28,13 @@ except PackageNotFoundError:
 
 __all__ = [
     'AVRO_DATUM_MIME_TYPE',
-    'BaseConsumer',
     'Consumer',
     'ConsumerException',
     'FunctionalConsumer',
     'Message',
     'MessageException',
     'ProcessingException',
+    'Result',
     '__author__',
     '__since__',
     '__version__',

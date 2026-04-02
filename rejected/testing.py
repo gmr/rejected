@@ -169,7 +169,6 @@ class AsyncTestCase(unittest.IsolatedAsyncioTestCase):
                 user_id=properties.get('user_id'),
             ),
             body=message,
-            returned=False,
         )
 
     def log_exception(self, msg_format, *args, exc_info):

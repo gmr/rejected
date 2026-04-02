@@ -768,7 +768,7 @@ class Process(multiprocessing.Process, state.State):
         :param str body: The message body
 
         """
-        message = data.Message(name, channel, method, properties, body, False)
+        message = data.Message(name, channel, method, properties, body)
         if self.is_processing:
             self.pending.append(message)
         else:
@@ -785,7 +785,9 @@ class Process(multiprocessing.Process, state.State):
         :param str body: The message body
 
         """
-        message = data.Message(name, channel, method, properties, body, True)
+        message = data.Message(
+            name, channel, method, properties, body, returned=True
+        )
         if self.is_processing:
             self.pending.append(message)
         else:

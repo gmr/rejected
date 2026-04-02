@@ -1,6 +1,7 @@
-"""Pydantic models for rejected configuration and messages."""
+"""Pydantic models for rejected configuration, messages, and data."""
 
 import datetime
+import enum
 import typing
 
 import pydantic
@@ -109,20 +110,136 @@ class Message(pydantic.BaseModel):
 
     model_config = pydantic.ConfigDict(arbitrary_types_allowed=True)
 
+    body: bytes
+
     app_id: str | None = None
-    body: typing.Any = None
     content_encoding: str | None = None
     content_type: str | None = None
     correlation_id: str | None = None
     exchange: str = ''
     expiration: str | None = None
-    headers: dict[str, typing.Any] = pydantic.Field(default_factory=dict)
+    headers: dict[str, bool | dict | float | int | str | bytes] = (
+        pydantic.Field(default_factory=dict)
+    )
     message_id: str | None = None
     message_type: str | None = None
     priority: int | None = None
     redelivered: bool = False
     reply_to: str | None = None
     returned: bool = False
-    routing_key: str = ''
+    routing_key: str
     timestamp: datetime.datetime | int | None = None
     user_id: str | None = None
+
+
+# Result codes
+
+
+class Result(enum.IntEnum):
+    """Result codes returned by Consumer.execute() to indicate how the
+    message should be handled by the process."""
+
+    MESSAGE_ACK = 1
+    MESSAGE_DROP = 2
+    MESSAGE_REQUEUE = 3
+    CONSUMER_EXCEPTION = 10
+    MESSAGE_EXCEPTION = 11
+    PROCESSING_EXCEPTION = 12
+    UNHANDLED_EXCEPTION = 13
+
+
+# Internal AMQP transport models
+
+
+class Properties(pydantic.BaseModel):
+    """AMQP Basic.Properties as a pydantic model."""
+
+    model_config = pydantic.ConfigDict(arbitrary_types_allowed=True)
+
+    app_id: str | None = None
+    content_encoding: str | None = None
+    content_type: str | None = None
+    correlation_id: str | None = None
+    delivery_mode: int | None = None
+    expiration: str | None = None
+    headers: dict[str, typing.Any] | None = None
+    message_id: str | None = None
+    priority: int | None = None
+    reply_to: str | None = None
+    timestamp: int | float | None = None
+    type: str | None = None
+    user_id: str | None = None
+
+    @classmethod
+    def from_pika(cls, properties) -> 'Properties':
+        """Create from a :class:`pika.spec.BasicProperties` instance.
+
+        :param properties: Pika properties object
+        :type properties: pika.spec.BasicProperties
+
+        """
+        if properties is None:
+            return cls()
+        return cls(
+            **{
+                attr: getattr(properties, attr, None)
+                for attr in cls.model_fields
+            }
+        )
+
+
+class InternalMessage(pydantic.BaseModel):
+    """Internal representation of an AMQP message as received from pika.
+
+    This is the framework's transport object — not the public
+    :class:`Message` model passed to ``FunctionalConsumer``.
+
+    """
+
+    model_config = pydantic.ConfigDict(arbitrary_types_allowed=True)
+
+    body: typing.Any = b''
+    channel: typing.Any = None
+    connection: typing.Any = ''
+    consumer_tag: str = ''
+    delivery_tag: int = 0
+    exchange: str = ''
+    method: typing.Any = None
+    properties: Properties = pydantic.Field(default_factory=Properties)
+    redelivered: bool = False
+    returned: bool = False
+    routing_key: str = ''
+
+    @classmethod
+    def from_pika(
+        cls,
+        connection: str,
+        channel: typing.Any,
+        method: typing.Any,
+        properties: typing.Any,
+        body: bytes,
+        returned: bool = False,
+    ) -> 'InternalMessage':
+        """Create from pika delivery callback arguments.
+
+        :param str connection: The connection name
+        :param channel: The pika channel
+        :param method: The pika method frame
+        :param properties: The pika BasicProperties
+        :param bytes body: The message body
+        :param bool returned: Whether the message was returned
+
+        """
+        return cls(
+            body=body,
+            channel=channel,
+            connection=connection,
+            consumer_tag=getattr(method, 'consumer_tag', ''),
+            delivery_tag=getattr(method, 'delivery_tag', 0),
+            exchange=getattr(method, 'exchange', ''),
+            method=method,
+            properties=Properties.from_pika(properties),
+            redelivered=getattr(method, 'redelivered', False),
+            returned=returned,
+            routing_key=getattr(method, 'routing_key', ''),
+        )

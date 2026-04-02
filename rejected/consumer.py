@@ -29,42 +29,23 @@ Supported MIME types are:
 """
 
 import asyncio
-import bz2
 import contextlib
-import csv
 import datetime
-import io
 import json
 import logging
 import pathlib
-import pickle
-import plistlib
 import sys
 import time
 import uuid
 import warnings
-import zlib
 
 import pika
-import yaml
 from pika import exceptions
 
-from . import data, log
+from . import codecs as codecs_module
+from . import data, log, models
 
 LOGGER = logging.getLogger(__name__)
-
-# Optional imports
-try:
-    import bs4
-except ImportError:
-    LOGGER.warning('BeautifulSoup not found, disabling html and xml support')
-    bs4 = None
-
-try:
-    import umsgpack
-except ImportError:
-    LOGGER.warning('umsgpack not found, disabling msgpack support')
-    umsgpack = None
 
 try:
     import sentry_sdk
@@ -78,25 +59,18 @@ except ImportError:
     fastavro = None
     _requests = None
 
+# Re-export for backward compatibility
+AVRO_DATUM_MIME_TYPE = codecs_module.AVRO_DATUM_MIME_TYPE
+
 DEFAULT_CHANNEL = 'default'
-AVRO_DATUM_MIME_TYPE = 'application/vnd.apache.avro.datum'
 _DROPPED_MESSAGE = 'X-Rejected-Dropped'
 _PROCESSING_EXCEPTIONS = 'X-Processing-Exceptions'
 _EXCEPTION_FROM = 'X-Exception-From'
 
 _UNSET = object()
 
-BS4_MIME_TYPES = ('text/html', 'text/xml')
-PICKLE_MIME_TYPES = (
-    'application/pickle',
-    'application/x-pickle',
-    'application/x-vnd.python.pickle',
-    'application/vnd.python.pickle',
-)
-YAML_MIME_TYPES = ('text/yaml', 'text/x-yaml')
 
-
-class Consumer:
+class BaseConsumer:
     """Base consumer class that defines the contract between rejected and
     consumer applications.
 
@@ -192,9 +166,9 @@ class Consumer:
         error_max_retry=None,
         drop_exchange=None,
     ):
-        """Creates a new instance of the :class:`~rejected.consumer.Consumer`
-        class. To perform initialization tasks, extend
-        :meth:`~rejected.consumer.Consumer.initialize`.
+        """Creates a new instance of the consumer class. To perform
+        initialization tasks, extend
+        :meth:`~rejected.consumer.BaseConsumer.initialize`.
 
         """
         self._channels = {}
@@ -233,7 +207,7 @@ class Consumer:
 
     async def initialize(self):
         """Extend this method for any initialization tasks that occur only when
-        the :class:`~rejected.consumer.Consumer` class is created.
+        the consumer class is created.
 
         """
         pass
@@ -381,27 +355,37 @@ class Consumer:
         """
         # Auto-serialize the content if needed
         is_string = isinstance(body, (str, bytes))
+        content_type = properties.get('content_type')
+        content_encoding = properties.get('content_encoding')
+
         if not no_serialization and not is_string:
-            content_type = properties.get('content_type')
             if (
                 fastavro
-                and content_type == AVRO_DATUM_MIME_TYPE
+                and content_type == codecs_module.AVRO_DATUM_MIME_TYPE
                 and properties.get('type')
             ):
                 self.logger.debug(
                     'Auto-serializing message body as Avro datum'
                 )
-                body = self._serialize_avro(
-                    self._avro_schema(properties['type']), body
-                )
+                try:
+                    body = codecs_module.encode_avro(
+                        body, self._avro_schema(properties['type'])
+                    )
+                except codecs_module.EncodeError as err:
+                    raise ConsumerException(str(err)) from err
             elif content_type:
                 self.logger.debug('Auto-serializing message body')
-                body = self._auto_serialize(content_type, body)
+                try:
+                    body = codecs_module.encode(body, content_type, None)
+                except codecs_module.EncodeError as err:
+                    raise ConsumerException(str(err)) from err
 
-        content_encoding = properties.get('content_encoding')
         if not no_encoding and content_encoding:
             self.logger.debug('Auto-encoding message body')
-            body = self._auto_encode(content_encoding, body)
+            try:
+                body = codecs_module.encode(body, None, content_encoding)
+            except codecs_module.EncodeError as err:
+                raise ConsumerException(str(err)) from err
 
         # Publish the message
         self.logger.debug('Publishing message to %s:%s', exchange, routing_key)
@@ -676,44 +660,34 @@ class Consumer:
         if self._message_body is not _UNSET:
             return self._message_body
 
-        if self.content_encoding == 'bzip2':
-            self._message_body = self._decode_bz2(self._message.body)
-        elif self.content_encoding == 'gzip':
-            self._message_body = self._decode_gzip(self._message.body)
-        else:
-            self._message_body = self._message.body
+        try:
+            self._message_body = codecs_module.decode(
+                self._message.body, None, self.content_encoding
+            )
+        except codecs_module.DecodeError as err:
+            raise MessageException(str(err)) from err
 
-        if fastavro and self.content_type == AVRO_DATUM_MIME_TYPE:
+        if (
+            fastavro
+            and self.content_type == codecs_module.AVRO_DATUM_MIME_TYPE
+        ):
             if self.message_type:
-                self._message_body = self._deserialize_avro(
-                    self._avro_schema(self.message_type), self._message_body
+                self._message_body = codecs_module.decode_avro(
+                    self._message_body,
+                    self._avro_schema(self.message_type),
                 )
             else:
                 self.logger.warning(
                     'Avro datum received without message_type; '
                     'returning raw bytes'
                 )
-
-        elif self.content_type == 'application/json':
-            self._message_body = self._load_json_value(self._message_body)
-
-        elif umsgpack and self.content_type == 'application/msgpack':
-            self._message_body = self._load_msgpack_value(self._message_body)
-
-        elif self.content_type in PICKLE_MIME_TYPES:
-            self._message_body = self._load_pickle_value(self._message_body)
-
-        elif self.content_type == 'application/x-plist':
-            self._message_body = self._load_plist_value(self._message_body)
-
-        elif self.content_type == 'text/csv':
-            self._message_body = self._load_csv_value(self._message_body)
-
-        elif bs4 and self.content_type in BS4_MIME_TYPES:
-            self._message_body = self._load_bs4_value(self._message_body)
-
-        elif self.content_type in YAML_MIME_TYPES:
-            self._message_body = self._load_yaml_value(self._message_body)
+        elif self.content_type:
+            try:
+                self._message_body = codecs_module.decode(
+                    self._message_body, self.content_type, None
+                )
+            except codecs_module.DecodeError as err:
+                raise MessageException(str(err)) from err
 
         # Return the message body
         return self._message_body
@@ -946,6 +920,18 @@ class Consumer:
         :rtype: bool
 
         """
+        result = await self._pre_execute(message_in, measurement)
+        if result is not None:
+            return result
+        return await self._run_consumer()
+
+    async def _pre_execute(self, message_in, measurement):
+        """Common setup/validation for message processing.
+
+        Returns a result code if the message should be dropped/rejected,
+        or None if processing should continue.
+
+        """
         LOGGER.debug('Received: %r', message_in)
         if not self._initialized:
             await self.initialize()
@@ -1004,20 +990,37 @@ class Consumer:
                     )
                 return data.MESSAGE_DROP
 
+        return None
+
+    async def _run_consumer(self):
+        """Run the prepare/process/finish flow with error handling."""
+        return await self._handle_execution(self._process_standard)
+
+    async def _process_standard(self):
+        """Standard prepare/process/finish flow."""
+        await self.prepare()
+        if not self._finished:
+            await self.process()
+
+    async def _handle_execution(self, handler_coro):
+        """Wrap the prepare/process/finish sequence with error handling.
+
+        :param handler_coro: An async callable that performs the processing
+        :returns: A result code from :mod:`rejected.data`
+
+        """
         try:
-            await self.prepare()
-            if not self._finished:
-                await self.process()
+            await handler_coro()
         except KeyboardInterrupt:
             self.logger.debug('CTRL-C')
-            self._process.reject(message_in.delivery_tag, True)
+            self._process.reject(self._message.delivery_tag, True)
             self._process.stop()
             return data.MESSAGE_REQUEUE
 
         except exceptions.ChannelClosed as error:
             self.logger.critical(
                 'Channel closed while processing %s: %s',
-                message_in.delivery_tag,
+                self._message.delivery_tag,
                 error,
             )
             self._measurement.set_tag('exception', error.__class__.__name__)
@@ -1026,7 +1029,7 @@ class Consumer:
         except exceptions.ConnectionClosed as error:
             self.logger.critical(
                 'Connection closed while processing %s: %s',
-                message_in.delivery_tag,
+                self._message.delivery_tag,
                 str(error),
             )
             self._measurement.set_tag('exception', error.__class__.__name__)
@@ -1035,7 +1038,7 @@ class Consumer:
         except ConsumerException as error:
             self.logger.error(
                 'ConsumerException processing delivery %s: %s',
-                message_in.delivery_tag,
+                self._message.delivery_tag,
                 str(error),
             )
             self._measurement.set_tag('exception', error.__class__.__name__)
@@ -1046,7 +1049,7 @@ class Consumer:
         except MessageException as error:
             self.logger.info(
                 'MessageException processing delivery %s: %s',
-                message_in.delivery_tag,
+                self._message.delivery_tag,
                 str(error),
             )
             self._measurement.set_tag('exception', error.__class__.__name__)
@@ -1057,7 +1060,7 @@ class Consumer:
         except ProcessingException as error:
             self.logger.warning(
                 'ProcessingException processing delivery %s: %s',
-                message_in.delivery_tag,
+                self._message.delivery_tag,
                 str(error),
             )
             self._measurement.set_tag('exception', error.__class__.__name__)
@@ -1071,7 +1074,7 @@ class Consumer:
         except NotImplementedError as error:
             self.log_exception(
                 'NotImplementedError processing delivery %s: %s',
-                message_in.delivery_tag,
+                self._message.delivery_tag,
                 error,
                 exc_info=sys.exc_info(),
             )
@@ -1081,7 +1084,7 @@ class Consumer:
         except Exception as error:
             self.log_exception(
                 'Exception processing delivery %s: %s',
-                message_in.delivery_tag,
+                self._message.delivery_tag,
                 str(error),
                 exc_info=sys.exc_info(),
             )
@@ -1198,294 +1201,6 @@ class Consumer:
         except KeyError:
             raise ValueError(f'Channel {name} not found')
 
-    def _auto_encode(self, content_encoding, value):
-        """Based upon the value of the content_encoding, encode the value.
-
-        :param str content_encoding: The content encoding type (gzip, bzip2)
-        :param str value: The value to encode
-        :rtype: value
-
-        """
-        if content_encoding == 'gzip':
-            return self._encode_gzip(value)
-
-        if content_encoding == 'bzip2':
-            return self._encode_bz2(value)
-
-        self.logger.warning(
-            'Invalid content-encoding specified for auto-encoding'
-        )
-        return value
-
-    def _auto_serialize(self, content_type, value):
-        """Auto-serialization of the value based upon the content-type value.
-
-        :param str content_type: The content type to serialize
-        :param any value: The value to serialize
-        :rtype: str
-
-        """
-        if content_type == 'application/json':
-            self.logger.debug('Auto-serializing content as JSON')
-            return self._dump_json_value(value)
-
-        elif umsgpack and content_type == 'application/msgpack':
-            self.logger.debug('Auto-serializing content as msgpack')
-            return self._dump_msgpack_value(value)
-
-        elif content_type in PICKLE_MIME_TYPES:
-            self.logger.debug('Auto-serializing content as Pickle')
-            return self._dump_pickle_value(value)
-
-        elif content_type == 'application/x-plist':
-            self.logger.debug('Auto-serializing content as plist')
-            return self._dump_plist_value(value)
-
-        elif content_type == 'text/csv':
-            self.logger.debug('Auto-serializing content as csv')
-            return self._dump_csv_value(value)
-
-        elif (
-            bs4
-            and isinstance(value, bs4.BeautifulSoup)
-            and content_type in BS4_MIME_TYPES
-        ):
-            return self._dump_bs4_value(value)
-
-        elif content_type in YAML_MIME_TYPES:
-            self.logger.debug('Auto-serializing content as YAML')
-            return self._dump_yaml_value(value)
-
-        self.logger.warning(
-            'Invalid content-type specified for auto-serialization'
-        )
-        return value
-
-    @staticmethod
-    def _decode_bz2(value):
-        """Return a bz2 decompressed value
-
-        :param bytes value: Compressed value
-        :rtype: str
-
-        """
-        return bz2.decompress(value)
-
-    @staticmethod
-    def _decode_gzip(value):
-        """Return a zlib decompressed value
-
-        :param bytes value: Compressed value
-        :rtype: str
-
-        """
-        return zlib.decompress(value)
-
-    @staticmethod
-    def _dump_bs4_value(value):
-        """Return a BeautifulSoup object as a string
-
-        :param bs4.BeautifulSoup value: The object to return a string from
-        :rtype: str
-
-        """
-        return str(value)
-
-    @staticmethod
-    def _dump_csv_value(value):
-        """Take a list of lists and return it as a CSV value
-
-        :param list value: A list of lists to return as a CSV
-        :rtype: str
-
-        """
-        buff = io.StringIO()
-        writer = csv.writer(buff, quotechar='"', quoting=csv.QUOTE_ALL)
-        writer.writerows(value)
-        buff.seek(0)
-        value = buff.read()
-        buff.close()
-        return value
-
-    @staticmethod
-    def _dump_json_value(value):
-        """Serialize a value into JSON
-
-        :param object value: The value to serialize
-        :rtype: bytes
-
-        """
-        return json.dumps(value, ensure_ascii=True).encode('utf-8')
-
-    @staticmethod
-    def _dump_msgpack_value(value):
-        """Serialize a value into MessagePack
-
-        :param object value: The value to serialize
-        :type value: str or dict or list
-        :rtype: bytes
-
-        """
-        return umsgpack.packb(value)
-
-    @staticmethod
-    def _dump_pickle_value(value):
-        """Serialize a value into the pickle format
-
-        :param object value: The object to pickle
-        :rtype: bytes
-
-        """
-        return pickle.dumps(value)
-
-    @staticmethod
-    def _dump_plist_value(value):
-        """Create a plist value from a dictionary
-
-        :param dict value: The value to make the plist from
-        :rtype: bytes
-
-        """
-        if hasattr(plistlib, 'dumps'):
-            return plistlib.dumps(value)
-        try:
-            return plistlib.writePlistToString(value).encode('utf-8')
-        except AttributeError:
-            return plistlib.writePlistToBytes(value)
-
-    @staticmethod
-    def _dump_yaml_value(value):
-        """Dump an object into a YAML string
-
-        :param object value: The value to dump as a YAML string
-        :rtype: str
-
-        """
-        return yaml.dump(value)
-
-    @staticmethod
-    def _encode_bz2(value):
-        """Return a bzip2 compressed value
-
-        :param str value: Uncompressed value
-        :rtype: bytes
-
-        """
-        if not isinstance(value, bytes):
-            value = value.encode('utf-8')
-        return bz2.compress(value)
-
-    @staticmethod
-    def _encode_gzip(value):
-        """Return zlib compressed value
-
-        :param str value: Uncompressed value
-        :rtype: bytes
-
-        """
-        if not isinstance(value, bytes):
-            value = value.encode('utf-8')
-        return zlib.compress(value)
-
-    @staticmethod
-    def _load_bs4_value(value):
-        """Load an HTML or XML string into an lxml etree object.
-
-        :param str value: The HTML or XML string
-        :rtype: bs4.BeautifulSoup
-        :raises: ConsumerException
-
-        """
-        if not bs4:
-            raise ConsumerException('BeautifulSoup4 is not enabled')
-        if isinstance(value, bytes):
-            value = value.decode('utf-8')
-        return bs4.BeautifulSoup(value, 'html.parser')
-
-    @staticmethod
-    def _load_csv_value(value):
-        """Create a csv.DictReader instance for the sniffed dialect for the
-        value passed in.
-
-        :param str value: The CSV value
-        :rtype: csv.DictReader
-
-        """
-        if isinstance(value, bytes):
-            value = value.decode('utf-8')
-        csv_buffer = io.StringIO(value)
-        dialect = csv.Sniffer().sniff(csv_buffer.read(1024))
-        csv_buffer.seek(0)
-        return csv.DictReader(csv_buffer, dialect=dialect)
-
-    def _load_json_value(self, value):
-        """Deserialize a JSON string returning the native Python data type
-        for the value.
-
-        :param str value: The JSON string
-        :rtype: object
-
-        """
-        if isinstance(value, bytes):
-            value = value.decode('utf-8')
-        try:
-            return json.loads(value)
-        except ValueError as error:
-            self.logger.exception('Could not decode message body: %s', error)
-            raise MessageException(error)
-
-    def _load_msgpack_value(self, value):
-        """Deserialize a msgpack string returning the native Python data type
-        for the value.
-
-        :param str value: The msgpack string
-        :rtype: object
-
-        """
-        try:
-            return umsgpack.unpackb(value)
-        except ValueError as error:
-            self.logger.exception('Could not decode message body: %s', error)
-            raise MessageException(error)
-
-    @staticmethod
-    def _load_pickle_value(value):
-        """Deserialize a pickle string returning the native Python data type
-        for the value.
-
-        :param bytes value: The pickle string
-        :rtype: object
-
-        """
-        return pickle.loads(value)
-
-    @staticmethod
-    def _load_plist_value(value):
-        """Deserialize a plist string returning the native Python data type
-        for the value.
-
-        :param bytes value: The pickle string
-        :rtype: dict
-
-        """
-        if hasattr(plistlib, 'loads'):
-            return plistlib.loads(value)
-        try:
-            return plistlib.readPlistFromString(value)
-        except AttributeError:
-            return plistlib.readPlistFromBytes(value)
-
-    @staticmethod
-    def _load_yaml_value(value):
-        """Load an YAML string into an dict object.
-
-        :param str value: The YAML string
-        :rtype: any
-        :raises: ConsumerException
-
-        """
-        return yaml.safe_load(value)
-
     def _republish_dropped_message(self, reason):
         """Republish the original message that was received it is being dropped
         by the consumer.
@@ -1576,8 +1291,8 @@ class Consumer:
         is built by calling ``schema_uri_format.format(message_type)`` and
         the scheme determines how the schema is fetched:
 
-        - ``file:///path/to/schemas/{0}.avsc`` — read from disk
-        - ``http://`` / ``https://`` — fetched via HTTP GET
+        - ``file:///path/to/schemas/{0}.avsc`` -- read from disk
+        - ``http://`` / ``https://`` -- fetched via HTTP GET
 
         If ``schema_uri_format`` is not set, override this method to provide
         your own schema loading logic.
@@ -1628,29 +1343,94 @@ class Consumer:
             f'use file:// or http(s)://'
         )
 
-    @staticmethod
-    def _deserialize_avro(avro_schema: dict, data: bytes) -> dict:
-        """Deserialize an Avro datum using the provided schema.
 
-        :param dict avro_schema: The parsed Avro schema
-        :param bytes data: The Avro-encoded bytes to deserialize
-        :rtype: dict
+class Consumer(BaseConsumer):
+    """The standard rejected consumer class.
 
-        """
-        return fastavro.schemaless_reader(io.BytesIO(data), avro_schema)
+    Provides access to the current message via properties (self.body,
+    self.content_type, etc.) and parameterless prepare/process/finish methods.
+    """
 
-    @staticmethod
-    def _serialize_avro(avro_schema: dict, data: dict) -> bytes:
-        """Serialize a data structure into an Avro datum.
+    pass
 
-        :param dict avro_schema: The parsed Avro schema
-        :param dict data: The value to serialize
-        :rtype: bytes
 
-        """
-        stream = io.BytesIO()
-        fastavro.schemaless_writer(stream, avro_schema, data)
-        return stream.getvalue()
+class FunctionalConsumer(BaseConsumer):
+    """A message-passing consumer that receives a Message model.
+
+    Instead of accessing message properties via self.body, self.content_type,
+    etc., the prepare/process/finish methods receive a fully deserialized
+    Message pydantic model as their argument.
+
+    """
+
+    async def prepare(self, message: models.Message) -> None:
+        """Called before process. Override to implement pre-processing."""
+        pass
+
+    async def process(self, message: models.Message) -> None:
+        """Process the message. Must be implemented by subclasses."""
+        raise NotImplementedError
+
+    async def finish(self, message: models.Message) -> None:
+        """Called after process. Override to implement post-processing."""
+        pass
+
+    async def _run_consumer(self):
+        """Build a Message model and run prepare/process/finish."""
+        body = self._message.body
+        ct = self.content_type
+        ce = self.content_encoding
+
+        # Decode content encoding
+        if ce:
+            try:
+                body = codecs_module.decode(body, None, ce)
+            except codecs_module.DecodeError as err:
+                raise MessageException(str(err)) from err
+
+        # Deserialize by content type (including avro)
+        if ct == codecs_module.AVRO_DATUM_MIME_TYPE:
+            if fastavro and self.message_type:
+                body = codecs_module.decode_avro(
+                    body, self._avro_schema(self.message_type)
+                )
+        elif ct:
+            try:
+                body = codecs_module.decode(body, ct, None)
+            except codecs_module.DecodeError as err:
+                raise MessageException(str(err)) from err
+
+        msg = models.Message(
+            app_id=self.app_id,
+            body=body,
+            content_encoding=ce,
+            content_type=ct,
+            correlation_id=self._correlation_id,
+            exchange=self._message.exchange if self._message else '',
+            expiration=self.expiration,
+            headers=self.headers or {},
+            message_id=self.message_id,
+            message_type=self.message_type,
+            priority=self.priority,
+            redelivered=self.redelivered,
+            reply_to=self.reply_to,
+            returned=self.returned,
+            routing_key=self.routing_key,
+            timestamp=self.timestamp,
+            user_id=self.user_id,
+        )
+
+        return await self._handle_execution(self._make_functional_handler(msg))
+
+    def _make_functional_handler(self, msg):
+        """Return an async callable for the functional flow."""
+
+        async def _handler():
+            await self.prepare(msg)
+            if not self._finished:
+                await self.process(msg)
+
+        return _handler
 
 
 class RejectedException(Exception):

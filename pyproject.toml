@@ -126,5 +126,6 @@ max-complexity = 15
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = ["S"]
 "rejected/consumer.py" = ["B904", "BLE001", "C901", "S301", "S506"]
+"rejected/codecs.py" = ["S301"]
 "examples.py" = ["S311"]
 "utils/**/*.py" = ["S311"]

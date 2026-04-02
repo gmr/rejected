@@ -11,29 +11,29 @@ requires-python = ">=3.11"
 license = "BSD-3-Clause"
 license-files = ["LICENSE"]
 authors = [
-    {name = "Gavin M. Roy", email = "gavinmroy@gmail.com"}
+  { name = "Gavin M. Roy", email = "gavinmroy@gmail.com" }
 ]
 classifiers = [
-    "Development Status :: 5 - Production/Stable",
-    "Intended Audience :: Developers",
-    "Natural Language :: English",
-    "Operating System :: OS Independent",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Programming Language :: Python :: 3.13",
-    "Programming Language :: Python :: 3.14",
-    "Programming Language :: Python :: Implementation :: CPython",
-    "Topic :: Software Development :: Libraries :: Application Frameworks",
-    "Topic :: System :: Networking",
-    "Typing :: Typed",
+  "Development Status :: 5 - Production/Stable",
+  "Intended Audience :: Developers",
+  "Natural Language :: English",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Programming Language :: Python :: Implementation :: CPython",
+  "Topic :: Software Development :: Libraries :: Application Frameworks",
+  "Topic :: System :: Networking",
+  "Typing :: Typed",
 ]
 keywords = ["amqp", "rabbitmq", "consumer", "messaging"]
 dependencies = [
-    "pika>=1.2.0,<3",
-    "psutil",
-    "pydantic>=2,<3",
-    "pyyaml>=5.3.1,<7",
+  "pika>=1.2.0,<3",
+  "psutil",
+  "pydantic>=2,<3",
+  "pyyaml>=5.3.1,<7",
 ]
 
 [project.optional-dependencies]
@@ -54,18 +54,19 @@ Documentation = "https://rejected.readthedocs.io"
 
 [dependency-groups]
 dev = [
-    "build",
-    "coverage[toml]",
-    "mypy",
-    "pre-commit",
-    "ruff",
-    "types-pika",
-    "types-PyYAML"
+  "build",
+  "coverage[toml]",
+  "mypy",
+  "pre-commit",
+  "ruff",
+  "types-pika",
+  "types-psutil",
+  "types-PyYAML"
 ]
 docs = [
-    "mkdocs>=1.5,<2",
-    "mkdocs-material>9.5,<10",
-    "mkdocstrings[python]",
+  "mkdocs>=1.5,<2",
+  "mkdocs-material>9.5,<10",
+  "mkdocstrings[python]",
 ]
 
 [tool.coverage.run]
@@ -77,7 +78,7 @@ source = ["rejected"]
 [tool.coverage.report]
 show_missing = true
 exclude_also = [
-    "typing.TYPE_CHECKING",
+  "typing.TYPE_CHECKING",
 ]
 
 [tool.coverage.html]
@@ -99,31 +100,31 @@ skip-magic-trailing-comma = true
 
 [tool.ruff.lint]
 select = [
-    "BLE",
-    "C4",
-    "C90",
-    "E", "W",
-    "F",
-    "G",
-    "I",
-    "N",
-    "Q",
-    "S",
-    "ASYNC",
-    "B",
-    "DTZ",
-    "FURB",
-    "RUF",
-    "T20",
-    "UP",
+  "BLE",
+  "C4",
+  "C90",
+  "E", "W",
+  "F",
+  "G",
+  "I",
+  "N",
+  "Q",
+  "S",
+  "ASYNC",
+  "B",
+  "DTZ",
+  "FURB",
+  "RUF",
+  "T20",
+  "UP",
 ]
 ignore = [
-    "N818",
-    "RSE",
-    "UP040",
+  "N818",
+  "RSE",
+  "UP040",
 ]
-flake8-quotes = {inline-quotes = "single"}
-isort = {split-on-trailing-comma = false}
+flake8-quotes = { inline-quotes = "single" }
+isort = { split-on-trailing-comma = false }
 
 [tool.ruff.lint.mccabe]
 max-complexity = 15
@@ -142,9 +143,9 @@ warn_unused_configs = true
 
 [[tool.mypy.overrides]]
 module = [
-    "pika.*", "bs4", "umsgpack", "fastavro", "yaml",
-    "prometheus_client",
-    "sentry_sdk", "sentry_sdk.integrations",
-    "sentry_sdk.integrations.logging"
+  "pika.*", "bs4", "umsgpack", "fastavro", "yaml",
+  "prometheus_client",
+  "sentry_sdk", "sentry_sdk.integrations",
+  "sentry_sdk.integrations.logging"
 ]
 ignore_missing_imports = true

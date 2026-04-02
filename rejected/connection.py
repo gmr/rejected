@@ -24,13 +24,13 @@ class Connection(state.State):
     }
 
     def __init__(
-        self,
-        name: str,
-        config: models.ConnectionConfig,
-        consumer_name: str,
-        should_consume: bool,
-        publisher_confirmations: bool,
-        callbacks: models.Callbacks,
+            self,
+            name: str,
+            config: models.ConnectionConfig,
+            consumer_name: str,
+            should_consume: bool,
+            publisher_confirmations: bool,
+            callbacks: models.Callbacks,
     ):
         super().__init__()
         self.blocked: bool = False
@@ -81,7 +81,7 @@ class Connection(state.State):
             self.channel.close()
 
     def on_open(
-        self, connection: asyncio_connection.AsyncioConnection
+            self, connection: asyncio_connection.AsyncioConnection
     ) -> None:
         """Invoked when the connection is opened
 
@@ -105,17 +105,17 @@ class Connection(state.State):
         )
 
     def on_open_error(
-        self,
-        _connection: asyncio_connection.AsyncioConnection,
-        error: BaseException | str,
+            self,
+            _connection: asyncio_connection.AsyncioConnection,
+            error: BaseException | str,
     ) -> None:
         LOGGER.error('Connection %s failure: %r', self.name, error)
         self.on_failure()
 
     def on_closed(
-        self,
-        _connection: asyncio_connection.AsyncioConnection,
-        reason: BaseException | str,
+            self,
+            _connection: asyncio_connection.AsyncioConnection,
+            reason: BaseException | str,
     ) -> None:
         if self.is_connecting:
             LOGGER.error(
@@ -128,18 +128,18 @@ class Connection(state.State):
             self.callbacks.on_closed(self.name)
 
     def on_blocked(
-        self,
-        _conn: asyncio_connection.AsyncioConnection,
-        method: pika.frame.Method[pika.spec.Connection.Blocked],
+            self,
+            _conn: asyncio_connection.AsyncioConnection,
+            method: pika.frame.Method[pika.spec.Connection.Blocked],
     ) -> None:
         LOGGER.warning('Connection %s is blocked: %r', self.name, method)
         self.blocked = True
         self.callbacks.on_blocked(self.name)
 
     def on_unblocked(
-        self,
-        _conn: asyncio_connection.AsyncioConnection,
-        method: pika.frame.Method[pika.spec.Connection.Unblocked],
+            self,
+            _conn: asyncio_connection.AsyncioConnection,
+            method: pika.frame.Method[pika.spec.Connection.Unblocked],
     ) -> None:
         LOGGER.warning('Connection %s is unblocked: %r', self.name, method)
         self.blocked = False
@@ -162,7 +162,7 @@ class Connection(state.State):
         self.callbacks.on_ready(self.name)
 
     def on_channel_closed(
-        self, _channel: pika.channel.Channel, closing_reason: Exception
+            self, _channel: pika.channel.Channel, closing_reason: Exception
     ) -> None:
         """Invoked by pika when RabbitMQ unexpectedly closes the channel.
         Channels are usually closed if you attempt to do something that
@@ -201,8 +201,8 @@ class Connection(state.State):
             try:
                 self.connection.channel(on_open_callback=self.on_channel_open)
             except (
-                pika.exceptions.ConnectionWrongStateError,
-                pika.exceptions.ConnectionClosed,
+                    pika.exceptions.ConnectionWrongStateError,
+                    pika.exceptions.ConnectionClosed,
             ) as error:
                 LOGGER.warning(
                     'Error raised while creating new channel: %s', error
@@ -222,7 +222,7 @@ class Connection(state.State):
         self.callbacks.on_connection_failure(self.name)
 
     def consume(
-        self, queue_name: str, no_ack: bool, prefetch_count: int
+            self, queue_name: str, no_ack: bool, prefetch_count: int
     ) -> None:
         """Configure quality of service and issue Basic.Consume command
 
@@ -252,13 +252,13 @@ class Connection(state.State):
         )
 
     def on_qos_set(
-        self, method: pika.frame.Method[pika.spec.Basic.QosOk]
+            self, method: pika.frame.Method[pika.spec.Basic.QosOk]
     ) -> None:
         """Invoked by pika when the QoS is set"""
         LOGGER.debug('Connection %s QoS was set: %r', self.name, method)
 
     def on_consumer_cancelled(
-        self, _method: pika.frame.Method[pika.spec.Basic.CancelOk]
+            self, _method: pika.frame.Method[pika.spec.Basic.CancelOk]
     ) -> None:
         """Invoked by pika when a ``Basic.CancelOk`` is received."""
         LOGGER.info('Connection %s consumer has been cancelled', self.name)
@@ -268,8 +268,9 @@ class Connection(state.State):
             self.channel.close()
 
     def on_confirmation(
-        self,
-        method: pika.frame.Method[pika.spec.Basic.Ack | pika.spec.Basic.Nack],
+            self,
+            method: pika.frame.Method[
+                pika.spec.Basic.Ack | pika.spec.Basic.Nack],
     ) -> None:
         """Invoked by pika when RabbitMQ responds to a Basic.Publish RPC
         command, passing in either a Basic.Ack or Basic.Nack frame with
@@ -289,11 +290,11 @@ class Connection(state.State):
         )
 
     def on_delivery(
-        self,
-        channel: pika.channel.Channel,
-        method: pika.spec.Basic.Deliver,
-        properties: pika.BasicProperties,
-        body: bytes,
+            self,
+            channel: pika.channel.Channel,
+            method: pika.spec.Basic.Deliver,
+            properties: pika.BasicProperties,
+            body: bytes,
     ) -> None:
         """Received on delivery of a message from RabbitMQ."""
         self.callbacks.on_delivery(
@@ -301,11 +302,11 @@ class Connection(state.State):
         )
 
     def on_return(
-        self,
-        channel: pika.channel.Channel,
-        method: pika.spec.Basic.Return,
-        properties: pika.BasicProperties,
-        body: bytes,
+            self,
+            channel: pika.channel.Channel,
+            method: pika.spec.Basic.Return,
+            properties: pika.BasicProperties,
+            body: bytes,
     ) -> None:
         """Received on return of a message from RabbitMQ."""
         self.callbacks.on_return(self.name, channel, method, properties, body)
@@ -343,34 +344,35 @@ class Connection(state.State):
         if not self.config.ssl_options:
             return None
 
-        protocol = self.config.ssl_options.protot, ssl.PROTOCOL_TLS_CLIENT)
+        protocol = self.config.ssl_options.get('protocol',
+                                               ssl.PROTOCOL_TLS_CLIENT)
         if isinstance(protocol, str):
             protocol = getattr(ssl, protocol)
         context = ssl.SSLContext(protocol)
 
         # Load a set of certification authority (CA) certificates
         if any(
-            [
-                ssl_options.get('ca_certs'),
-                ssl_options.get('ca_path'),
-                ssl_options.get('ca_data'),
-            ]
+                [
+                    self.config.ssl_options.get('ca_certs'),
+                    self.config.ssl_options.get('ca_path'),
+                    self.config.ssl_options.get('ca_data'),
+                ]
         ):
             context.load_verify_locations(
-                ssl_options.get('ca_certs'),
-                ssl_options.get('ca_path'),
-                ssl_options.get('ca_data'),
+                self.config.ssl_options.get('ca_certs'),
+                self.config.ssl_options.get('ca_path'),
+                self.config.ssl_options.get('ca_data'),
             )
 
         # Load a private key and the corresponding certificate
-        if ssl_options.get('certfile'):
-            certfile = ssl_options['certfile']
-            keyfile = ssl_options.get('keyfile')
-            password = ssl_options.get('password')
+        if self.config.ssl_options.get('certfile'):
+            certfile = self.config.ssl_options['certfile']
+            keyfile = self.config.ssl_options.get('keyfile')
+            password = self.config.ssl_options.get('password')
             context.load_cert_chain(certfile, keyfile, password)
 
         # Set the available ciphers for sockets created with this context
-        if ssl_options.get('ciphers'):
-            context.set_ciphers(ssl_options['ciphers'])
+        if self.config.ssl_options.get('ciphers'):
+            context.set_ciphers(self.config.ssl_options['ciphers'])
 
         return pika.SSLOptions(context=context)

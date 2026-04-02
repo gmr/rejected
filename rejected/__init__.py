@@ -13,9 +13,9 @@ from rejected.codecs import AVRO_DATUM_MIME_TYPE  # noqa: E402
 from rejected.consumer import (  # noqa: E402
     Consumer,
     ConsumerException,
-    FunctionalConsumer,
     MessageException,
     ProcessingException,
+    TransactionConsumer,
 )
 from rejected.models import Message, Result  # noqa: E402
 
@@ -30,11 +30,11 @@ __all__ = [
     'AVRO_DATUM_MIME_TYPE',
     'Consumer',
     'ConsumerException',
-    'FunctionalConsumer',
     'Message',
     'MessageException',
     'ProcessingException',
     'Result',
+    'TransactionConsumer',
     '__author__',
     '__since__',
     '__version__',

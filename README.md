@@ -10,7 +10,6 @@ each run in an isolated process. It has the ability to collect statistical
 data from the consumer processes and report on it.
 
 [![Version](https://img.shields.io/pypi/v/rejected.svg?)](https://pypi.python.org/pypi/rejected)
-[![Coverage](https://img.shields.io/codecov/c/github/gmr/rejected.svg?)](https://codecov.io/github/gmr/rejected?branch=main)
 [![License](https://img.shields.io/pypi/l/rejected.svg?)](https://github.com/gmr/rejected/blob/main/LICENSE)
 
 ## Features
@@ -30,6 +29,7 @@ pip install rejected
 For optional features:
 
 ```bash
+pip install rejected[avro]     # Avro support
 pip install rejected[html]     # HTML message body support
 pip install rejected[msgpack]  # MessagePack support
 ```
@@ -41,7 +41,7 @@ Full documentation is available at [https://rejected.readthedocs.io](https://rej
 ## Example Consumer
 
 ```python
-from rejected import consumer
+from rejected import consumer, models
 import logging
 
 LOGGER = logging.getLogger(__name__)
@@ -49,37 +49,6 @@ LOGGER = logging.getLogger(__name__)
 
 class Test(consumer.Consumer):
 
-    def process(self, message):
+    async def process(self, message: models.Message) -> None:
         LOGGER.debug('In Test.process: %s', message.body)
 ```
-
-## Async Consumer
-
-To make a consumer async, you can use Tornado's `@gen.coroutine` decorator on the
-`Consumer.prepare` and `Consumer.process` methods. Asynchronous consumers allow
-you to use async clients like Tornado's `AsyncHTTPClient` to perform parallel
-tasks when processing a single message.
-
-```python
-import logging
-
-from rejected import consumer
-
-from tornado import gen
-from tornado import httpclient
-
-
-class AsyncExampleConsumer(consumer.Consumer):
-
-    @gen.coroutine
-    def process(self):
-        LOGGER.debug('Message: %r', self.body)
-        http_client = httpclient.AsyncHTTPClient()
-        results = yield [http_client.fetch('http://www.github.com'),
-                         http_client.fetch('http://www.reddit.com')]
-        LOGGER.info('Length: %r', [len(r.body) for r in results])
-```
-
-## Version History
-
-See [HISTORY.md](HISTORY.md) or the [documentation](https://rejected.readthedocs.io).

@@ -2,9 +2,12 @@
 
 import datetime
 import enum
+import time
 import typing
 
 import pydantic
+
+from . import measurement as measurement_mod
 
 # Configuration models
 
@@ -56,6 +59,13 @@ class StatsConfig(pydantic.BaseModel):
     statsd: StatsdConfig = pydantic.Field(default_factory=StatsdConfig)
 
 
+class SchemaRegistryConfig(pydantic.BaseModel):
+    """Schema registry configuration."""
+
+    type: typing.Literal['file', 'http'] = 'file'
+    uri: str = ''  # URI with {0} placeholder for message type
+
+
 class ConsumerConfig(pydantic.BaseModel):
     consumer: str | None = None
     connections: list[str | ConnectionRef] = pydantic.Field(
@@ -67,7 +77,6 @@ class ConsumerConfig(pydantic.BaseModel):
     qos_prefetch: int = 1
     max_errors: int = 5
     error_exchange: str | None = None
-    schema_uri_format: str | None = None
     sentry_dsn: str | None = None
     drop_exchange: str | None = None
     drop_invalid_messages: bool | None = None
@@ -82,6 +91,7 @@ class Config(pydantic.BaseModel):
     model_config = pydantic.ConfigDict(populate_by_name=True)
 
     poll_interval: float = 60.0
+    schema_registry: SchemaRegistryConfig | None = None
     sentry_dsn: str | None = None
     stats: StatsConfig = pydantic.Field(default_factory=StatsConfig)
     connections: dict[str, ConnectionConfig] = pydantic.Field(
@@ -113,12 +123,8 @@ class Callbacks(pydantic.BaseModel):
 
 
 class Message(pydantic.BaseModel):
-    """A fully deserialized AMQP message."""
+    """The deserialized message to be processed by the consumer."""
 
-    model_config = pydantic.ConfigDict(arbitrary_types_allowed=True)
-
-    connection: typing.Any
-    channel: typing.Any
     delivery_tag: int | None
     exchange: str | None
     routing_key: str | None
@@ -158,3 +164,19 @@ class Result(enum.IntEnum):
     MESSAGE_EXCEPTION = 11
     PROCESSING_EXCEPTION = 12
     UNHANDLED_EXCEPTION = 13
+
+
+class ProcessingContext(pydantic.BaseModel):
+    """Tracks a single in-flight message being processed."""
+
+    model_config = pydantic.ConfigDict(arbitrary_types_allowed=True)
+
+    connection: typing.Any  # connection.Connection (avoid circular import)
+    channel: typing.Any  # pika.channel.Channel
+    raw_body: bytes = b''  # original bytes before decoding
+    received_at: float = pydantic.Field(default_factory=time.monotonic)
+    message: Message
+    measurement: measurement_mod.Measurement = pydantic.Field(
+        default_factory=measurement_mod.Measurement
+    )
+    result: Result | None = None

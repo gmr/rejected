@@ -86,9 +86,7 @@ class Controller:
             if not self._reload_requested:
                 break
 
-            LOGGER.info(
-                'Reloading configuration from %s', self.args.config
-            )
+            LOGGER.info('Reloading configuration from %s', self.args.config)
             try:
                 self.config = config_module.load(self.args.config)
                 if self.config.logging:
@@ -104,20 +102,14 @@ class Controller:
         signal.signal(signal.SIGHUP, self._on_sighup)
         signal.signal(signal.SIGTERM, self._on_sigterm)
 
-    def _on_sighup(
-        self,
-        _signum: int,
-        _frame: types.FrameType | None,
-    ) -> None:
+    def _on_sighup(self, _signum: int, _frame: types.FrameType | None) -> None:
         LOGGER.info('Received SIGHUP — reloading configuration')
         self._reload_requested = True
         if self._mcp:
             self._mcp.stop_processes()
 
     def _on_sigterm(
-        self,
-        _signum: int,
-        _frame: types.FrameType | None,
+        self, _signum: int, _frame: types.FrameType | None
     ) -> None:
         LOGGER.info('Received SIGTERM, initiating shutdown')
         self._shutdown_requested = True
@@ -127,37 +119,51 @@ class Controller:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog='rejected',
-        description='RabbitMQ consumer framework',
+        prog='rejected', description='RabbitMQ consumer framework'
     )
     parser.add_argument(
-        '-c', '--config', required=True, dest='config',
+        '-c',
+        '--config',
+        required=True,
+        dest='config',
         metavar='FILE',
         help='Path to the configuration file (YAML or TOML)',
     )
     parser.add_argument(
-        '-P', '--profile', default=None, dest='profile',
+        '-P',
+        '--profile',
+        default=None,
+        dest='profile',
         metavar='DIR',
         help='Profile consumer modules, writing output to DIR',
     )
     parser.add_argument(
-        '-o', '--only', default=None, dest='consumer',
+        '-o',
+        '--only',
+        default=None,
+        dest='consumer',
         metavar='CONSUMER',
         help='Only run the named consumer',
     )
     parser.add_argument(
-        '-p', '--prepend-path', default=None,
-        dest='prepend_path', metavar='PATH',
+        '-p',
+        '--prepend-path',
+        default=None,
+        dest='prepend_path',
+        metavar='PATH',
         help='Prepend PATH to sys.path before importing consumers',
     )
     parser.add_argument(
-        '-q', '--qty', type=int, default=None,
-        dest='quantity', metavar='N',
+        '-q',
+        '--qty',
+        type=int,
+        default=None,
+        dest='quantity',
+        metavar='N',
         help='Override the consumer quantity (use with -o)',
     )
     parser.add_argument(
-        '--version', action='version',
-        version=f'%(prog)s {__version__}',
+        '--version', action='version', version=f'%(prog)s {__version__}'
     )
     return parser
 
@@ -185,9 +191,7 @@ def main() -> None:
                 level=logging.INFO,
                 format='%(levelname)-8s %(name)s: %(message)s',
             )
-    except (
-        ValueError, TypeError, AttributeError, ImportError
-    ) as exc:
+    except (ValueError, TypeError, AttributeError, ImportError) as exc:
         sys.exit(f'Error: invalid logging configuration: {exc}')
 
     ctrl = Controller(args, cfg)

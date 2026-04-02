@@ -75,20 +75,20 @@ class MasterControlProgram(state.State):
 
         # Default values
         self._active_cache: tuple[float, list[process.Process]] | None = None
-        self.consumer_cfg: dict[str, models.ConsumerConfig] = \
+        self.consumer_cfg: dict[str, models.ConsumerConfig] = (
             self.get_consumer_cfg(config, consumer, quantity)
+        )
         self.consumers: dict[str, Consumer] = {}
         self.config: models.Config = config
         self.last_poll_results: dict[str, typing.Any] = {}
-        self.poll_data: dict[str, typing.Any] = {
-            'time': 0, 'processes': [],
-        }
+        self.poll_data: dict[str, typing.Any] = {'time': 0, 'processes': []}
         self.poll_timer: float | None = None
         self.profile: str | None = profile
         self.results_timer: float | None = None
         self.stats: dict[str, typing.Any] = {}
-        self.stats_queue: multiprocessing.Queue[dict[str, typing.Any]] = \
+        self.stats_queue: multiprocessing.Queue[dict[str, typing.Any]] = (
             multiprocessing.Queue()
+        )
         self.polled: bool = False
         self.unresponsive: collections.Counter[str] = collections.Counter()
 
@@ -104,7 +104,7 @@ class MasterControlProgram(state.State):
         LOGGER.debug('Set process poll interval to %.2f', self.poll_interval)
 
     def active_processes(
-        self, use_cache: bool = True,
+        self, use_cache: bool = True
     ) -> list[process.Process]:
         """Return a list of all active processes, pruning dead ones
 
@@ -161,7 +161,7 @@ class MasterControlProgram(state.State):
         return active_processes
 
     def calculate_stats(
-        self, data: dict[str, typing.Any],
+        self, data: dict[str, typing.Any]
     ) -> dict[str, typing.Any]:
         """Calculate the stats data for our process level data.
 
@@ -274,7 +274,7 @@ class MasterControlProgram(state.State):
         }
 
     def get_consumer_process(
-        self, consumer: str, name: str,
+        self, consumer: str, name: str
     ) -> process.Process | None:
         """Get the process object for the specified consumer and process name.
 
@@ -287,9 +287,7 @@ class MasterControlProgram(state.State):
 
     @staticmethod
     def get_consumer_cfg(
-        config: models.Config,
-        only: str | None,
-        qty: int | None,
+        config: models.Config, only: str | None, qty: int | None
     ) -> dict[str, models.ConsumerConfig]:
         """Get the consumers config, possibly filtering the config if only
         or qty is set.
@@ -403,7 +401,7 @@ class MasterControlProgram(state.State):
             )
 
     def new_consumer(
-        self, config: models.ConsumerConfig, consumer_name: str,
+        self, config: models.ConsumerConfig, consumer_name: str
     ) -> Consumer:
         """Return a consumer dict for the given name and configuration.
 
@@ -414,9 +412,7 @@ class MasterControlProgram(state.State):
         """
         return Consumer(0, {}, config.qty, config.queue or consumer_name)
 
-    def new_process(
-        self, consumer_name: str,
-    ) -> tuple[str, process.Process]:
+    def new_process(self, consumer_name: str) -> tuple[str, process.Process]:
         """Create a new consumer instances
 
         :param str consumer_name: The name of the consumer
@@ -433,9 +429,7 @@ class MasterControlProgram(state.State):
             'stats_queue': self.stats_queue,
             'logging_config': self.config.logging,
         }
-        return process_name, process.Process(  # type: ignore[no-untyped-call]
-            name=process_name, kwargs=kwargs,
-        )
+        return process_name, process.Process(name=process_name, kwargs=kwargs)
 
     def new_process_number(self, name: str) -> int:
         """Increment the counter for the process id number for a given consumer
@@ -449,9 +443,7 @@ class MasterControlProgram(state.State):
         return self.consumers[name].last_proc_num
 
     def on_sigchld(
-        self,
-        _signum: int,
-        _unused_frame: types.FrameType | None,
+        self, _signum: int, _unused_frame: types.FrameType | None
     ) -> None:
         """Invoked when a child sends up an SIGCHLD signal.
 
@@ -466,9 +458,7 @@ class MasterControlProgram(state.State):
             self.set_state(self.STATE_STOPPED)
 
     def on_timer(
-        self,
-        _signum: int,
-        _unused_frame: types.FrameType | None,
+        self, _signum: int, _unused_frame: types.FrameType | None
     ) -> None:
         """Invoked by the Poll timer signal.
 
@@ -544,8 +534,7 @@ class MasterControlProgram(state.State):
 
         """
         return bool(
-            (time.time() - self.poll_data['timestamp'])
-            >= self.poll_interval
+            (time.time() - self.poll_data['timestamp']) >= self.poll_interval
         )
 
     def poll_results_check(self) -> None:
@@ -600,9 +589,7 @@ class MasterControlProgram(state.State):
         """
         return self.consumers[name].qty - self.process_count(name)
 
-    def remove_consumer_process(
-        self, consumer: str, name: str,
-    ) -> None:
+    def remove_consumer_process(self, consumer: str, name: str) -> None:
         """Remove all details for the specified consumer and process name.
 
         :param str consumer: The consumer name

@@ -1,8 +1,7 @@
 """
-The :class:`rejected.testing.AsyncTestCase` provides a based class for the
-easy creation of tests for your consumers. The test cases exposes multiple
-methods to make it easy to setup a consumer and process messages. It is
-built on top of :class:`unittest.IsolatedAsyncioTestCase`.
+The :class:`rejected.testing.AsyncTestCase` provides a base class for the
+easy creation of tests for your consumers. It is built on top of
+:class:`unittest.IsolatedAsyncioTestCase`.
 
 To get started, override the
 :meth:`rejected.testing.AsyncTestCase.get_consumer` method.
@@ -19,11 +18,12 @@ invoked.
 Example
 -------
 The following example expects that when the message is processed by the
-consumer, the consumer will raise a :exc:`~rejected.consumer.MessageException`.
+consumer, the consumer will raise a
+:exc:`~rejected.exceptions.MessageException`.
 
 .. code:: python
 
-    from rejected import consumer, testing
+    from rejected import exceptions, testing
 
     import my_package
 
@@ -37,14 +37,15 @@ consumer, the consumer will raise a :exc:`~rejected.consumer.MessageException`.
             return {'remote_url': 'http://foo'}
 
         async def test_consumer_raises_message_exception(self):
-            with self.assertRaises(consumer.MessageException):
+            with self.assertRaises(exceptions.MessageException):
                 await self.process_message({'foo': 'bar'})
 
 """
 
+import datetime
 import json
 import logging
-import time
+import typing
 import unittest
 import uuid
 from unittest import mock
@@ -57,45 +58,38 @@ try:
 except ImportError:
     sentry_sdk = None
 
+from . import codecs, connection, consumer, exceptions, models, process
 from . import config as config_module
-from . import consumer, process
+from . import measurement as measurement_mod
 
 LOGGER = logging.getLogger(__name__)
 
 
 class AsyncTestCase(unittest.IsolatedAsyncioTestCase):
     """:class:`unittest.IsolatedAsyncioTestCase` subclass for testing
-    :class:`~rejected.consumer.Consumer` classes.
+    :class:`~rejected.consumer.Consumer` and
+    :class:`~rejected.consumer.TransactionConsumer` classes.
 
     """
 
-    _consumer = None
+    _consumer: consumer._Consumer | None = None
+    _last_ctx: models.ProcessingContext | None = None
 
-    async def asyncSetUp(self):
+    async def asyncSetUp(self) -> None:
         await super().asyncSetUp()
         self.correlation_id = str(uuid.uuid4())
         self.process = self._create_process()
         self.consumer = self._create_consumer()
         self.channel = self.process.connections['mock'].channel
-        self.exc_info = None
-
-    async def asyncTearDown(self):
-        await super().asyncTearDown()
-        if not self.consumer._finished:
-            await self.consumer.finish()
+        self.exc_info: (
+            tuple[type[BaseException], BaseException, typing.Any] | None
+        ) = None
 
     @property
-    def published_messages(self):
-        """Return a list of :class:`~rejected.testing.PublishedMessage`
-        that are extracted from all calls to
-        :meth:`~pika.channel.Channel.basic_publish` that are invoked during the
-        test. The properties attribute is the
-        :class:`pika.spec.BasicProperties`
-        instance that was created during publishing.
-
-        .. versionadded:: 3.18.9
-
-        :returns: list([:class:`~rejected.testing.PublishedMessage`])
+    def published_messages(self) -> list['PublishedMessage']:
+        """Return a list of :class:`PublishedMessage` extracted from
+        all calls to :meth:`pika.channel.Channel.basic_publish` during
+        the test.
 
         """
         return [
@@ -108,206 +102,182 @@ class AsyncTestCase(unittest.IsolatedAsyncioTestCase):
             for c in self.channel.basic_publish.mock_calls
         ]
 
-    def get_consumer(self):
-        """Override to return the consumer class for testing.
-
-        :rtype: :class:`rejected.consumer.Consumer`
-
-        """
+    def get_consumer(self) -> type[consumer._Consumer]:
+        """Override to return the consumer class for testing."""
         return consumer.Consumer
 
-    def get_settings(self):
-        """Override this method to provide settings to the consumer during
-        construction. These settings should be from the `config` stanza
-        of the Consumer configuration.
-
-        :rtype: dict
+    def get_settings(self) -> dict[str, typing.Any]:
+        """Override to provide settings to the consumer during
+        construction.
 
         """
         return {}
 
-    def create_message(
-            self, message, properties=None, exchange='rejected',
-            routing_key='test'
-    ):
-        """Create a message instance for use with the consumer in testing.
+    def create_context(
+        self,
+        message_body: typing.Any = None,
+        content_type: str = 'application/json',
+        message_type: str | None = None,
+        properties: dict[str, typing.Any] | None = None,
+        exchange: str = 'rejected',
+        routing_key: str = 'test',
+    ) -> models.ProcessingContext:
+        """Create a :class:`~rejected.models.ProcessingContext` for
+        testing.
 
-        :param any message: the body of the message to create
-        :param dict properties: AMQP message properties
-        :param str exchange: The exchange the message should appear to be from
-        :param str routing_key: The message's routing key
-        :rtype: :class:`rejected.data.Message`
-
-        """
-        if not properties:
-            properties = {}
-        if (
-                isinstance(message, dict)
-                and properties.get('content_type') == 'application/json'
-        ):
-            message = json.dumps(message)
-        return data.Message(
-            connection='mock',
-            channel=self.process.connections['mock'].channel,
-            method=spec.Basic.Deliver(
-                'ctag0', 1, False, exchange, routing_key
-            ),
-            properties=spec.BasicProperties(
-                app_id=properties.get('app_id', 'rejected.testing'),
-                content_encoding=properties.get('content_encoding'),
-                content_type=properties.get('content_type'),
-                correlation_id=properties.get(
-                    'correlation_id', self.correlation_id
-                ),
-                delivery_mode=properties.get('delivery_mode', 1),
-                expiration=properties.get('expiration'),
-                headers=properties.get('headers'),
-                message_id=properties.get('message_id', str(uuid.uuid4())),
-                priority=properties.get('priority'),
-                reply_to=properties.get('reply_to'),
-                timestamp=properties.get('timestamp', int(time.time())),
-                type=properties.get('type'),
-                user_id=properties.get('user_id'),
-            ),
-            body=message,
-        )
-
-    def log_exception(self, msg_format, *args, exc_info):
-        """Customize the logging of uncaught exceptions.
-
-        :param str msg_format: format of msg to log with ``self.logger.error``
-        :param args: positional arguments to pass to ``self.logger.error``
-        :param exc_info: The exc_info for the exception
-
-        This for internal use and should not be extended or used directly.
-
-        By default, this method will log the message using
-        :meth:`logging.Logger.error` and send the exception to Sentry.
-        If an exception is currently active, then the traceback will be
-        logged at the debug level.
-
-        """
-        LOGGER.exception(msg_format, *args, exc_info=exc_info)
-        self.exc_info = exc_info
-
-    @property
-    def measurement(self):
-        """Return the :py:class:`rejected.data.Measurement` for the currently
-        assigned measurement object to the consumer.
-
-        :rtype: :class:`rejected.measurement.Measurement`
-
-        """
-        return self.consumer._measurement
-
-    async def process_message(
-            self,
-            message_body=None,
-            content_type='application/json',
-            message_type=None,
-            properties=None,
-            exchange='rejected',
-            routing_key='routing-key',
-    ):
-        """Process a message as if it were being delivered by RabbitMQ. When
-        invoked, an AMQP message will be locally created and passed into the
-        consumer. With using the default values for the method, if you pass in
-        a JSON serializable object, the message body will automatically be
-        JSON serialized.
-
-        If an exception is not raised, a :class:`~rejected.data.Measurement`
-        instance is returned that will contain all of the measurements
-        collected during the processing of the message.
-
-        Example:
-
-        .. code:: python
-
-            class ConsumerTestCase(testing.AsyncTestCase):
-
-                async def test_consumer_raises_message_exception(self):
-                    with self.assertRaises(consumer.MessageException):
-                        result = await self.process_message({'foo': 'bar'})
-
-
-        .. note:: This method is a coroutine and must be awaited to ensure
-                  that your tests are functioning properly.
-
-        :param any message_body: the body of the message to create
-        :param str content_type: The mime type
-        :param str message_type: identifies the type of message to create
-        :param dict properties: AMQP message properties
-        :param str exchange: The exchange the message should appear to be from
-        :param str routing_key: The message's routing key
-        :raises: :exc:`rejected.consumer.ConsumerException`
-        :raises: :exc:`rejected.consumer.MessageException`
-        :raises: :exc:`rejected.consumer.ProcessingException`
-        :rtype: :class:`rejected.measurement.Measurement`
+        If ``message_body`` is a dict and ``content_type`` is
+        ``application/json``, the body is JSON-serialized.
 
         """
         properties = properties or {}
         properties.setdefault('content_type', content_type)
         properties.setdefault('correlation_id', self.correlation_id)
-        properties.setdefault('timestamp', int(time.time()))
+        properties.setdefault(
+            'timestamp',
+            int(datetime.datetime.now(tz=datetime.UTC).timestamp()),
+        )
         properties.setdefault('type', message_type)
 
-        measurement = data.Measurement()
+        if (
+            isinstance(message_body, dict)
+            and properties.get('content_type') == 'application/json'
+        ):
+            message_body = json.dumps(message_body)
 
-        self.consumer.log_exception = self.log_exception
-        result = await self.consumer.execute(
-            self.create_message(
-                message_body, properties, exchange, routing_key
+        mock_conn = mock.Mock(spec=connection.Connection)
+        mock_conn.is_running = True
+
+        msg = models.Message(
+            delivery_tag=1,
+            exchange=exchange,
+            routing_key=routing_key,
+            body=message_body,
+            app_id=properties.get('app_id', 'rejected.testing'),
+            content_encoding=properties.get('content_encoding'),
+            content_type=properties.get('content_type'),
+            correlation_id=properties.get(
+                'correlation_id', self.correlation_id
             ),
-            measurement,
+            delivery_mode=properties.get('delivery_mode', 1),
+            expiration=properties.get('expiration'),
+            headers=properties.get('headers', {}),
+            message_id=properties.get('message_id', str(uuid.uuid4())),
+            message_type=properties.get('type'),
+            priority=properties.get('priority'),
+            redelivered=False,
+            reply_to=properties.get('reply_to'),
+            returned=False,
+            timestamp=(
+                datetime.datetime.fromtimestamp(
+                    properties['timestamp'], tz=datetime.UTC
+                )
+                if properties.get('timestamp')
+                else None
+            ),
+            user_id=properties.get('user_id'),
         )
-        if result == data.CONSUMER_EXCEPTION:
-            raise consumer.ConsumerException()
-        elif result == data.MESSAGE_EXCEPTION:
-            raise consumer.MessageException()
-        elif result == data.PROCESSING_EXCEPTION:
-            raise consumer.ProcessingException()
-        elif result == data.UNHANDLED_EXCEPTION:
+        return models.ProcessingContext(
+            connection=mock_conn,
+            channel=self.process.connections['mock'].channel,
+            message=msg,
+        )
+
+    @property
+    def measurement(self) -> measurement_mod.Measurement | None:
+        """Return the Measurement for the last processed message."""
+        if self._last_ctx:
+            return self._last_ctx.measurement
+        return None
+
+    async def process_message(
+        self,
+        message_body: typing.Any = None,
+        content_type: str = 'application/json',
+        message_type: str | None = None,
+        properties: dict[str, typing.Any] | None = None,
+        exchange: str = 'rejected',
+        routing_key: str = 'routing-key',
+    ) -> measurement_mod.Measurement:
+        """Process a message as if it were being delivered by RabbitMQ.
+
+        Builds a :class:`~rejected.models.ProcessingContext` and
+        passes it through the consumer's ``execute`` method.
+
+        If an exception is not raised, returns the
+        :class:`~rejected.measurement.Measurement` collected during
+        processing.
+
+        :raises: :exc:`rejected.exceptions.ConsumerException`
+        :raises: :exc:`rejected.exceptions.MessageException`
+        :raises: :exc:`rejected.exceptions.ProcessingException`
+
+        """
+        ctx = self.create_context(
+            message_body,
+            content_type,
+            message_type,
+            properties,
+            exchange,
+            routing_key,
+        )
+        self._last_ctx = ctx
+
+        # Patch _log_exception to capture exc_info for re-raising
+        original_log = self.consumer._log_exception
+
+        def _capture_log(
+            ctx_: models.ProcessingContext, msg_format: str, *args: typing.Any
+        ) -> None:
+            import sys
+
+            self.exc_info = sys.exc_info()  # type: ignore[assignment]
+            original_log(ctx_, msg_format, *args)
+
+        self.consumer._log_exception = _capture_log  # type: ignore[assignment]
+
+        result = await self.consumer.execute(ctx)
+
+        if result == models.Result.CONSUMER_EXCEPTION:
+            raise exceptions.ConsumerException()
+        elif result == models.Result.MESSAGE_EXCEPTION:
+            raise exceptions.MessageException()
+        elif result == models.Result.PROCESSING_EXCEPTION:
+            raise exceptions.ProcessingException()
+        elif result == models.Result.UNHANDLED_EXCEPTION:
             if self.exc_info:
                 raise self.exc_info[1]
             raise AssertionError('UNHANDLED_EXCEPTION')
-        return measurement
+        return ctx.measurement
 
     @staticmethod
-    def _create_channel():
+    def _create_channel() -> mock.Mock:
         return mock.Mock(spec=channel.Channel)
 
-    def _create_connection(self):
+    def _create_connection(self) -> mock.Mock:
         obj = mock.Mock(spec=asyncio_connection.AsyncioConnection)
         obj.channel = self._create_channel()
         obj.channel.connection = obj
         return obj
 
-    def _create_consumer(self):
-        """Creates the per-test instance of the consumer that is going to be
-        tested.
-
-        :rtype: rejected.consumer.Consumer
-
-        """
+    def _create_consumer(self) -> consumer._Consumer:
         cls = self.get_consumer()
         obj = cls(config_module.Settings(self.get_settings()), self.process)
-        obj._message = self.create_message('dummy')
         obj.set_channel('mock', self.process.connections['mock'].channel)
         return obj
 
-    def _create_process(self):
+    def _create_process(self) -> mock.Mock:
         obj = mock.Mock(spec=process.Process)
         obj.connections = {'mock': self._create_connection()}
         obj.sentry_client = True if sentry_sdk else None
+        obj.codec = codecs.Codec()
         return obj
 
 
 class PublishedMessage:
-    """Contains information about messages published during a test when
-    using :class:`rejected.testing.AsyncTestCase`.
+    """Contains information about messages published during a test.
 
     :param str exchange: The exchange the message was published to
-    :param str routing_key: The routing key the message was published with
+    :param str routing_key: The routing key used
     :param pika.spec.BasicProperties properties: AMQP message properties
     :param bytes body: AMQP message body
 
@@ -317,26 +287,19 @@ class PublishedMessage:
 
     __slots__ = ['body', 'exchange', 'properties', 'routing_key']
 
-    def __init__(self, exchange, routing_key, properties, body):
-        """Create a new instance of the object.
-
-        :param str exchange: The exchange the message was published to
-        :param str routing_key: The routing key the message was published with
-        :param pika.spec.BasicProperties properties: AMQP message properties
-        :param bytes body: AMQP message body
-
-        """
+    def __init__(
+        self,
+        exchange: str,
+        routing_key: str,
+        properties: spec.BasicProperties,
+        body: bytes,
+    ) -> None:
         self.exchange = exchange
         self.routing_key = routing_key
         self.properties = properties
         self.body = body
 
-    def __repr__(self):
-        """Return the string representation of the object.
-
-        :rtype: str
-
-        """
+    def __repr__(self) -> str:
         return (
             f'<PublishedMessage exchange="{self.exchange}"'
             f' routing_key="{self.routing_key}">'

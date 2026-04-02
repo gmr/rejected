@@ -20,9 +20,7 @@ def get_package_version(
     parts = value.split('.')
     for index, _part in enumerate(parts):
         try:
-            return importlib.metadata.version(
-                '.'.join(parts[0 : index + 1])
-            )
+            return importlib.metadata.version('.'.join(parts[0 : index + 1]))
         except importlib.metadata.PackageNotFoundError:
             continue
     return None
@@ -44,9 +42,7 @@ def import_consumer(value: str) -> tuple[typing.Any, str | None]:
     )
 
 
-def percentile(
-    values: list[float], k: int
-) -> float | None:
+def percentile(values: list[float], k: int) -> float | None:
     """Find the percentile of a list of values.
 
     :param values: The list of values to find the percentile of

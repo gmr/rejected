@@ -38,9 +38,7 @@ class GarbageCollectorMixin:
         """
         if value is not None:
             self._collection_cycle = value
-            self._cycles_left = min(
-                self._cycles_left, self._collection_cycle
-            )
+            self._cycles_left = min(self._cycles_left, self._collection_cycle)
 
     async def on_finish(self) -> None:
         """Used to initiate the garbage collection"""
@@ -51,6 +49,5 @@ class GarbageCollectorMixin:
             num_collected = gc.collect()
             self._cycles_left = self._collection_cycle
             LOGGER.debug(
-                'garbage collection run, %d objects evicted',
-                num_collected,
+                'garbage collection run, %d objects evicted', num_collected
             )

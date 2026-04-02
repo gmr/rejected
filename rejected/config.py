@@ -75,9 +75,7 @@ def load(file_path: str | pathlib.Path) -> models.Config:
     """
     path = pathlib.Path(file_path)
     if not path.exists():
-        raise FileNotFoundError(
-            f'Configuration file not found: {path}'
-        )
+        raise FileNotFoundError(f'Configuration file not found: {path}')
 
     try:
         if path.suffix == '.toml':
@@ -87,35 +85,21 @@ def load(file_path: str | pathlib.Path) -> models.Config:
             with open(path) as f:
                 raw = yaml.safe_load(f) or {}
         else:
-            raise ValueError(
-                f'Unsupported config file type: {path.suffix}'
-            )
+            raise ValueError(f'Unsupported config file type: {path.suffix}')
     except (OSError, yaml.YAMLError) as exc:
-        raise ValueError(
-            f'Failed to read configuration: {exc}'
-        ) from exc
+        raise ValueError(f'Failed to read configuration: {exc}') from exc
     except tomllib.TOMLDecodeError as exc:
-        raise ValueError(
-            f'Failed to read configuration: {exc}'
-        ) from exc
+        raise ValueError(f'Failed to read configuration: {exc}') from exc
 
     if not isinstance(raw, dict):
         raise ValueError('Configuration root must be a mapping')
 
-    app_raw = (
-            raw.get('Application', raw.get('application', {})) or {}
-    )
-    logging_raw = (
-            raw.get('Logging', raw.get('logging', {})) or {}
-    )
+    app_raw = raw.get('Application', raw.get('application', {})) or {}
+    logging_raw = raw.get('Logging', raw.get('logging', {})) or {}
 
     try:
-        cfg = models.Config.model_validate(
-            {**app_raw, 'logging': logging_raw}
-        )
+        cfg = models.Config.model_validate({**app_raw, 'logging': logging_raw})
     except Exception as exc:
-        raise ValueError(
-            f'Invalid configuration: {exc}'
-        ) from exc
+        raise ValueError(f'Invalid configuration: {exc}') from exc
 
     return cfg

@@ -26,19 +26,14 @@ class CorrelationAdapter(logging.LoggerAdapter[logging.Logger]):
     """
 
     def __init__(
-        self,
-        logger: logging.Logger,
-        consumer: typing.Any,
-        **extra: typing.Any,
+        self, logger: logging.Logger, consumer: typing.Any, **extra: typing.Any
     ) -> None:
         self.logger = logger
         self.consumer = consumer
         super().__init__(logger, extra)
 
     def process(
-        self,
-        msg: str,
-        kwargs: typing.MutableMapping[str, typing.Any],
+        self, msg: str, kwargs: typing.MutableMapping[str, typing.Any]
     ) -> tuple[str, typing.MutableMapping[str, typing.Any]]:
         kwargs['extra'] = {
             'correlation_id': self.consumer.correlation_id,

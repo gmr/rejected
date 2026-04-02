@@ -20,6 +20,7 @@ class Measurement:
     def __init__(self) -> None:
         self.durations: dict[str, list[float]] = {}
         self.counters: collections.Counter[str] = collections.Counter()
+        self.message_age: float = 0.0
         self.tags: dict[str, str | bool | int] = {}
         self.values: dict[str, int | float] = {}
 
@@ -54,9 +55,7 @@ class Measurement:
             self.durations[key] = []
         self.durations[key].append(value)
 
-    def set_tag(
-        self, key: str, value: str | bool | int
-    ) -> None:
+    def set_tag(self, key: str, value: str | bool | int) -> None:
         """Set a tag for metrics submission.
 
         :param key: The tag name
@@ -65,9 +64,7 @@ class Measurement:
         """
         self.tags[key] = value
 
-    def set_value(
-        self, key: str, value: int | float
-    ) -> None:
+    def set_value(self, key: str, value: int | float) -> None:
         """Set a numeric value.
 
         :param key: The value name
@@ -77,9 +74,7 @@ class Measurement:
         self.values[key] = value
 
     @contextlib.contextmanager
-    def track_duration(
-        self, key: str
-    ) -> typing.Generator[None, None, None]:
+    def track_duration(self, key: str) -> typing.Generator[None, None, None]:
         """Context manager that records the duration of the wrapped
         block.
 

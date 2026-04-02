@@ -141,5 +141,5 @@ warn_return_any = true
 warn_unused_configs = true
 
 [[tool.mypy.overrides]]
-module = ["pika.*", "bs4", "umsgpack", "fastavro"]
+module = ["pika.*", "bs4", "umsgpack", "fastavro", "yaml"]
 ignore_missing_imports = true

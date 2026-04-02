@@ -6,9 +6,6 @@ import typing
 
 import pydantic
 
-if typing.TYPE_CHECKING:
-    from . import connection
-
 # Configuration models
 
 
@@ -100,14 +97,16 @@ class Config(pydantic.BaseModel):
 class Callbacks(pydantic.BaseModel):
     """Callbacks to the processor from the connection"""
 
-    on_ready: typing.Callable
-    on_connection_failure: typing.Callable
-    on_closed: typing.Callable
-    on_blocked: typing.Callable
-    on_unblocked: typing.Callable
-    on_confirmation: typing.Callable
-    on_delivery: typing.Callable
-    on_return: typing.Callable
+    model_config = pydantic.ConfigDict(arbitrary_types_allowed=True)
+
+    on_ready: typing.Callable[..., typing.Any]
+    on_connection_failure: typing.Callable[..., typing.Any]
+    on_closed: typing.Callable[..., typing.Any]
+    on_blocked: typing.Callable[..., typing.Any]
+    on_unblocked: typing.Callable[..., typing.Any]
+    on_confirmation: typing.Callable[..., typing.Any]
+    on_delivery: typing.Callable[..., typing.Any]
+    on_return: typing.Callable[..., typing.Any]
 
 
 # Message model
@@ -118,30 +117,31 @@ class Message(pydantic.BaseModel):
 
     model_config = pydantic.ConfigDict(arbitrary_types_allowed=True)
 
-    connection: 'connection.Connection'
-    channel: 'pika.channel.Channel'
-    delivery_tag: int | None = None
+    connection: typing.Any
+    channel: typing.Any
+    delivery_tag: int | None
+    exchange: str | None
+    routing_key: str | None
+    returned: bool = False
 
     body: typing.Any
 
-    app_id: str | None = None
-    content_encoding: str | None = None
-    content_type: str | None = None
-    correlation_id: str | None = None
-    exchange: str = ''
-    expiration: str | None = None
-    headers: dict[str, bool | dict | float | int | str | bytes] = (
-        pydantic.Field(default_factory=dict)
-    )
-    message_id: str | None = None
-    message_type: str | None = None
-    priority: int | None = None
-    redelivered: bool = False
-    reply_to: str | None = None
-    returned: bool = False
-    routing_key: str
-    timestamp: datetime.datetime | int | None = None
-    user_id: str | None = None
+    app_id: str | None
+    content_encoding: str | None
+    content_type: str | None
+    correlation_id: str | None
+    delivery_mode: int | None
+    expiration: str | None
+    headers: dict[
+        str, bool | dict[str, typing.Any] | float | int | str | bytes
+    ]
+    message_id: str | None
+    message_type: str | None
+    priority: int | None
+    redelivered: bool
+    reply_to: str | None
+    timestamp: datetime.datetime | None
+    user_id: str | None
 
 
 # Result codes

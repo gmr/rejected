@@ -199,6 +199,16 @@ class MasterControlProgram(state.State):
         process_name = data_values['name']
         del data_values['name']
 
+        # Forward per-message observations to Prometheus
+        prometheus.observe(
+            consumer_name,
+            data_values.pop('durations', []),
+            data_values.pop('message_ages', []),
+            data_values.pop('custom_durations', {}),
+            data_values.pop('custom_counters', {}),
+            data_values.pop('custom_gauges', {}),
+        )
+
         # Add it to our last poll global data
         if consumer_name not in self.last_poll_results:
             self.last_poll_results[consumer_name] = {}

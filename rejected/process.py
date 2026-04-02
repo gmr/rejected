@@ -486,6 +486,11 @@ class Process(multiprocessing.Process, state.State):
         self.pending = collections.deque()
         self.prepend_path = None
         self.previous = None
+        self._duration_observations: list[float] = []
+        self._message_age_observations: list[float] = []
+        self._custom_durations: dict[str, list[float]] = {}
+        self._custom_counters: dict[str, int] = {}
+        self._custom_gauges: dict[str, float] = {}
         self.sentry_client = None
         self.state = self.STATE_INITIALIZING
         self._tasks: set[asyncio.Task] = set()
@@ -802,6 +807,7 @@ class Process(multiprocessing.Process, state.State):
         duration = time.monotonic() - start_time
         self.counters[self.TIME_SPENT] += duration
         self.measurement.add_duration(self.TIME_SPENT, duration)
+        self._duration_observations.append(duration)
 
         if result == data.MESSAGE_DROP:
             LOGGER.debug('Rejecting message due to drop return from consumer')
@@ -843,6 +849,11 @@ class Process(multiprocessing.Process, state.State):
 
         self.counters[self.PROCESSED] += 1
         self.measurement.set_tag(self.PROCESSED, True)
+        if message.properties.timestamp:
+            age = time.time() - message.properties.timestamp
+            if age > 0:
+                self._message_age_observations.append(age)
+        self._collect_custom_measurements()
         self.maybe_submit_measurement()
         self.reset_state()
 
@@ -943,6 +954,24 @@ class Process(multiprocessing.Process, state.State):
         self.measurement.set_tag(self.NACKED, True)
         self.measurement.set_tag(self.REQUEUED, requeue)
 
+    def _collect_custom_measurements(self):
+        """Accumulate per-message Measurement data for Prometheus."""
+        if not self.measurement:
+            return
+        # Custom durations (excluding processing_time, already tracked)
+        for key, values in self.measurement.durations.items():
+            if key == self.TIME_SPENT:
+                continue
+            self._custom_durations.setdefault(key, []).extend(values)
+        # Custom counters
+        for key, value in self.measurement.counters.items():
+            self._custom_counters[key] = (
+                self._custom_counters.get(key, 0) + value
+            )
+        # Custom gauges (values dict on Measurement)
+        for key, value in self.measurement.values.items():
+            self._custom_gauges[key] = value
+
     def report_stats(self):
         """Create the dict of stats data for the MCP stats queue"""
         if not self.previous:
@@ -954,8 +983,20 @@ class Process(multiprocessing.Process, state.State):
             'consumer_name': self.consumer_name,
             'counts': dict(self.counters),
             'previous': dict(self.previous),
+            'durations': list(self._duration_observations),
+            'message_ages': list(self._message_age_observations),
+            'custom_durations': {
+                k: list(v) for k, v in self._custom_durations.items()
+            },
+            'custom_counters': dict(self._custom_counters),
+            'custom_gauges': dict(self._custom_gauges),
         }
         self.previous = dict(self.counters)
+        self._duration_observations.clear()
+        self._message_age_observations.clear()
+        self._custom_durations.clear()
+        self._custom_counters.clear()
+        self._custom_gauges.clear()
         return values
 
     def reset_error_counter(self):

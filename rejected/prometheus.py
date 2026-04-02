@@ -17,7 +17,6 @@ LOGGER = logging.getLogger(__name__)
 
 _metrics: dict = {}
 _previous: dict[str, dict[str, float]] = {}
-_custom_counter_prev: dict[tuple[str, str], int] = {}
 _started = False
 
 # Counter keys from process.Process that map to Prometheus Counters.
@@ -122,6 +121,10 @@ def start(port: int) -> None:
         LOGGER.warning('Prometheus exporter already running')
         return
 
+    prometheus_client.start_http_server(port)
+    _started = True
+    LOGGER.info('Prometheus metrics server started on port %d', port)
+
     for key, name, help_text in _COUNTER_DEFS:
         _metrics[key] = prometheus_client.Counter(
             name, help_text, ['consumer']
@@ -152,10 +155,6 @@ def start(port: int) -> None:
         ['consumer'],
         buckets=_AGE_BUCKETS,
     )
-
-    prometheus_client.start_http_server(port)
-    _started = True
-    LOGGER.info('Prometheus metrics server started on port %d', port)
 
 
 def _get_custom_histogram(key: str) -> 'prometheus_client.Histogram':
@@ -236,12 +235,8 @@ def observe(
             hist.observe(value)
 
     for key, value in (custom_counters or {}).items():
-        prev_key = (consumer_name, key)
-        prev = _custom_counter_prev.get(prev_key, 0)
-        delta = value - prev
-        if delta > 0:
-            _get_custom_counter(key).labels(consumer=consumer_name).inc(delta)
-        _custom_counter_prev[prev_key] = value
+        if value > 0:
+            _get_custom_counter(key).labels(consumer=consumer_name).inc(value)
 
     for key, value in (custom_gauges or {}).items():
         _get_custom_gauge(key).labels(consumer=consumer_name).set(value)

@@ -192,6 +192,8 @@ def main() -> None:
         parser.error(f'Unknown consumer: {args.consumer}')
     if args.quantity is not None and args.consumer is None:
         parser.error('--qty requires --only')
+    if args.max_messages is not None and args.max_messages <= 0:
+        parser.error('--max-messages must be a positive integer')
 
     try:
         if cfg.logging:

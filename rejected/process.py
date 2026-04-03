@@ -291,10 +291,7 @@ class Process(multiprocessing.Process, state.State):
             msg = ctx.message
             try:
                 msg.body = await self.codec.decode(
-                    msg.body,
-                    msg.content_type,
-                    msg.content_encoding,
-                    msg.message_type,
+                    msg.body, msg.content_type, msg.content_encoding, msg.type
                 )
             except codecs.DecodeError as error:
                 LOGGER.error('Failed to decode message body: %s', error)
@@ -451,7 +448,7 @@ class Process(multiprocessing.Process, state.State):
                     dict(properties.headers) if properties.headers else {}
                 ),
                 message_id=properties.message_id,
-                message_type=properties.type,
+                type=properties.type,
                 priority=properties.priority,
                 redelivered=redelivered,
                 reply_to=properties.reply_to,
@@ -537,6 +534,14 @@ class Process(multiprocessing.Process, state.State):
 
         if self.statsd:
             self._submit_statsd(ctx.measurement)
+
+        # Shut down after reaching the message limit
+        if self.max_messages and self._processed_count >= self.max_messages:
+            LOGGER.info(
+                'Reached max messages (%i), shutting down', self.max_messages
+            )
+            self.shutdown_connections()
+            return
 
         # Transition state based on remaining in-flight messages
         if not self._in_flight:
@@ -988,6 +993,10 @@ class Process(multiprocessing.Process, state.State):
     @property
     def stats_queue(self) -> 'multiprocessing.Queue[dict[str, typing.Any]]':
         return self._kwargs['stats_queue']  # type: ignore[no-any-return]
+
+    @property
+    def max_messages(self) -> int | None:
+        return self._kwargs.get('max_messages')  # type: ignore[no-any-return]
 
     @property
     def too_many_errors(self) -> bool:

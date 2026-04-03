@@ -122,7 +122,7 @@ Each consumer entry is a named object with the following attributes:
 | `qty` | Number of consumer processes to run | `1` |
 | `queue` | RabbitMQ queue name to consume from (defaults to consumer name) | |
 | `ack` | Explicitly acknowledge messages (`no_ack = !ack`) | `true` |
-| `qos_prefetch` | QoS prefetch count (set > 1 for concurrent processing with `TransactionConsumer`) | `1` |
+| `qos_prefetch` | QoS prefetch count (set > 1 for concurrent processing with `FunctionalConsumer`) | `1` |
 | `max_errors` | Errors within 60s before restarting the consumer | `5` |
 | `error_exchange` | Exchange to republish messages to on `ProcessingException` | |
 | `error_max_retry` | Max `ProcessingException` retries before dropping | |

@@ -59,6 +59,7 @@ class MasterControlProgram(state.State):
         consumer: str | None = None,
         profile: str | None = None,
         quantity: int | None = None,
+        max_messages: int | None = None,
     ) -> None:
         """Initialize the Master Control Program
 
@@ -100,6 +101,7 @@ class MasterControlProgram(state.State):
         LOGGER.debug('Stats logging enabled: %s', self.log_stats_enabled)
 
         # Setup the poller related threads
+        self.max_messages: int | None = max_messages
         self.poll_interval: float = config.poll_interval
         LOGGER.debug('Set process poll interval to %.2f', self.poll_interval)
 
@@ -198,6 +200,11 @@ class MasterControlProgram(state.State):
         processes needed.
 
         """
+        if self.max_messages:
+            LOGGER.debug(
+                'Skipping process respawn (max_messages=%i)', self.max_messages
+            )
+            return
         LOGGER.debug('Checking minimum consumer process levels')
         for name in self.consumers:
             processes_needed = self.process_spawn_qty(name)
@@ -428,6 +435,7 @@ class MasterControlProgram(state.State):
             'daemon': False,
             'stats_queue': self.stats_queue,
             'logging_config': self.config.logging,
+            'max_messages': self.max_messages,
         }
         return process_name, process.Process(name=process_name, kwargs=kwargs)
 

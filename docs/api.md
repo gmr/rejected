@@ -49,9 +49,9 @@ The primary base classes for building message consumers.
         - timestamp
         - user_id
 
-### TransactionConsumer
+### FunctionalConsumer
 
-::: rejected.consumer.TransactionConsumer
+::: rejected.consumer.FunctionalConsumer
     options:
       members:
         - process

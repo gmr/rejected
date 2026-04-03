@@ -70,6 +70,7 @@ class Controller:
                 consumer=self.args.consumer,
                 profile=self.args.profile,
                 quantity=self.args.quantity,
+                max_messages=self.args.max_messages,
             )
             try:
                 self._mcp.run()
@@ -163,6 +164,15 @@ def _build_parser() -> argparse.ArgumentParser:
         help='Override the consumer quantity (use with -o)',
     )
     parser.add_argument(
+        '-n',
+        '--max-messages',
+        type=int,
+        default=None,
+        dest='max_messages',
+        metavar='N',
+        help='Process N messages per consumer then shut down',
+    )
+    parser.add_argument(
         '--version', action='version', version=f'%(prog)s {__version__}'
     )
     return parser
@@ -182,6 +192,8 @@ def main() -> None:
         parser.error(f'Unknown consumer: {args.consumer}')
     if args.quantity is not None and args.consumer is None:
         parser.error('--qty requires --only')
+    if args.max_messages is not None and args.max_messages <= 0:
+        parser.error('--max-messages must be a positive integer')
 
     try:
         if cfg.logging:

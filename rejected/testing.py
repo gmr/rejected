@@ -68,7 +68,7 @@ LOGGER = logging.getLogger(__name__)
 class AsyncTestCase(unittest.IsolatedAsyncioTestCase):
     """:class:`unittest.IsolatedAsyncioTestCase` subclass for testing
     :class:`~rejected.consumer.Consumer` and
-    :class:`~rejected.consumer.TransactionConsumer` classes.
+    :class:`~rejected.consumer.FunctionalConsumer` classes.
 
     """
 
@@ -162,7 +162,7 @@ class AsyncTestCase(unittest.IsolatedAsyncioTestCase):
             expiration=properties.get('expiration'),
             headers=properties.get('headers', {}),
             message_id=properties.get('message_id', str(uuid.uuid4())),
-            message_type=properties.get('type'),
+            type=properties.get('type'),
             priority=properties.get('priority'),
             redelivered=False,
             reply_to=properties.get('reply_to'),

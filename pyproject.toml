@@ -48,7 +48,7 @@ rejected = "rejected.controller:main"
 
 [project.urls]
 Homepage = "https://github.com/gmr/rejected"
-Documentation = "https://rejected.readthedocs.io"
+Documentation = "https://gmr.github.io/rejected"
 "Bug Tracker" = "https://github.com/gmr/rejected/issues"
 "Source Code" = "https://github.com/gmr/rejected"
 

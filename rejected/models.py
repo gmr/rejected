@@ -142,7 +142,7 @@ class Message(pydantic.BaseModel):
         str, bool | dict[str, typing.Any] | float | int | str | bytes
     ]
     message_id: str | None
-    message_type: str | None
+    type: str | None
     priority: int | None
     redelivered: bool
     reply_to: str | None

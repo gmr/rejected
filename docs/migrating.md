@@ -47,7 +47,9 @@ class MyConsumer(consumer.Consumer):
         yield self.do_something()
 
 # 4.0
-class MyConsumer(consumer.Consumer):
+import rejected
+
+class MyConsumer(rejected.Consumer):
     async def process(self):
         self.logger.info(self.body)
         await self.do_something()
@@ -86,7 +88,9 @@ class MyConsumer(consumer.SmartConsumer):
         self.publish_message(...)
 
 # 4.0
-class MyConsumer(consumer.Consumer):
+import rejected
+
+class MyConsumer(rejected.Consumer):
     async def process(self):
         # self.body is auto-deserialized (same behavior)
         data = self.body
@@ -101,10 +105,10 @@ Unlike `Consumer` (which holds a lock), `TransactionConsumer` passes a
 processed in parallel:
 
 ```python
-from rejected import consumer, models
+import rejected
 
-class MyConcurrentConsumer(consumer.TransactionConsumer):
-    async def process(self, ctx: models.ProcessingContext):
+class MyConcurrentConsumer(rejected.TransactionConsumer):
+    async def process(self, ctx: rejected.ProcessingContext):
         self.logger.info('Body: %s', ctx.message.body)
 ```
 
@@ -138,17 +142,38 @@ instead of rejected.
 
 ### Import changes
 
+In 4.0, the primary consumer classes, exceptions, and models are all
+available directly from the `rejected` package:
+
 ```python
 # 3.x
-from rejected.consumer import ConsumerException, MessageException, ProcessingException
+from rejected.consumer import Consumer, ConsumerException, MessageException
 from rejected.data import Measurement
 
-# 4.0 (preferred)
-from rejected.exceptions import ConsumerException, MessageException, ProcessingException
-from rejected.measurement import Measurement
+# 4.0 (preferred — use top-level imports)
+import rejected
 
-# 4.0 (backward-compatible re-exports still work)
-from rejected.consumer import ConsumerException, MessageException, ProcessingException
+class MyConsumer(rejected.Consumer): ...
+class MyConcurrent(rejected.TransactionConsumer): ...
+
+# Exceptions
+raise rejected.ConsumerException('...')
+raise rejected.MessageException('...')
+raise rejected.ProcessingException('...')
+
+# Models
+ctx: rejected.ProcessingContext
+msg: rejected.Message
+result: rejected.Result
+```
+
+Sub-module imports still work for backward compatibility or if you prefer
+explicit paths:
+
+```python
+from rejected.exceptions import ConsumerException
+from rejected.measurement import Measurement
+from rejected.models import Message, ProcessingContext
 ```
 
 ## Data Classes
@@ -156,8 +181,8 @@ from rejected.consumer import ConsumerException, MessageException, ProcessingExc
 ### Message
 
 The `rejected.data.Message` and `rejected.data.Properties` classes have been
-replaced by `rejected.models.Message`, a Pydantic model. If you accessed
-these directly in tests or custom code:
+replaced by `rejected.Message` (a Pydantic model). If you accessed these
+directly in tests or custom code:
 
 ```python
 # 3.x
@@ -166,8 +191,9 @@ msg = Message(channel, method, header, properties, body)
 msg.properties.content_type
 
 # 4.0
-from rejected.models import Message
-msg = Message(
+import rejected
+
+msg = rejected.Message(
     delivery_tag=1,
     exchange='exchange',
     routing_key='key',
@@ -201,6 +227,8 @@ The API is unchanged.
 
 ```python
 # 3.x
+from rejected import testing
+
 class MyTest(testing.AsyncTestCase):
     def get_consumer(self):
         return MyConsumer
@@ -210,6 +238,8 @@ class MyTest(testing.AsyncTestCase):
         yield self.process_message({'key': 'value'})
 
 # 4.0
+from rejected import testing
+
 class MyTest(testing.AsyncTestCase):
     def get_consumer(self):
         return MyConsumer
@@ -285,8 +315,8 @@ connections:
 
 | 3.x API | 4.0 Replacement |
 |---------|----------------|
-| `consumer.SmartConsumer` | `consumer.Consumer` (auto-deserializes) |
-| `consumer.PublishingConsumer` | `consumer.Consumer` (always could publish) |
+| `consumer.SmartConsumer` | `rejected.Consumer` (auto-deserializes) |
+| `consumer.PublishingConsumer` | `rejected.Consumer` (always could publish) |
 | `self.io_loop` | `asyncio.get_event_loop()` |
 | `self.yield_to_ioloop()` | `await asyncio.sleep(0)` |
 | `self.reply(...)` | Use `await self.publish_message(...)` with `reply_to` |
@@ -296,8 +326,8 @@ connections:
 | `self.statsd_incr(...)` | `self.stats_incr(...)` |
 | `self.statsd_track_duration(...)` | `self.stats_track_duration(...)` |
 | `rejected.data.Data` | Removed |
-| `rejected.data.Message` | `rejected.models.Message` |
-| `rejected.data.Properties` | Fields are on `rejected.models.Message` |
+| `rejected.data.Message` | `rejected.Message` |
+| `rejected.data.Properties` | Fields are on `rejected.Message` |
 | `pickle` content types | Removed for security (RCE risk) |
 
 ## Prometheus Metrics (new)
@@ -321,16 +351,17 @@ to Prometheus.
 ## Quick Migration Checklist
 
 1. Ensure Python >= 3.11
-2. Replace `@gen.coroutine` / `yield` with `async def` / `await`
-3. Make `process()`, `prepare()`, `finish()` async
-4. Add `await` to `publish_message()` calls
-5. Replace `SmartConsumer` / `PublishingConsumer` with `Consumer`
-6. Replace `tornado` imports with `asyncio` equivalents
-7. Update tests to use `async def` test methods (no `@gen_test`)
-8. Replace `from rejected.data import ...` with `from rejected.measurement import ...`
-   or `from rejected.models import ...`
-9. Rename `publisher_confirmation` to `confirm` in connection config
-10. Remove `Daemon` section from config (if present)
-11. Remove `stats.influxdb` from config (use Prometheus instead)
-12. Remove any `pickle` content type usage
-13. Replace deprecated `statsd_*` method calls with `stats_*` equivalents
+2. Update imports to use `import rejected` and `rejected.Consumer`, etc.
+3. Replace `@gen.coroutine` / `yield` with `async def` / `await`
+4. Make `process()`, `prepare()`, `finish()` async
+5. Add `await` to `publish_message()` calls
+6. Replace `SmartConsumer` / `PublishingConsumer` with `rejected.Consumer`
+7. Replace `tornado` imports with `asyncio` equivalents
+8. Replace `from rejected.data import ...` with `rejected.Message`,
+   `rejected.measurement.Measurement`, etc.
+9. Update tests to use `async def` test methods (no `@gen_test`)
+10. Rename `publisher_confirmation` to `confirm` in connection config
+11. Remove `Daemon` section from config (if present)
+12. Remove `stats.influxdb` from config (use Prometheus instead)
+13. Remove any `pickle` content type usage
+14. Replace deprecated `statsd_*` method calls with `stats_*` equivalents

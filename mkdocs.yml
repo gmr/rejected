@@ -1,6 +1,6 @@
 site_name: Rejected
 site_description: Rejected is a Python RabbitMQ Consumer Framework and Controller Daemon
-site_url: https://rejected.readthedocs.io
+site_url: https://gmr.github.io/rejected
 repo_url: https://github.com/gmr/rejected
 repo_name: gmr/rejected
 

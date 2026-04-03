@@ -6,15 +6,16 @@ The following example illustrates a very simple consumer that logs each
 message body as it's received.
 
 ```python
-from rejected import consumer
 import logging
+
+import rejected
 
 __version__ = '1.0.0'
 
 LOGGER = logging.getLogger(__name__)
 
 
-class ExampleConsumer(consumer.Consumer):
+class ExampleConsumer(rejected.Consumer):
 
     async def process(self):
         LOGGER.info(self.body)
@@ -51,22 +52,23 @@ error counter. When too many errors occur, rejected will automatically restart
 the consumer after a brief quiet period.
 
 ```python
-from rejected import consumer, exceptions
 import logging
+
+import rejected
 
 __version__ = '1.0.0'
 
 LOGGER = logging.getLogger(__name__)
 
 
-class ExampleConsumer(consumer.Consumer):
+class ExampleConsumer(rejected.Consumer):
 
     def _connect_to_database(self):
         return False
 
     async def process(self):
         if not self._connect_to_database():
-            raise exceptions.ConsumerException('Database error')
+            raise rejected.ConsumerException('Database error')
         LOGGER.info(self.body)
 ```
 
@@ -128,7 +130,7 @@ If the type does not match:
 - Otherwise, a `MessageException` is raised.
 
 ```python
-class StrictConsumer(consumer.Consumer):
+class StrictConsumer(rejected.Consumer):
     MESSAGE_TYPE = 'user.created'
     DROP_INVALID_MESSAGES = True
     DROP_EXCHANGE = 'dead-letter'
@@ -143,7 +145,7 @@ Consumers can publish messages using `publish_message`. Note that it is
 an `async` method:
 
 ```python
-class ExampleConsumer(consumer.Consumer):
+class ExampleConsumer(rejected.Consumer):
 
     async def process(self):
         LOGGER.info(self.body)
@@ -168,21 +170,22 @@ in parallel. Instead of accessing message properties via `self.body` etc.,
 the processing context is passed explicitly:
 
 ```python
-from rejected import consumer, models
 import logging
+
+import rejected
 
 LOGGER = logging.getLogger(__name__)
 
 
-class MyConcurrentConsumer(consumer.FunctionalConsumer):
+class MyConcurrentConsumer(rejected.FunctionalConsumer):
 
-    async def prepare(self, ctx: models.ProcessingContext):
+    async def prepare(self, ctx: rejected.ProcessingContext):
         LOGGER.debug('Preparing to process %s', ctx.message.message_id)
 
-    async def process(self, ctx: models.ProcessingContext):
+    async def process(self, ctx: rejected.ProcessingContext):
         LOGGER.info('Processing: %s', ctx.message.body)
 
-    async def finish(self, ctx: models.ProcessingContext):
+    async def finish(self, ctx: rejected.ProcessingContext):
         LOGGER.debug('Finished processing %s', ctx.message.message_id)
 ```
 
@@ -205,7 +208,7 @@ Consumers can emit custom metrics that are forwarded to statsd and/or
 Prometheus:
 
 ```python
-class MetricsConsumer(consumer.Consumer):
+class MetricsConsumer(rejected.Consumer):
 
     async def process(self):
         # Increment a counter
@@ -229,10 +232,12 @@ after processing messages. By default it collects every 10,000 messages.
 Configure the frequency via the `gc_collection_frequency` setting:
 
 ```python
-from rejected import consumer, mixins
+from rejected.mixins import GarbageCollectorMixin
+
+import rejected
 
 
-class MyConsumer(mixins.GarbageCollectorMixin, consumer.Consumer):
+class MyConsumer(GarbageCollectorMixin, rejected.Consumer):
 
     async def process(self):
         ...

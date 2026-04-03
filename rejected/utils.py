@@ -1,33 +1,37 @@
 import importlib
 import importlib.metadata
 import math
+import types
+import typing
 
 
-def get_package_version(module_obj, value):
+def get_package_version(
+    module_obj: types.ModuleType, value: str
+) -> str | None:
     """Get the version of a package or a module's package.
 
-    :param object module_obj: The module that was imported for the consumer
-    :param str value: The namespaced module path or package name
-    :rtype: str or None
+    :param module_obj: The module that was imported for the consumer
+    :param value: The namespaced module path or package name
 
     """
     for key in ['version', '__version__']:
         if hasattr(module_obj, key):
-            return getattr(module_obj, key)
+            return str(getattr(module_obj, key))
     parts = value.split('.')
     for index, _part in enumerate(parts):
         try:
             return importlib.metadata.version('.'.join(parts[0 : index + 1]))
         except importlib.metadata.PackageNotFoundError:
             continue
+    return None
 
 
-def import_consumer(value):
-    """Pass in a string in the format of foo.Bar, foo.bar.Baz, foo.bar.baz.Qux
-    and it will return a handle to the class, and the version.
+def import_consumer(value: str) -> tuple[typing.Any, str | None]:
+    """Pass in a string in the format of foo.Bar, foo.bar.Baz,
+    foo.bar.baz.Qux and it will return a handle to the class, and
+    the version.
 
-    :param str value: The consumer class in module.Consumer format
-    :return: tuple(Class, str)
+    :param value: The consumer class in module.Consumer format
 
     """
     parts = value.split('.')
@@ -38,12 +42,11 @@ def import_consumer(value):
     )
 
 
-def percentile(values, k):
+def percentile(values: list[float], k: int) -> float | None:
     """Find the percentile of a list of values.
 
-    :param list values: The list of values to find the percentile of
-    :param int k: The percentile to find
-    :rtype: float or int
+    :param values: The list of values to find the percentile of
+    :param k: The percentile to find
 
     """
     if not values:

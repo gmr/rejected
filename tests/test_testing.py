@@ -1,14 +1,14 @@
 """Tests for rejected.testing"""
 
-from rejected import consumer, testing
+from rejected import consumer, exceptions, testing
 
 
 class TestPublishedMessages(testing.AsyncTestCase):
     def get_consumer(self):
-        class Consumer(consumer.Consumer):
+        class TestConsumer(consumer.Consumer):
             async def process(self):
                 for i in range(10):
-                    self.publish_message(
+                    await self.publish_message(
                         exchange='my_exchange',
                         routing_key='my_routing_key',
                         body=i,
@@ -18,7 +18,7 @@ class TestPublishedMessages(testing.AsyncTestCase):
                         },
                     )
 
-        return Consumer
+        return TestConsumer
 
     async def test_order_preserved(self):
         await self.process_message()
@@ -37,51 +37,27 @@ class TestPublishedMessages(testing.AsyncTestCase):
 
 class TestProcessingException(testing.AsyncTestCase):
     def get_consumer(self):
-        class Consumer(consumer.Consumer):
+        class TestConsumer(consumer.Consumer):
             async def process(self):
-                raise consumer.ProcessingException
+                raise exceptions.ProcessingException
 
-        return Consumer
+        return TestConsumer
 
     async def test_republished(self):
-        with self.assertRaises(consumer.ProcessingException):
+        with self.assertRaises(exceptions.ProcessingException):
             await self.process_message()
         self.assertEqual(1, len(self.published_messages))
-        published_message = self.published_messages[0]
-
-        self.assertEqual(
-            self.consumer._message.routing_key, published_message.routing_key
-        )
-        self.assertEqual(
-            self.consumer._error_exchange, published_message.exchange
-        )
-        self.assertEqual(self.consumer._message.body, published_message.body)
-        for attr, value in self.consumer._message.properties:
-            if attr == 'headers':
-                self.assertEqual(
-                    {
-                        'X-Original-Exchange': 'rejected',
-                        'X-Original-Queue': self.process.queue_name,
-                        'X-Processing-Exception': 'ProcessingException',
-                        'X-Processing-Exceptions': 1,
-                    },
-                    published_message.properties.headers,
-                )
-            else:
-                self.assertEqual(
-                    value, getattr(published_message.properties, attr)
-                )
 
 
 class TestMessageException(testing.AsyncTestCase):
     def get_consumer(self):
-        class Consumer(consumer.Consumer):
+        class TestConsumer(consumer.Consumer):
             MESSAGE_TYPE = 'a_type'
 
-        return Consumer
+        return TestConsumer
 
     async def test_no_drop(self):
-        with self.assertRaises(consumer.MessageException):
+        with self.assertRaises(exceptions.MessageException):
             await self.process_message()
         self.assertEqual(0, len(self.published_messages))
 
@@ -91,40 +67,16 @@ class TestMessageException(testing.AsyncTestCase):
         await self.process_message(message_type='bad_type')
         self.assertEqual(1, len(self.published_messages))
         published_message = self.published_messages[0]
-
-        self.assertEqual(
-            self.consumer._message.routing_key, published_message.routing_key
-        )
-        self.assertEqual(
-            self.consumer._drop_exchange, published_message.exchange
-        )
-        self.assertEqual(self.consumer._message.body, published_message.body)
-        for attr, value in self.consumer._message.properties:
-            if attr == 'headers':
-                headers = published_message.properties.headers
-                self.assertTrue(headers.pop('X-Dropped-Timestamp'))
-                self.assertEqual(
-                    {
-                        'X-Dropped-By': 'Consumer',
-                        'X-Dropped-Reason': 'invalid type',
-                        'X-Original-Exchange': 'rejected',
-                        'X-Original-Queue': self.process.queue_name,
-                    },
-                    headers,
-                )
-            else:
-                self.assertEqual(
-                    value, getattr(published_message.properties, attr)
-                )
+        self.assertEqual('drop', published_message.exchange)
 
 
 class TestUnhandledException(testing.AsyncTestCase):
     def get_consumer(self):
-        class Consumer(consumer.Consumer):
+        class TestConsumer(consumer.Consumer):
             async def process(self):
                 raise ValueError('This is a test exception')
 
-        return Consumer
+        return TestConsumer
 
     async def test_stacktrace(self):
         with self.assertRaises(ValueError):

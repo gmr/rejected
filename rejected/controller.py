@@ -2,12 +2,16 @@
 OS Level controlling class: CLI entry point, signal handling, MCP lifecycle.
 """
 
+from __future__ import annotations
+
 import argparse
 import logging
 import logging.config
 import os
 import signal
 import sys
+import types
+import typing
 
 try:
     import sentry_sdk
@@ -24,15 +28,17 @@ LOGGER = logging.getLogger(__name__)
 class Controller:
     """Manages the MCP lifecycle and OS-level signal handling."""
 
-    def __init__(self, args: argparse.Namespace, cfg: config_module.Config):
+    def __init__(
+        self, args: argparse.Namespace, cfg: config_module.Config
+    ) -> None:
         self.args = args
         self.config = cfg
-        self._mcp = None
+        self._mcp: mcp.MasterControlProgram | None = None
         self._reload_requested = False
         self._shutdown_requested = False
         self._sentry_client = False
         if sentry_sdk and cfg.sentry_dsn:
-            init_kwargs = {
+            init_kwargs: dict[str, typing.Any] = {
                 'dsn': cfg.sentry_dsn,
                 'send_default_pii': False,
                 'integrations': [
@@ -46,8 +52,9 @@ class Controller:
             sentry_sdk.init(**init_kwargs)
             self._sentry_client = True
 
-    def run(self):
-        """Run the application: set up signals, start MCP, block until done.
+    def run(self) -> None:
+        """Run the application: set up signals, start MCP, block until
+        done.
 
         Loops on SIGHUP to reload config and restart consumers without
         dropping the process.
@@ -86,22 +93,24 @@ class Controller:
                     logging.config.dictConfig(self.config.logging)
             except (FileNotFoundError, ValueError) as exc:
                 LOGGER.error(
-                    'Failed to reload configuration: %s — restarting with '
-                    'previous config',
+                    'Failed to reload configuration: %s — restarting '
+                    'with previous config',
                     exc,
                 )
 
-    def _setup_signals(self):
+    def _setup_signals(self) -> None:
         signal.signal(signal.SIGHUP, self._on_sighup)
         signal.signal(signal.SIGTERM, self._on_sigterm)
 
-    def _on_sighup(self, _signum, _frame):
+    def _on_sighup(self, _signum: int, _frame: types.FrameType | None) -> None:
         LOGGER.info('Received SIGHUP — reloading configuration')
         self._reload_requested = True
         if self._mcp:
             self._mcp.stop_processes()
 
-    def _on_sigterm(self, _signum, _frame):
+    def _on_sigterm(
+        self, _signum: int, _frame: types.FrameType | None
+    ) -> None:
         LOGGER.info('Received SIGTERM, initiating shutdown')
         self._shutdown_requested = True
         if self._mcp:
@@ -110,8 +119,7 @@ class Controller:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog='rejected',
-        description='RabbitMQ consumer framework',
+        prog='rejected', description='RabbitMQ consumer framework'
     )
     parser.add_argument(
         '-c',
@@ -127,7 +135,7 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         dest='profile',
         metavar='DIR',
-        help='Profile consumer modules, writing output to this directory',
+        help='Profile consumer modules, writing output to DIR',
     )
     parser.add_argument(
         '-o',
@@ -155,14 +163,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help='Override the consumer quantity (use with -o)',
     )
     parser.add_argument(
-        '--version',
-        action='version',
-        version=f'%(prog)s {__version__}',
+        '--version', action='version', version=f'%(prog)s {__version__}'
     )
     return parser
 
 
-def main():
+def main() -> None:
     """CLI entry point."""
     parser = _build_parser()
     args = parser.parse_args()

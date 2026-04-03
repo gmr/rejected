@@ -5,7 +5,7 @@ connection state and collects stats about the consuming process.
 """
 
 import asyncio
-import collections
+import datetime
 import logging
 import logging.config
 import math
@@ -13,407 +13,34 @@ import multiprocessing
 import os
 import profile
 import signal
-import ssl
 import time
+import types
 import typing
 from os import path
 
 import pika
-from pika import exceptions
-from pika.adapters import asyncio_connection
+import pika.channel
+import pika.spec
 
 try:
     import sentry_sdk
-    from sentry_sdk.integrations.logging import LoggingIntegration
+    from sentry_sdk import logging as sentry_logging
 except ImportError:
-    sentry_sdk = None
-    LoggingIntegration = None
+    sentry_sdk, sentry_logging = None, None
 
-from . import __version__, data, state, statsd, utils
+from . import (
+    __version__,
+    codecs,
+    connection,
+    measurement,
+    models,
+    state,
+    statsd,
+    utils,
+)
 from . import config as config_module
 
 LOGGER = logging.getLogger(__name__)
-
-
-class Callbacks:
-    """Slotted callback classes to fix namedtuple issue in 3.9"""
-
-    __slots__ = [
-        'on_blocked',
-        'on_closed',
-        'on_confirmation',
-        'on_connection_failure',
-        'on_delivery',
-        'on_ready',
-        'on_return',
-        'on_unblocked',
-    ]
-
-    def __init__(
-        self,
-        on_ready,
-        on_connection_failure,
-        on_closed,
-        on_blocked,
-        on_unblocked,
-        on_confirmation,
-        on_delivery,
-        on_return,
-    ):
-        self.on_ready = on_ready
-        self.on_connection_failure = on_connection_failure
-        self.on_closed = on_closed
-        self.on_blocked = on_blocked
-        self.on_unblocked = on_unblocked
-        self.on_confirmation = on_confirmation
-        self.on_delivery = on_delivery
-        self.on_return = on_return
-
-
-class Connection(state.State):
-    HB_INTERVAL = 300
-    STATE_CLOSED = 0x08
-    STATES: typing.ClassVar[dict[int, str]] = {
-        **state.State.STATES,
-        STATE_CLOSED: 'Closed',
-    }
-
-    def __init__(
-        self,
-        name,
-        config,
-        consumer_name,
-        should_consume,
-        publisher_confirmations,
-        io_loop,
-        callbacks,
-    ):
-        super().__init__()
-        self.blocked = False
-        self.callbacks = callbacks
-        self.channel = None
-        self.config = config
-        self.should_consume = should_consume
-        self.consumer_tag = f'{consumer_name}-{os.getpid()}'
-        self.io_loop = io_loop
-        self.name = name
-        self.publisher_confirm = publisher_confirmations
-        self.connection = self.connect()
-
-    @property
-    def is_closed(self):
-        return self.is_stopped
-
-    def connect(self):
-        """Setup the AsyncioConnection which connects to RabbitMQ
-        automatically with connection callbacks for when the connection is
-        opened, when there is an error opening a connection or when a
-        previously opened connection is closed.
-
-        """
-        self.set_state(self.STATE_CONNECTING)
-        return asyncio_connection.AsyncioConnection(
-            self._connection_parameters,
-            on_open_callback=self.on_open,
-            on_open_error_callback=self.on_open_error,
-            on_close_callback=self.on_closed,
-            custom_ioloop=self.io_loop,
-        )
-
-    def shutdown(self):
-        if self.is_shutting_down:
-            LOGGER.debug('Connection %s is already shutting down', self.name)
-            return
-
-        self.set_state(self.STATE_SHUTTING_DOWN)
-        LOGGER.debug('Connection %s is shutting down', self.name)
-        if self.is_active:
-            LOGGER.debug(
-                'Connection %s is sending a Basic.Cancel to RabbitMQ',
-                self.name,
-            )
-            self.channel.basic_cancel(
-                self.on_consumer_cancelled, self.consumer_tag
-            )
-        else:
-            self.channel.close()
-
-    def on_open(self, connection):
-        """Invoked when the connection is opened
-
-        :type connection: pika.adapters.asyncio_connection.AsyncioConnection
-
-        """
-        LOGGER.debug('Connection %s is open (%r)', self.name, connection)
-        self.connection = connection
-        try:
-            self.connection.channel(on_open_callback=self.on_channel_open)
-        except exceptions.ConnectionClosed:
-            LOGGER.warning('Channel open on closed connection')
-            self.set_state(self.STATE_CLOSED)
-            self.callbacks.on_closed(self.name)
-            return
-        self.connection.add_on_connection_blocked_callback(self.on_blocked)
-        self.connection.add_on_connection_unblocked_callback(self.on_unblocked)
-
-    def on_open_error(self, *args, **kwargs):
-        LOGGER.error('Connection %s failure %r %r', self.name, args, kwargs)
-        self.on_failure()
-
-    def on_closed(self, *args, **kwargs):
-        if self.is_connecting:
-            LOGGER.error(
-                'Connection %s failure while connecting: (%r %r)',
-                self.name,
-                args,
-                kwargs,
-            )
-            self.on_failure()
-        elif not self.is_closed:
-            self.set_state(self.STATE_CLOSED)
-            LOGGER.info(
-                'Connection %s closed (%r %r)', self.name, args, kwargs
-            )
-            self.callbacks.on_closed(self.name)
-
-    def on_blocked(self, *args, **kwargs):
-        LOGGER.warning(
-            'Connection %s is blocked: (%r %r)', self.name, args, kwargs
-        )
-        self.blocked = True
-        self.callbacks.on_blocked(self.name)
-
-    def on_unblocked(self, *args, **kwargs):
-        LOGGER.warning(
-            'Connection %s is unblocked: (%r %r)', self.name, args, kwargs
-        )
-        self.blocked = False
-        self.callbacks.on_unblocked(self.name)
-
-    def on_channel_open(self, channel):
-        """This method is invoked by pika when the channel has been opened. It
-        will change the state to IDLE, add the callbacks and setup the channel
-        to start consuming.
-
-        :param pika.channel.Channel channel: The channel object
-
-        """
-        LOGGER.debug('Connection %s channel is now open', self.name)
-        self.set_state(self.STATE_IDLE)
-        self.channel = channel
-        self.channel.add_on_close_callback(self.on_channel_closed)
-        self.channel.add_on_cancel_callback(self.on_consumer_cancelled)
-        self.channel.add_on_return_callback(self.on_return)
-        if self.publisher_confirm:
-            self.channel.confirm_delivery(callback=self.on_confirmation)
-        self.callbacks.on_ready(self.name)
-
-    def on_channel_closed(self, _channel, closing_reason):
-        """Invoked by pika when RabbitMQ unexpectedly closes the channel.
-        Channels are usually closed if you attempt to do something that
-        violates the protocol, such as re-declare an exchange or queue with
-        different parameters. In this case, we'll close the connection
-        to shutdown the object.
-
-        :param pika.channel.Channel _channel: The AMQP Channel
-        :param pika.exceptions.ChannelClosed closing_reason: The channel
-            closed exception
-
-        """
-        del self.channel
-
-        try:
-            reply_code = closing_reason.reply_code
-            reply_text = closing_reason.reply_text
-        except AttributeError:
-            reply_code = 0
-            reply_text = 'unknown'
-
-        if reply_code <= 0 or reply_code == 404:
-            LOGGER.error(
-                'Channel Error (%r): %s', reply_code, reply_text or 'unknown'
-            )
-            self.on_failure()
-        elif self.is_shutting_down:
-            LOGGER.debug('Connection %s closing', self.name)
-            self.connection.close()
-        elif self.is_running:
-            LOGGER.warning(
-                'Connection %s channel was closed: (%s) %s',
-                self.name,
-                reply_code,
-                reply_text,
-            )
-
-            try:
-                self.connection.channel(on_open_callback=self.on_channel_open)
-            except (
-                exceptions.ConnectionWrongStateError,
-                exceptions.ConnectionClosed,
-            ) as error:
-                LOGGER.warning(
-                    'Error raised while creating new channel: %s', error
-                )
-                self.on_failure()
-            else:
-                self.set_state(self.STATE_CONNECTING)
-
-    def on_failure(self):
-        LOGGER.info('Connection failure, terminating connection')
-        self.set_state(self.STATE_CLOSED)
-        try:
-            self.connection.close()
-        except (AttributeError, exceptions.ConnectionWrongStateError):
-            pass
-        del self.connection
-        self.callbacks.on_connection_failure(self.name)
-
-    def consume(self, queue_name, no_ack, prefetch_count):
-        """Configure quality of service and issue Basic.Consume command
-
-        :param str queue_name: The queue to consume from. Use the empty string
-            to specify the most recent server-named queue for this channel
-        :param bool no_ack: if set to True, automatic acknowledgement mode
-            will be used (see http://www.rabbitmq.com/confirms.html).
-            This corresponds with the 'no_ack' parameter in the basic.consume
-            AMQP 0.9.1 method
-        :param int prefetch_count: Specifies a prefetch window in terms of
-            whole messages.
-
-        """
-        self.set_state(self.STATE_ACTIVE)
-        self.channel.basic_qos(
-            callback=self.on_qos_set,
-            prefetch_size=0,
-            prefetch_count=prefetch_count,
-            global_qos=False,
-        )
-        self.channel.basic_consume(
-            queue=queue_name,
-            on_message_callback=self.on_delivery,
-            auto_ack=no_ack,
-            consumer_tag=self.consumer_tag,
-        )
-
-    def on_qos_set(self, frame):
-        """Invoked by pika when the QoS is set
-
-        :param pika.frame.Frame frame: The QoS Frame
-
-        """
-        LOGGER.debug('Connection %s QoS was set: %r', self.name, frame)
-
-    def on_consumer_cancelled(self, *args, **kwargs):
-        """Invoked by pika when a ``Basic.Cancel`` or ``Basic.CancelOk``
-        is received.
-
-        """
-        LOGGER.info('Connection %s consumer has been cancelled', self.name)
-        if not self.is_shutting_down:
-            self.set_state(self.STATE_SHUTTING_DOWN)
-        self.channel.close()
-
-    def on_confirmation(self, frame):
-        """Invoked by pika when RabbitMQ responds to a Basic.Publish RPC
-        command, passing in either a Basic.Ack or Basic.Nack frame with
-        the delivery tag of the message that was published. The delivery tag
-        is an integer counter indicating the message number that was sent
-        on the channel via Basic.Publish.
-
-        :param pika.frame.Method frame: Basic.Ack or Basic.Nack frame
-
-        """
-        delivered = frame.method.NAME.split('.')[1].lower() == 'ack'
-        LOGGER.debug(
-            'Connection %s received delivery confirmation (Delivered: %s)',
-            self.name,
-            delivered,
-        )
-        self.callbacks.on_confirmation(
-            self.name, delivered, frame.method.delivery_tag
-        )
-
-    def on_delivery(self, channel, method, properties, body):
-        self.callbacks.on_delivery(
-            self.name, channel, method, properties, body
-        )
-
-    def on_return(self, channel, method, properties, body):
-        self.callbacks.on_return(self.name, channel, method, properties, body)
-
-    @property
-    def _connection_parameters(self):
-        """Return connection parameters for a pika connection.
-
-        :rtype: pika.ConnectionParameters
-
-        """
-        return pika.ConnectionParameters(
-            self.config.host,
-            self.config.port,
-            self.config.vhost,
-            pika.PlainCredentials(
-                self.config.user,
-                self.config.password,
-            ),
-            ssl_options=self._ssl_options,
-            frame_max=self.config.frame_max,
-            socket_timeout=self.config.socket_timeout,
-            heartbeat=self.config.heartbeat_interval,
-        )
-
-    @property
-    def _ssl_options(self):
-        """Return the `pika.SSLOptions` parameter for the pika connection
-
-        The expected ssl_options values in the config are:
-            * ca_certs
-            * ca_path
-            * ca_data
-            * prototcol
-            * certfile
-            * keyfile
-            * password
-            * ciphers
-
-        :rtype: `pika.SSLOptions`|None
-
-        """
-        ssl_options = self.config.ssl_options or None
-        if not ssl_options:
-            return
-
-        protocol = ssl_options.get('protocol', ssl.PROTOCOL_TLS_CLIENT)
-        if isinstance(protocol, str):
-            protocol = getattr(ssl, protocol)
-        context = ssl.SSLContext(protocol)
-
-        # Load a set of certification authority (CA) certificates
-        if any(
-            [
-                ssl_options.get('ca_certs'),
-                ssl_options.get('ca_path'),
-                ssl_options.get('ca_data'),
-            ]
-        ):
-            context.load_verify_locations(
-                ssl_options.get('ca_certs'),
-                ssl_options.get('ca_path'),
-                ssl_options.get('ca_data'),
-            )
-
-        # Load a private key and the corresponding certificate
-        if ssl_options.get('certfile'):
-            certfile = ssl_options['certfile']
-            keyfile = ssl_options.get('keyfile')
-            password = ssl_options.get('password')
-            context.load_cert_chain(certfile, keyfile, password)
-
-        # Set the available ciphers for sockets created with this context
-        if ssl_options.get('ciphers'):
-            context.set_ciphers(ssl_options['ciphers'])
-
-        return pika.SSLOptions(context=context)
 
 
 class Process(multiprocessing.Process, state.State):
@@ -422,100 +49,108 @@ class Process(multiprocessing.Process, state.State):
 
     """
 
-    AMQP_APP_ID = f'rejected/{__version__}'
+    AMQP_APP_ID: typing.ClassVar[str] = f'rejected/{__version__}'
 
     # Additional State constants
-    STATE_PROCESSING = 0x04
+    STATE_PROCESSING: typing.ClassVar[int] = 0x09
     STATES: typing.ClassVar[dict[int, str]] = {
         **state.State.STATES,
         STATE_PROCESSING: 'Processing',
     }
 
     # Counter constants
-    ACKED = 'acked'
-    CLOSED_ON_COMPLETE = 'closed_on_complete'
-    DROPPED = 'dropped'
-    ERROR = 'failed'
-    FAILURES = 'failures_until_stop'
-    NACKED = 'nacked'
-    PROCESSED = 'processed'
-    REQUEUED = 'requeued'
-    REDELIVERED = 'redelivered'
-    TIME_SPENT = 'processing_time'
-    TIME_WAITED = 'idle_time'
+    ACKED: typing.ClassVar[str] = 'acked'
+    CLOSED_ON_COMPLETE: typing.ClassVar[str] = 'closed_on_complete'
+    DROPPED: typing.ClassVar[str] = 'dropped'
+    ERROR: typing.ClassVar[str] = 'failed'
+    FAILURES: typing.ClassVar[str] = 'failures_until_stop'
+    NACKED: typing.ClassVar[str] = 'nacked'
+    PROCESSED: typing.ClassVar[str] = 'processed'
+    REQUEUED: typing.ClassVar[str] = 'requeued'
+    REDELIVERED: typing.ClassVar[str] = 'redelivered'
+    TIME_SPENT: typing.ClassVar[str] = 'processing_time'
+    TIME_WAITED: typing.ClassVar[str] = 'idle_time'
 
-    CONSUMER_EXCEPTION = 'consumer_exception'
-    MESSAGE_EXCEPTION = 'message_exception'
-    PROCESSING_EXCEPTION = 'processing_exception'
-    UNHANDLED_EXCEPTION = 'unhandled_exception'
+    CONSUMER_EXCEPTION: typing.ClassVar[str] = 'consumer_exception'
+    MESSAGE_EXCEPTION: typing.ClassVar[str] = 'message_exception'
+    PROCESSING_EXCEPTION: typing.ClassVar[str] = 'processing_exception'
+    UNHANDLED_EXCEPTION: typing.ClassVar[str] = 'unhandled_exception'
 
-    QOS_PREFETCH_COUNT = 1
-    MAX_ERROR_COUNT = 5
-    MAX_ERROR_WINDOW = 60
-    MAX_SHUTDOWN_WAIT = 5
+    QOS_PREFETCH_COUNT: typing.ClassVar[int] = 1
+    MAX_ERROR_COUNT: typing.ClassVar[int] = 5
+    MAX_ERROR_WINDOW: typing.ClassVar[int] = 60
+    MAX_SHUTDOWN_WAIT: typing.ClassVar[int] = 5
 
     def __init__(
-        self, group=None, target=None, name=None, args=(), kwargs=None
-    ):
+        self,
+        group: None = None,
+        target: None = None,
+        name: str | None = None,
+        args: tuple[typing.Any, ...] = (),
+        kwargs: dict[str, typing.Any] | None = None,
+    ) -> None:
         if kwargs is None:
             kwargs = {}
         super().__init__(group, target, name, args, kwargs)
-        self.active_message = None
-        self.callbacks = Callbacks(
-            self.on_connection_ready,
-            self.on_connection_failure,
-            self.on_connection_closed,
-            self.on_connection_blocked,
-            self.on_connection_unblocked,
-            self.on_confirmation,
-            self.on_delivery,
-            self.on_returned,
+        self._kwargs: dict[str, typing.Any]  # set by super().__init__
+        self.callbacks: models.Callbacks = models.Callbacks(
+            on_ready=self.on_connection_ready,
+            on_connection_failure=self.on_connection_failure,
+            on_closed=self.on_connection_closed,
+            on_blocked=self.on_connection_blocked,
+            on_unblocked=self.on_connection_unblocked,
+            on_confirmation=self.on_confirmation,
+            on_delivery=self.on_message,
+            on_return=self.on_message,
         )
-        self.connections = {}
-        self.consumer = None
-        self.consumer_lock = None
-        self.consumer_version = None
-        self.counters = collections.Counter()
+        self.connections: dict[str, connection.Connection] = {}
+        self.consumer: typing.Any = None
+        self.consumer_version: str | None = None
 
-        self.delivery_time = None
-        self.ioloop = None
-        self.last_failure = 0
-        self.last_stats_time = None
-        self.measurement = None
-        self.message_connection_id = None
-        self.pending = collections.deque()
-        self.prepend_path = None
-        self.previous = None
+        self.codec: codecs.Codec | None = None
+        self.ioloop: asyncio.AbstractEventLoop | None = None
+        self.last_failure: float = 0
+        self.last_stats_time: float | None = None
+        self.prepend_path: str | None = None
+        self.sentry_client: bool | None = None
+        self.state = self.STATE_INITIALIZING
+        self.state_start = time.time()
+        self.statsd: statsd.Client | None = None
+
+        # Concurrent message tracking
+        self._in_flight: dict[int, models.ProcessingContext] = {}
+        self._tasks: set[asyncio.Task[typing.Any]] = set()
+
+        # Cumulative counts for stats reporting
+        self._cumulative_counts: dict[str, int | float] = {}
+        self._previous_counts: dict[str, int | float] = {}
+        self._error_count: int = 0
+        self._processed_count: int = 0
+
+        # Per-interval observation buffers for Prometheus / stats
         self._duration_observations: list[float] = []
         self._message_age_observations: list[float] = []
         self._custom_durations: dict[str, list[float]] = {}
-        self._custom_counters: dict[str, int] = {}
-        self._custom_gauges: dict[str, float] = {}
-        self.sentry_client = None
-        self.state = self.STATE_INITIALIZING
-        self._tasks: set[asyncio.Task] = set()
-        self.state_start = time.time()
-        self.statsd = None
+        self._custom_counters: dict[str, int | float] = {}
+        self._custom_gauges: dict[str, int | float] = {}
 
-    def ack_message(self, message):
-        """Acknowledge the message on the broker and log the ack
+    def ack_message(self, ctx: models.ProcessingContext) -> None:
+        """Acknowledge the message on the broker and log the ack.
 
-        :param message: The message to acknowledge
-        :type message: rejected.data.Message
+        :param ctx: The processing context containing the message
 
         """
-        if not self.connections[message.connection].is_running:
+        if not ctx.connection.is_running:
             LOGGER.warning('Can not ack message, disconnected from RabbitMQ')
-            self.counters[self.CLOSED_ON_COMPLETE] += 1
-            self.connections[message.connection].shutdown()
+            ctx.measurement.set_tag(self.CLOSED_ON_COMPLETE, True)
+            ctx.connection.shutdown()
             return
 
-        LOGGER.debug('Acking %s', message.delivery_tag)
-        message.channel.basic_ack(delivery_tag=message.delivery_tag)
-        self.counters[self.ACKED] += 1
-        self.measurement.set_tag(self.ACKED, True)
+        LOGGER.debug('Acking %s', ctx.message.delivery_tag)
+        ctx.channel.basic_ack(delivery_tag=ctx.message.delivery_tag)
+        ctx.measurement.set_tag(self.ACKED, True)
 
-    def calc_velocity(self, values):
+    def calc_velocity(self, values: dict[str, typing.Any]) -> float:
         """Return the message consuming velocity for the process.
 
         :param dict values: The dict with velocity data
@@ -525,6 +160,7 @@ class Process(multiprocessing.Process, state.State):
         processed = values['counts'].get(self.PROCESSED, 0) - values[
             'previous'
         ].get(self.PROCESSED, 0)
+        assert self.last_stats_time is not None
         duration = time.time() - self.last_stats_time
 
         # If there were no messages, do not calculate, use the base
@@ -536,19 +172,21 @@ class Process(multiprocessing.Process, state.State):
         LOGGER.debug('Message processing velocity: %.2f/s', velocity)
         return velocity
 
-    def create_connections(self):
+    def create_connections(self) -> None:
         """Create and start the RabbitMQ connections, assigning the connection
         object to the connections dict.
 
         """
         self.set_state(self.STATE_CONNECTING)
-        for connection in self.consumer_config.connections:
-            name, confirm, consume = connection, False, True
-            if isinstance(connection, config_module.ConnectionRef):
-                name = connection.name
-                confirm = connection.confirm
-                consume = connection.consume
-
+        for conn in self.consumer_config.connections:
+            if isinstance(conn, str):
+                name, consume, confirm = conn, True, False
+            else:
+                name, consume, confirm = (
+                    conn.name,
+                    conn.consume,
+                    conn.confirm,
+                )
             if name not in self.config.connections:
                 LOGGER.critical(
                     'Connection "%s" for %s not found',
@@ -557,34 +195,27 @@ class Process(multiprocessing.Process, state.State):
                 )
                 continue
 
-            self.connections[name] = Connection(
+            self.connections[name] = connection.Connection(
                 name,
                 self.config.connections[name],
                 self.consumer_name,
                 consume,
                 confirm,
-                self.ioloop,
                 self.callbacks,
             )
 
     @staticmethod
-    def get_config(cfg, number, name, connection):
-        """Initialize a new consumer thread, setting defaults and config values
-
-        :param dict cfg: Consumer config section from YAML File
-        :param int number: The identification number for the consumer
-        :param str name: The name of the consumer
-        :param str connection: The name of the connection):
-        :rtype: dict
-
-        """
+    def get_config(
+        cfg: models.ConsumerConfig, number: int, name: str, conn: int
+    ) -> dict[str, str | models.ConnectionRef]:
+        """Return the configuration for a single consumer."""
         return {
-            'connection': cfg.connections[connection],
+            'connection': cfg.connections[conn],
             'consumer_name': name,
             'process_name': f'{name}_{os.getpid()}_tag_{number}',
         }
 
-    def get_consumer(self, cfg):
+    def get_consumer(self, cfg: models.ConsumerConfig) -> typing.Any:
         """Import and create a new instance of the configured message consumer.
 
         :param dict cfg: The named consumer section of the configuration
@@ -592,13 +223,15 @@ class Process(multiprocessing.Process, state.State):
         :raises: ImportError
 
         """
+        if not cfg.consumer:
+            return None
         try:
             handle, version = utils.import_consumer(cfg.consumer)
         except ImportError as error:
             LOGGER.exception(
                 'Error importing the consumer %s: %s', cfg.consumer, error
             )
-            return
+            return None
 
         if version:
             LOGGER.info('Creating consumer %s v%s', cfg.consumer, version)
@@ -625,61 +258,68 @@ class Process(multiprocessing.Process, state.State):
             LOGGER.exception(
                 'Error creating the consumer "%s": %s', cfg.consumer, error
             )
+        return None
 
-    async def invoke_consumer(self, message):
-        """Wrap the actual processor processing bits
+    async def invoke_consumer(self, ctx: models.ProcessingContext) -> None:
+        """Process a single message, tracking it as in-flight.
 
-        :param rejected.data.Message message: The message to process
+        :param ctx: The processing context for the message
 
         """
-        # Only allow for a single message to be processed at a time
-        async with self.consumer_lock:
-            if self.is_idle:
-                self.set_state(self.STATE_PROCESSING)
-                self.delivery_time = time.time()
-                start_time = time.monotonic()
-                self.active_message = message
-
-                self.measurement = data.Measurement()
-
-                if message.method.redelivered:
-                    self.counters[self.REDELIVERED] += 1
-                    self.measurement.set_tag(self.REDELIVERED, True)
-
-                try:
-                    result = await self.consumer.execute(
-                        message, self.measurement
-                    )
-                except Exception as error:
-                    LOGGER.exception(
-                        'Unhandled exception from consumer in '
-                        'process. This should not happen. %s',
-                        error,
-                    )
-                    result = data.MESSAGE_REQUEUE
-
-                LOGGER.debug('Finished processing message: %r', result)
-                self.on_processed(message, result, start_time)
-            elif self.is_waiting_to_shutdown:
-                LOGGER.info(
-                    'Requeueing pending message due to pending shutdown'
-                )
-                self.reject(message, True)
-                self.shutdown_connections()
-            elif self.is_shutting_down:
-                LOGGER.info('Requeueing pending message due to shutdown')
-                self.reject(message, True)
+        if self.is_shutting_down or self.is_waiting_to_shutdown:
+            LOGGER.info('Dropping message due to shutdown')
+            if not self.no_ack:
+                self.reject(ctx, True)
+            if not self._in_flight:
                 self.on_ready_to_stop()
-            else:
-                LOGGER.warning(
-                    'Exiting invoke_consumer without processing, '
-                    'this should not happen. State: %s',
-                    self.state_description,
-                )
-        if self.pending:
-            self._schedule(self.invoke_consumer(self.pending.popleft()))
+            return
 
-    def _schedule(self, coro):
+        tag = (
+            ctx.message.delivery_tag
+            if ctx.message.delivery_tag is not None
+            else id(ctx.message)
+        )
+        if not self._in_flight and self.is_idle:
+            self.set_state(self.STATE_PROCESSING)
+        self._in_flight[tag] = ctx
+
+        if ctx.message.redelivered:
+            ctx.measurement.set_tag(self.REDELIVERED, True)
+
+        # Decode the message body async (avro schemas may need HTTP)
+        if self.codec:
+            msg = ctx.message
+            try:
+                msg.body = await self.codec.decode(
+                    msg.body,
+                    msg.content_type,
+                    msg.content_encoding,
+                    msg.message_type,
+                )
+            except codecs.DecodeError as error:
+                LOGGER.error('Failed to decode message body: %s', error)
+                ctx.result = models.Result.MESSAGE_EXCEPTION
+                self.on_processed(ctx)
+                return
+
+        try:
+            await self.consumer.execute(ctx)
+        except Exception as error:
+            LOGGER.exception(
+                'Unhandled exception from consumer in '
+                'process. This should not happen. %s',
+                error,
+            )
+            ctx.result = models.Result.MESSAGE_REQUEUE
+        finally:
+            self._in_flight.pop(tag, None)
+
+        LOGGER.debug('Finished processing message: %r', ctx.result)
+        self.on_processed(ctx)
+
+    def _schedule(
+        self, coro: typing.Coroutine[typing.Any, typing.Any, typing.Any]
+    ) -> None:
         """Schedule a coroutine as a fire-and-forget task, keeping a reference
         to prevent it from being garbage-collected before completion.
         """
@@ -688,7 +328,7 @@ class Process(multiprocessing.Process, state.State):
         task.add_done_callback(self._tasks.discard)
 
     @property
-    def is_processing(self):
+    def is_processing(self) -> bool:
         """Returns a bool specifying if the consumer is currently processing
 
         :rtype: bool
@@ -696,24 +336,28 @@ class Process(multiprocessing.Process, state.State):
         """
         return self.state in [self.STATE_PROCESSING, self.STATE_STOP_REQUESTED]
 
-    def maybe_submit_measurement(self):
-        """Check for configured instrumentation backends and if found, submit
-        the message measurement info.
+    @property
+    def is_running(self) -> bool:
+        return self.state in [
+            self.STATE_IDLE,
+            self.STATE_ACTIVE,
+            self.STATE_SLEEPING,
+            self.STATE_PROCESSING,
+        ]
 
-        """
-        if self.statsd:
-            self.submit_statsd_measurements()
-
-    def on_connection_closed(self, name):
+    def on_connection_closed(self, name: str) -> None:
         if self.is_running:
             LOGGER.warning('Connection %s was closed, reconnecting', name)
-            return self.connections[name].connect()
+            self.connections[name].connect()
+            return
 
         ready = all(c.is_closed for c in self.connections.values())
         if (self.is_shutting_down or self.is_waiting_to_shutdown) and ready:
             self.on_ready_to_stop()
 
-    def on_connection_failure(self, *args, **kwargs):
+    def on_connection_failure(
+        self, *args: typing.Any, **kwargs: typing.Any
+    ) -> None:
         ready = all(c.is_closed for c in self.connections.values())
         LOGGER.warning(
             'Connection failure while %s - Ready to stop: %r',
@@ -728,7 +372,7 @@ class Process(multiprocessing.Process, state.State):
         ) and ready:
             self.on_ready_to_stop()
 
-    def on_connection_ready(self, name):
+    def on_connection_ready(self, name: str) -> None:
         LOGGER.debug('Connection %s indicated it is ready', name)
         self.consumer.set_channel(name, self.connections[name].channel)
         if all(c.is_idle for c in self.connections.values()):
@@ -740,17 +384,19 @@ class Process(multiprocessing.Process, state.State):
             if self.is_connecting:
                 self.set_state(self.STATE_IDLE)
 
-    def on_connection_blocked(self, name):
+    def on_connection_blocked(self, name: str) -> None:
         LOGGER.warning('Connection %s blocked', name)
         if self.is_processing:
             self._schedule(self.consumer.on_blocked(name))
 
-    def on_connection_unblocked(self, name):
+    def on_connection_unblocked(self, name: str) -> None:
         LOGGER.info('Connection %s unblocked', name)
         if self.is_processing:
             self._schedule(self.consumer.on_unblocked(name))
 
-    def on_confirmation(self, name, delivered, delivery_tag):
+    def on_confirmation(
+        self, name: str, delivered: bool, delivery_tag: str
+    ) -> None:
         """Invoked on delivery confirmation
 
         :param str name: The RabbitMQ connection that confirmed the delivery
@@ -761,103 +407,145 @@ class Process(multiprocessing.Process, state.State):
         if self.is_processing:
             self.consumer.on_confirmation(name, delivered, delivery_tag)
 
-    def on_delivery(self, name, channel, method, properties, body):
-        """Process a message from Rabbit
-
-        :param str name: The connection name
-        :param pika.channel.Channel channel: The message's delivery channel
-        :param pika.frames.MethodFrame method: The method frame
-        :param pika.spec.BasicProperties properties: The message properties
-        :param str body: The message body
-
-        """
-        message = data.Message(name, channel, method, properties, body, False)
-        if self.is_processing:
-            self.pending.append(message)
+    def on_message(
+        self,
+        name: str,
+        channel: pika.channel.Channel,
+        method: pika.spec.Basic.Deliver | pika.spec.Basic.Return,
+        properties: pika.spec.BasicProperties,
+        body: bytes,
+    ) -> None:
+        """Process a message from Rabbit"""
+        timestamp = (
+            datetime.datetime.fromtimestamp(
+                properties.timestamp, tz=datetime.UTC
+            )
+            if properties.timestamp
+            else None
+        )
+        if isinstance(method, pika.spec.Basic.Deliver):
+            delivery_tag = method.delivery_tag
+            redelivered = method.redelivered
+            returned = False
         else:
-            self._schedule(self.invoke_consumer(message))
+            delivery_tag = None
+            redelivered = False
+            returned = True
 
-    def on_returned(self, name, channel, method, properties, body):
-        """Send a message to the consumer that was returned by RabbitMQ
+        ctx = models.ProcessingContext(
+            connection=self.connections[name],
+            channel=channel,
+            raw_body=body,
+            message=models.Message(
+                delivery_tag=delivery_tag,
+                exchange=method.exchange,
+                routing_key=method.routing_key,
+                body=body,  # raw — decoded async in invoke_consumer
+                app_id=properties.app_id,
+                content_encoding=properties.content_encoding,
+                content_type=properties.content_type,
+                correlation_id=properties.correlation_id,
+                delivery_mode=properties.delivery_mode,
+                expiration=properties.expiration,
+                headers=(
+                    dict(properties.headers) if properties.headers else {}
+                ),
+                message_id=properties.message_id,
+                message_type=properties.type,
+                priority=properties.priority,
+                redelivered=redelivered,
+                reply_to=properties.reply_to,
+                returned=returned,
+                timestamp=timestamp,
+                user_id=properties.user_id,
+            ),
+        )
+        self._schedule(self.invoke_consumer(ctx))
 
-        :param str name: The connection name
-        :param channel: The channel the message was returned on
-        :type channel: pika.channel.Channel channel:
-        :param pika.frames.MethodFrame method: The method frame
-        :param pika.spec.BasicProperties properties: The message properties
-        :param str body: The message body
-
-        """
-        message = data.Message(name, channel, method, properties, body, True)
-        if self.is_processing:
-            self.pending.append(message)
-        else:
-            self._schedule(self.invoke_consumer(message))
-
-    def on_processed(self, message, result, start_time):
+    def on_processed(self, ctx: models.ProcessingContext) -> None:
         """Invoked after a message is processed by the consumer and
         implements the logic for how to deal with a message based upon
         the result.
 
-        :param rejected.data.Message message: The message that was processed
-        :param int result: The result of the processing of the message
-        :param float start_time: When the message was received
+        :param ctx: The processing context with message and result
 
         """
-        duration = time.monotonic() - start_time
-        self.counters[self.TIME_SPENT] += duration
-        self.measurement.add_duration(self.TIME_SPENT, duration)
+        duration = time.monotonic() - ctx.received_at
+        ctx.measurement.add_duration(self.TIME_SPENT, duration)
         self._duration_observations.append(duration)
 
-        if result == data.MESSAGE_DROP:
-            LOGGER.debug('Rejecting message due to drop return from consumer')
-            self.reject(message, False)
-            self.counters[self.DROPPED] += 1
+        match ctx.result:
+            case models.Result.MESSAGE_DROP:
+                LOGGER.debug(
+                    'Rejecting message due to drop return from consumer'
+                )
+                self.reject(ctx, False)
+                ctx.measurement.set_tag(self.DROPPED, True)
+            case models.Result.MESSAGE_EXCEPTION:
+                LOGGER.debug('Rejecting message due to MessageException')
+                self.reject(ctx, False)
+                ctx.measurement.set_tag(self.MESSAGE_EXCEPTION, True)
+            case models.Result.PROCESSING_EXCEPTION:
+                LOGGER.debug('Rejecting message due to ProcessingException')
+                if self.consumer.ACK_PROCESSING_EXCEPTIONS:
+                    self.ack_message(ctx)
+                else:
+                    self.reject(ctx, False)
+                ctx.measurement.set_tag(self.PROCESSING_EXCEPTION, True)
+            case models.Result.CONSUMER_EXCEPTION:
+                LOGGER.debug('Re-queueing message due to ConsumerException')
+                self.reject(ctx, True)
+                self._on_processing_error()
+                ctx.measurement.set_tag(self.CONSUMER_EXCEPTION, True)
+            case models.Result.UNHANDLED_EXCEPTION:
+                LOGGER.debug('Re-queueing message due to UnhandledException')
+                self.reject(ctx, True)
+                self._on_processing_error()
+                ctx.measurement.set_tag(self.UNHANDLED_EXCEPTION, True)
+            case models.Result.MESSAGE_REQUEUE:
+                LOGGER.debug('Re-queueing message due Consumer request')
+                self.reject(ctx, True)
+                ctx.measurement.set_tag(self.REQUEUED, True)
+            case models.Result.MESSAGE_ACK:
+                if not self.no_ack:
+                    self.ack_message(ctx)
+                ctx.measurement.set_tag(self.ACKED, True)
+            case _:
+                LOGGER.error(
+                    'Unexpected result %r for %s',
+                    ctx.result,
+                    ctx.message.delivery_tag,
+                )
 
-        elif result == data.MESSAGE_EXCEPTION:
-            LOGGER.debug('Rejecting message due to MessageException')
-            self.reject(message, False)
-            self.counters[self.MESSAGE_EXCEPTION] += 1
+        ctx.measurement.set_tag(self.PROCESSED, True)
+        self._processed_count += 1
 
-        elif result == data.PROCESSING_EXCEPTION:
-            LOGGER.debug('Rejecting message due to ProcessingException')
-            if self.consumer.ACK_PROCESSING_EXCEPTIONS:
-                self.ack_message(message)
-            else:
-                self.reject(message, False)
-            self.counters[self.PROCESSING_EXCEPTION] += 1
+        if ctx.message.timestamp:
+            age = (
+                datetime.datetime.now(tz=datetime.UTC) - ctx.message.timestamp
+            )
+            self._message_age_observations.append(age.total_seconds())
 
-        elif result == data.CONSUMER_EXCEPTION:
-            LOGGER.debug('Re-queueing message due to ConsumerException')
-            self.reject(message, True)
-            self.on_processing_error()
-            self.counters[self.CONSUMER_EXCEPTION] += 1
+        # Accumulate into cumulative counts for stats reporting
+        for key, value in ctx.measurement.tags.items():
+            if isinstance(value, bool) and value:
+                self._cumulative_counts[key] = (
+                    self._cumulative_counts.get(key, 0) + 1
+                )
 
-        elif result == data.UNHANDLED_EXCEPTION:
-            LOGGER.debug('Re-queueing message due to UnhandledException')
-            self.reject(message, True)
-            self.on_processing_error()
-            self.counters[self.UNHANDLED_EXCEPTION] += 1
+        self._collect_custom_measurements(ctx.measurement)
 
-        elif result == data.MESSAGE_REQUEUE:
-            LOGGER.debug('Re-queueing message due Consumer request')
-            self.reject(message, True)
-            self.counters[self.REQUEUED] += 1
+        if self.statsd:
+            self._submit_statsd(ctx.measurement)
 
-        elif result == data.MESSAGE_ACK and not self.no_ack:
-            self.ack_message(message)
+        # Transition state based on remaining in-flight messages
+        if not self._in_flight:
+            if self.is_waiting_to_shutdown:
+                self.shutdown_connections()
+            elif self.is_processing:
+                self.set_state(self.STATE_IDLE)
 
-        self.counters[self.PROCESSED] += 1
-        self.measurement.set_tag(self.PROCESSED, True)
-        if message.properties.timestamp:
-            age = time.time() - message.properties.timestamp
-            if age > 0:
-                self._message_age_observations.append(age)
-        self._collect_custom_measurements()
-        self.maybe_submit_measurement()
-        self.reset_state()
-
-    def on_processing_error(self):
+    def _on_processing_error(self) -> None:
         """Called when message processing failure happens due to a
         ConsumerException or an unhandled exception.
 
@@ -867,17 +555,17 @@ class Process(multiprocessing.Process, state.State):
             LOGGER.info(
                 'Resetting failure window, %i seconds since last', duration
             )
-            self.reset_error_counter()
-        self.counters[self.ERROR] += 1
+            self._error_count = 0
+        self._error_count += 1
         self.last_failure = time.time()
         if self.too_many_errors:
             LOGGER.critical(
                 'Error threshold exceeded (%i), shutting down',
-                self.counters[self.ERROR],
+                self._error_count,
             )
             self.shutdown_connections()
 
-    def on_ready_to_stop(self):
+    def on_ready_to_stop(self) -> None:
         """Invoked when the consumer is ready to stop."""
         LOGGER.debug('Ready to stop')
 
@@ -894,9 +582,6 @@ class Process(multiprocessing.Process, state.State):
         if self.consumer:
             self.stop_consumer()
 
-        # Clear IOLoop constructs
-        self.consumer_lock = None
-
         # Stop the event loop
         if self.ioloop:
             LOGGER.debug('Stopping event loop')
@@ -906,7 +591,9 @@ class Process(multiprocessing.Process, state.State):
         self.set_state(self.STATE_STOPPED)
         LOGGER.info('Shutdown complete')
 
-    def on_sigprof(self, _unused_signum, _unused_frame):
+    def on_sigprof(
+        self, _unused_signum: int, _unused_frame: types.FrameType | None
+    ) -> None:
         """Called when SIGPROF is sent to the process, will dump the stats, in
         future versions, queue them for the master process to get data.
 
@@ -918,7 +605,7 @@ class Process(multiprocessing.Process, state.State):
         self.last_stats_time = time.time()
         signal.siginterrupt(signal.SIGPROF, False)
 
-    def on_startup_error(self, error):
+    def on_startup_error(self, error: str) -> None:
         """Invoked when a pre-condition for starting the consumer has failed.
         Log the error and then exit the process.
 
@@ -926,63 +613,62 @@ class Process(multiprocessing.Process, state.State):
         LOGGER.critical('Could not start %s: %s', self.consumer_name, error)
         self.set_state(self.STATE_STOPPED)
 
-    def reject(self, message, requeue=True):
+    def reject(
+        self, ctx: models.ProcessingContext, requeue: bool = True
+    ) -> None:
         """Reject the message on the broker and log it.
 
-        :param message: The message to reject
-        :type message: rejected.Data.message
-        :param bool requeue: Specify if the message should be re-queued or not
+        :param ctx: The processing context containing the message
+        :param requeue: Specify if the message should be re-queued
 
         """
         if self.no_ack:
-            raise RuntimeError('Can not rejected messages when ack is False')
+            raise RuntimeError('Can not reject messages when ack is False')
 
-        if not self.connections[message.connection].is_running:
+        if not ctx.connection.is_running:
             LOGGER.warning('Can not nack message, disconnected from RabbitMQ')
-            self.counters[self.CLOSED_ON_COMPLETE] += 1
-            self.connections[message.connection].shutdown()
+            ctx.measurement.set_tag(self.CLOSED_ON_COMPLETE, True)
+            ctx.connection.shutdown()
             return
 
         LOGGER.warning(
             'Rejecting message %s %s requeue',
-            message.delivery_tag,
+            ctx.message.delivery_tag,
             'with' if requeue else 'without',
         )
-        message.channel.basic_nack(
-            delivery_tag=message.delivery_tag, requeue=requeue
+        ctx.channel.basic_nack(
+            delivery_tag=ctx.message.delivery_tag, requeue=requeue
         )
-        self.measurement.set_tag(self.NACKED, True)
-        self.measurement.set_tag(self.REQUEUED, requeue)
+        ctx.measurement.set_tag(self.NACKED, True)
+        ctx.measurement.set_tag(self.REQUEUED, requeue)
 
-    def _collect_custom_measurements(self):
+    def _collect_custom_measurements(self, m: measurement.Measurement) -> None:
         """Accumulate per-message Measurement data for Prometheus."""
-        if not self.measurement:
-            return
         # Custom durations (excluding processing_time, already tracked)
-        for key, values in self.measurement.durations.items():
+        for key, values in m.durations.items():
             if key == self.TIME_SPENT:
                 continue
             self._custom_durations.setdefault(key, []).extend(values)
         # Custom counters
-        for key, value in self.measurement.counters.items():
-            self._custom_counters[key] = (
-                self._custom_counters.get(key, 0) + value
+        for counter_key, counter_value in m.counters.items():
+            self._custom_counters[counter_key] = (
+                self._custom_counters.get(counter_key, 0) + counter_value
             )
         # Custom gauges (values dict on Measurement)
-        for key, value in self.measurement.values.items():
-            self._custom_gauges[key] = value
+        for gauge_key, gauge_value in m.values.items():
+            self._custom_gauges[gauge_key] = gauge_value
 
-    def report_stats(self):
+    def report_stats(self) -> dict[str, typing.Any]:
         """Create the dict of stats data for the MCP stats queue"""
-        if not self.previous:
-            self.previous = {}
-            for key in self.counters:
-                self.previous[key] = 0
+        counts = dict(self._cumulative_counts)
+        counts[self.PROCESSED] = self._processed_count
+        counts[self.ERROR] = self._error_count
+
         values = {
             'name': self.name,
             'consumer_name': self.consumer_name,
-            'counts': dict(self.counters),
-            'previous': dict(self.previous),
+            'counts': counts,
+            'previous': dict(self._previous_counts),
             'durations': list(self._duration_observations),
             'message_ages': list(self._message_age_observations),
             'custom_durations': {
@@ -991,7 +677,7 @@ class Process(multiprocessing.Process, state.State):
             'custom_counters': dict(self._custom_counters),
             'custom_gauges': dict(self._custom_gauges),
         }
-        self.previous = dict(self.counters)
+        self._previous_counts = dict(counts)
         self._duration_observations.clear()
         self._message_age_observations.clear()
         self._custom_durations.clear()
@@ -999,34 +685,7 @@ class Process(multiprocessing.Process, state.State):
         self._custom_gauges.clear()
         return values
 
-    def reset_error_counter(self):
-        """Reset the error counter to 0"""
-        LOGGER.debug('Resetting the error counter')
-        self.counters[self.ERROR] = 0
-
-    def reset_state(self):
-        """Reset the runtime state after processing a message to either idle
-        or shutting down based upon the current state.
-
-        """
-        self.active_message = None
-        self.measurement = None
-        if self.is_waiting_to_shutdown:
-            self.set_state(self.STATE_SHUTTING_DOWN)
-            self.shutdown_connections()
-        elif self.is_processing:
-            self.set_state(self.STATE_IDLE)
-        elif self.is_idle or self.is_connecting or self.is_shutting_down:
-            pass
-        else:
-            LOGGER.critical('Unexepected state: %s', self.state_description)
-        LOGGER.debug(
-            'State reset to %s (%s in pending)',
-            self.state_description,
-            len(self.pending),
-        )
-
-    def run(self):
+    def run(self) -> None:
         """Start the consumer"""
         if self.profile_file:
             LOGGER.info('Profiling to %s', self.profile_file)
@@ -1039,20 +698,20 @@ class Process(multiprocessing.Process, state.State):
             'Exiting %s (%i, %i)', self.name, os.getpid(), os.getppid()
         )
 
-    def _run(self):
+    def _run(self) -> None:
         """Run method that can be profiled"""
         self.set_state(self.STATE_INITIALIZING)
         self.ioloop = asyncio.new_event_loop()
         asyncio.set_event_loop(self.ioloop)
-        self.consumer_lock = asyncio.Lock()
 
         try:
             self.setup()
         except (AttributeError, ImportError) as error:
             LOGGER.exception('Setup failure: %s', error)
-            return self.on_startup_error(
+            self.on_startup_error(
                 f'Failed to import the Python module for {self.consumer_name}'
             )
+            return
 
         self.sentry_client = self.setup_sentry(
             self._kwargs['config'], self.consumer_name
@@ -1064,50 +723,39 @@ class Process(multiprocessing.Process, state.State):
             except KeyboardInterrupt:
                 LOGGER.warning('CTRL-C while waiting for clean shutdown')
 
-    def send_exception_to_sentry(self, exc_info):
+    def send_exception_to_sentry(
+        self,
+        exc_info: (
+            tuple[type[BaseException], BaseException, types.TracebackType]
+            | tuple[None, None, None]
+        ),
+        ctx: models.ProcessingContext | None = None,
+    ) -> None:
         """Send an exception to Sentry if enabled.
 
         :param tuple exc_info: exception information as returned from
             :func:`sys.exc_info`
+        :param ctx: optional processing context for the message being handled
 
         """
         if not self.sentry_client:
             LOGGER.debug('No sentry_client, aborting')
             return
 
-        message = dict(self.active_message)
-        try:
-            duration = math.ceil(time.time() - self.delivery_time) * 1000
-        except TypeError:
-            duration = 0
+        message = ctx.message.model_dump() if ctx else {}
+        duration = (
+            math.ceil((time.monotonic() - ctx.received_at) * 1000)
+            if ctx
+            else 0
+        )
         LOGGER.debug('Sending exception to sentry')
         with sentry_sdk.new_scope() as scope:
             scope.set_extra('consumer_name', self.consumer_name)
-            scope.set_extra(
-                'env',
-                {
-                    k: v
-                    for k, v in os.environ.items()
-                    if not any(
-                        s in k.upper()
-                        for s in (
-                            'KEY',
-                            'SECRET',
-                            'TOKEN',
-                            'PASSWORD',
-                            'DSN',
-                            'CREDENTIAL',
-                            'AUTH',
-                            'PRIVATE',
-                        )
-                    )
-                },
-            )
             scope.set_extra('message', message)
             scope.set_extra('time_spent', duration)
             sentry_sdk.capture_exception(exc_info, scope=scope)
 
-    def setup(self):
+    def setup(self) -> None:
         """Initialize the consumer, setting up needed attributes and connecting
         to RabbitMQ.
 
@@ -1129,12 +777,13 @@ class Process(multiprocessing.Process, state.State):
                 )
             )
 
+        self.codec = codecs.Codec(self.config.schema_registry)
         self.setup_instrumentation()
-        self.reset_error_counter()
+        self._error_count = 0
         self.setup_sighandlers()
         self.create_connections()
 
-    def setup_instrumentation(self):
+    def setup_instrumentation(self) -> None:
         """Configure statsd instrumentation for per-message measurements."""
         if self.config.stats.statsd.enabled:
             self.statsd = statsd.Client(
@@ -1144,7 +793,7 @@ class Process(multiprocessing.Process, state.State):
             )
             LOGGER.debug('statsd measurements configured')
 
-    def setup_sentry(self, cfg, consumer_name):
+    def setup_sentry(self, cfg: models.Config, consumer_name: str) -> bool:
         # Setup Sentry if configured and sentry_sdk is installed
         sentry_dsn = self.consumer_config.sentry_dsn or cfg.sentry_dsn
         if not sentry_sdk or not sentry_dsn:
@@ -1158,7 +807,7 @@ class Process(multiprocessing.Process, state.State):
                 'rejected.consumer.ProcessingException',
             ],
             'integrations': [
-                LoggingIntegration(level=None, event_level=None),
+                sentry_logging.LoggingIntegration(level=None, event_level=None)
             ],
         }
         if os.environ.get('ENVIRONMENT'):
@@ -1168,7 +817,7 @@ class Process(multiprocessing.Process, state.State):
         sentry_sdk.init(**kwargs)
         return True
 
-    def setup_sighandlers(self):
+    def setup_sighandlers(self) -> None:
         """Setup the stats and stop signal handlers."""
         signal.signal(signal.SIGINT, signal.SIG_IGN)
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
@@ -1180,7 +829,7 @@ class Process(multiprocessing.Process, state.State):
         signal.siginterrupt(signal.SIGABRT, False)
         LOGGER.debug('Signal handlers setup')
 
-    def shutdown_connections(self):
+    def shutdown_connections(self) -> None:
         """This method closes the connections to RabbitMQ."""
         if not self.is_shutting_down:
             self.set_state(self.STATE_SHUTTING_DOWN)
@@ -1188,7 +837,9 @@ class Process(multiprocessing.Process, state.State):
             if self.connections[name].is_running:
                 self.connections[name].shutdown()
 
-    def stop(self, signum=None, _unused=None):
+    def stop(
+        self, signum: int | None = None, _unused: types.FrameType | None = None
+    ) -> None:
         """Stop the consumer from consuming by calling BasicCancel and setting
         our state.
 
@@ -1218,82 +869,93 @@ class Process(multiprocessing.Process, state.State):
                 signal.siginterrupt(signal.SIGTERM, False)
             return
 
-    def stop_consumer(self):
+    def stop_consumer(self) -> None:
         """Stop the consumer object and allow it to do a clean shutdown if it
         has the ability to do so.
 
         """
         try:
             LOGGER.info('Shutting down the consumer')
-            self.consumer.shutdown()
+            result = self.consumer.shutdown()
+            if asyncio.iscoroutine(result):
+                self._schedule(result)
         except AttributeError:
             LOGGER.debug('Consumer does not have a shutdown method')
+        if self.codec:
+            if self.ioloop and self.ioloop.is_running():
+                self._schedule(self.codec.close())
+            self.codec = None
 
-    def submit_statsd_measurements(self):
+    def _submit_statsd(self, m: measurement.Measurement) -> None:
         """Submit a measurement for a message to statsd as individual items."""
-        for key, value in self.measurement.counters.items():
-            self.statsd.incr(key, value)
-        for key, values in self.measurement.durations.items():
-            for value in values:
-                self.statsd.add_timing(key, value)
-        for key, value in self.measurement.values.items():
-            self.statsd.set_gauge(key, value)
-        for key, value in self.measurement.tags.items():
-            if isinstance(value, bool):
-                if value:
-                    self.statsd.incr(key)
-            elif isinstance(value, str):
-                if value:
-                    self.statsd.incr(f'{key}.{value}')
-            elif isinstance(value, int):
-                self.statsd.incr(key, value)
+        assert self.statsd is not None
+        for counter_key, counter_value in m.counters.items():
+            self.statsd.incr(counter_key, counter_value)
+        for dur_key, dur_values in m.durations.items():
+            for dur_value in dur_values:
+                self.statsd.add_timing(dur_key, dur_value)
+        for gauge_key, gauge_value in m.values.items():
+            self.statsd.set_gauge(gauge_key, gauge_value)
+        for tag_key, tag_value in m.tags.items():
+            if isinstance(tag_value, bool):
+                if tag_value:
+                    self.statsd.incr(tag_key)
+            elif isinstance(tag_value, str):
+                if tag_value:
+                    self.statsd.incr(f'{tag_key}.{tag_value}')
+            elif isinstance(tag_value, int):
+                self.statsd.incr(tag_key, tag_value)
             else:
                 LOGGER.warning(
-                    'The %s value type of %s is unsupported', key, type(value)
+                    'The %s value type of %s is unsupported',
+                    tag_key,
+                    type(tag_value),
                 )
 
     @property
-    def active_consumers(self):
+    def active_consumers(self) -> int:
         return len(
             [
                 c
                 for c in self.connections.values()
-                if c.should_consume and c.is_active()
+                if c.should_consume and c.is_active
             ]
         )
 
     @property
-    def config(self):
-        return self._kwargs['config']
+    def config(self) -> models.Config:
+        return typing.cast(models.Config, self._kwargs['config'])
 
     @property
-    def consumer_config(self):
+    def consumer_config(self) -> models.ConsumerConfig:
         return self.config.consumers.get(
-            self.consumer_name, config_module.ConsumerConfig()
+            self.consumer_name, models.ConsumerConfig()
         )
 
     @property
-    def consumer_name(self):
-        return self._kwargs['consumer_name']
+    def consumer_name(self) -> str:
+        return typing.cast(str, self._kwargs['consumer_name'])
 
     @property
-    def expected_consumers(self):
+    def expected_consumers(self) -> int:
         return len([c for c in self.connections.values() if c.should_consume])
 
     @property
-    def logging_config(self):
-        return self._kwargs['logging_config']
+    def logging_config(self) -> dict[str, typing.Any]:
+        return typing.cast(
+            dict[str, typing.Any], self._kwargs['logging_config']
+        )
 
     @property
-    def max_error_count(self):
+    def max_error_count(self) -> int:
         return int(self.consumer_config.max_errors)
 
     @property
-    def no_ack(self):
+    def no_ack(self) -> bool:
         return not self.consumer_config.ack
 
     @property
-    def profile_file(self):
+    def profile_file(self) -> str | None:
         """Return the full path to write the cProfile data
 
         :return: str
@@ -1311,7 +973,7 @@ class Process(multiprocessing.Process, state.State):
         return None
 
     @property
-    def qos_prefetch(self):
+    def qos_prefetch(self) -> int:
         """Return the base, configured QoS prefetch value.
 
         :rtype: int
@@ -1320,18 +982,18 @@ class Process(multiprocessing.Process, state.State):
         return self.consumer_config.qos_prefetch
 
     @property
-    def queue_name(self):
+    def queue_name(self) -> str:
         return self.consumer_config.queue or self.consumer_name
 
     @property
-    def stats_queue(self):
-        return self._kwargs['stats_queue']
+    def stats_queue(self) -> 'multiprocessing.Queue[dict[str, typing.Any]]':
+        return self._kwargs['stats_queue']  # type: ignore[no-any-return]
 
     @property
-    def too_many_errors(self):
+    def too_many_errors(self) -> bool:
         """Return a bool if too many errors have occurred.
 
         :rtype: bool
 
         """
-        return self.counters[self.ERROR] >= self.max_error_count
+        return self._error_count >= self.max_error_count

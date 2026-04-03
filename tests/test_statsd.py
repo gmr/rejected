@@ -152,9 +152,7 @@ class TCPTestCase(unittest.IsolatedAsyncioTestCase):
         loop = asyncio.get_running_loop()
         self._server_protocol = StatsdServer()
         self._server = await loop.create_server(
-            lambda: self._server_protocol,
-            '127.0.0.1',
-            0,
+            lambda: self._server_protocol, '127.0.0.1', 0
         )
         self.port = self._server.sockets[0].getsockname()[1]
 

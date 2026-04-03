@@ -538,6 +538,14 @@ class Process(multiprocessing.Process, state.State):
         if self.statsd:
             self._submit_statsd(ctx.measurement)
 
+        # Shut down after reaching the message limit
+        if self.max_messages and self._processed_count >= self.max_messages:
+            LOGGER.info(
+                'Reached max messages (%i), shutting down', self.max_messages
+            )
+            self.shutdown_connections()
+            return
+
         # Transition state based on remaining in-flight messages
         if not self._in_flight:
             if self.is_waiting_to_shutdown:
@@ -988,6 +996,10 @@ class Process(multiprocessing.Process, state.State):
     @property
     def stats_queue(self) -> 'multiprocessing.Queue[dict[str, typing.Any]]':
         return self._kwargs['stats_queue']  # type: ignore[no-any-return]
+
+    @property
+    def max_messages(self) -> int | None:
+        return self._kwargs.get('max_messages')  # type: ignore[no-any-return]
 
     @property
     def too_many_errors(self) -> bool:

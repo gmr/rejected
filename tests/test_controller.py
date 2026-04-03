@@ -17,6 +17,7 @@ def _make_args(**kwargs):
         'profile': None,
         'prepend_path': None,
         'quantity': None,
+        'max_messages': None,
     }
     defaults.update(kwargs)
     return argparse.Namespace(**defaults)

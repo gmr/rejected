@@ -119,7 +119,7 @@ class Codec:
             if content_type == 'text/csv':
                 return _load_csv(body)
             if bs4 and content_type in BS4_MIME_TYPES:
-                return _load_bs4(body)
+                return _load_bs4(body, content_type)
             if content_type in YAML_MIME_TYPES:
                 return yaml.safe_load(body)
         except DecodeError:
@@ -142,34 +142,46 @@ class Codec:
         str/bytes), then content_encoding compression.
 
         """
-        if not isinstance(body, (str, bytes)):
-            if content_type == AVRO_DATUM_MIME_TYPE:
-                body = await self._encode_avro(body, message_type)
-            elif content_type == 'application/json':
-                body = json.dumps(body, ensure_ascii=True).encode('utf-8')
-            elif umsgpack and content_type == 'application/msgpack':
-                body = umsgpack.packb(body)
-            elif content_type == 'application/x-plist':
-                body = plistlib.dumps(body)
-            elif content_type == 'text/csv':
-                body = _dump_csv(body)
-            elif (
-                bs4
-                and isinstance(body, bs4.BeautifulSoup)
-                and content_type in BS4_MIME_TYPES
-            ):
-                body = str(body)
-            elif content_type in YAML_MIME_TYPES:
-                body = yaml.dump(body)
+        try:
+            if not isinstance(body, (str, bytes)):
+                body = await self._serialize(body, content_type, message_type)
+            if content_encoding:
+                body = _compress(body, content_encoding)
+        except EncodeError:
+            raise
+        except Exception as error:
+            raise EncodeError(str(error)) from error
+        return body
 
-        if content_encoding:
-            if isinstance(body, str):
-                body = body.encode('utf-8')
-            if content_encoding == 'gzip':
-                body = gzip.compress(body)
-            elif content_encoding == 'bzip2':
-                body = bz2.compress(body)
-
+    async def _serialize(
+        self,
+        body: typing.Any,
+        content_type: str | None,
+        message_type: str | None,
+    ) -> typing.Any:
+        """Serialize a non-string/bytes body by content type."""
+        if content_type == AVRO_DATUM_MIME_TYPE:
+            return await self._encode_avro(body, message_type)
+        if content_type == 'application/json':
+            return json.dumps(body, ensure_ascii=True).encode('utf-8')
+        if content_type == 'application/msgpack':
+            if umsgpack is None:
+                raise EncodeError(
+                    'umsgpack is required for MessagePack encoding'
+                )
+            return umsgpack.packb(body)
+        if content_type == 'application/x-plist':
+            return plistlib.dumps(body)
+        if content_type == 'text/csv':
+            return _dump_csv(body)
+        if (
+            bs4
+            and isinstance(body, bs4.BeautifulSoup)
+            and content_type in BS4_MIME_TYPES
+        ):
+            return str(body)
+        if content_type in YAML_MIME_TYPES:
+            return yaml.dump(body)
         return body
 
     async def _encode_avro(
@@ -282,6 +294,17 @@ class Codec:
 # --- Internal helpers (stateless, sync) ---
 
 
+def _compress(body: typing.Any, content_encoding: str) -> bytes:
+    """Apply content-encoding compression to a body."""
+    if isinstance(body, str):
+        body = body.encode('utf-8')
+    if content_encoding == 'gzip':
+        return gzip.compress(body)
+    if content_encoding == 'bzip2':
+        return bz2.compress(body)
+    return body
+
+
 def _load_json(value: bytes | str) -> typing.Any:
     """Deserialize a JSON value."""
     if isinstance(value, bytes):
@@ -310,13 +333,14 @@ def _load_csv(value: bytes | str) -> csv.DictReader[str]:
     return csv.DictReader(csv_buffer, dialect=dialect)
 
 
-def _load_bs4(value: bytes | str) -> typing.Any:
+def _load_bs4(value: bytes | str, content_type: str) -> typing.Any:
     """Parse HTML or XML into a BeautifulSoup object."""
     if not bs4:
         raise DecodeError('BeautifulSoup4 is not enabled')
     if isinstance(value, bytes):
         value = value.decode('utf-8')
-    return bs4.BeautifulSoup(value, 'html.parser')
+    parser = 'xml' if content_type == 'text/xml' else 'html.parser'
+    return bs4.BeautifulSoup(value, parser)
 
 
 def _dump_csv(value: list[list[typing.Any]]) -> str:

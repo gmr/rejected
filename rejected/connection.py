@@ -104,7 +104,10 @@ class Connection(state.State):
             return
         try:
             self.connection.channel(on_open_callback=self.on_channel_open)
-        except pika.exceptions.ConnectionClosed:
+        except (
+            pika.exceptions.ConnectionWrongStateError,
+            pika.exceptions.ConnectionClosed,
+        ):
             LOGGER.warning('Channel open on closed connection')
             self.set_state(self.STATE_CLOSED)
             self.callbacks.on_closed(self.name)
@@ -202,7 +205,8 @@ class Connection(state.State):
             reply_code = 0
             reply_text = str(closing_reason) or 'unknown'
 
-        if reply_code <= 0 or reply_code == 404:
+        terminal_codes = {0, 403, 404, 405, 406}
+        if reply_code <= 0 or reply_code in terminal_codes:
             LOGGER.error(
                 'Channel Error (%r): %s', reply_code, reply_text or 'unknown'
             )

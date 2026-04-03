@@ -119,11 +119,13 @@ class _Consumer:
 
     # --- Core execute flow ---
 
-    async def execute(self, ctx: models.ProcessingContext) -> models.Result:
+    async def execute(self, ctx: models.ProcessingContext) -> None:
         """Entry point called by the process for each message.
 
         Handles initialization, pre-validation, then delegates to
         :meth:`_run_consumer` which subclasses override.
+
+        The result is stored on ``ctx.result``.
 
         """
         if not self._initialized:
@@ -133,11 +135,9 @@ class _Consumer:
         result = self._pre_execute(ctx)
         if result is not None:
             ctx.result = result
-            return result
+            return
 
-        result = await self._run_consumer(ctx)
-        ctx.result = result
-        return result
+        ctx.result = await self._run_consumer(ctx)
 
     def _pre_execute(
         self, ctx: models.ProcessingContext
@@ -538,7 +538,7 @@ class Consumer(_Consumer):
 
     async def on_finish(self) -> None:
         """Called after processing completes."""
-        self.logger.debug('on_finish invoked')
+        pass
 
     async def _run_consumer(
         self, ctx: models.ProcessingContext

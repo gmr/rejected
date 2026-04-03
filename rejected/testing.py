@@ -235,15 +235,15 @@ class AsyncTestCase(unittest.IsolatedAsyncioTestCase):
 
         self.consumer._log_exception = _capture_log  # type: ignore[assignment]
 
-        result = await self.consumer.execute(ctx)
+        await self.consumer.execute(ctx)
 
-        if result == models.Result.CONSUMER_EXCEPTION:
+        if ctx.result == models.Result.CONSUMER_EXCEPTION:
             raise exceptions.ConsumerException()
-        elif result == models.Result.MESSAGE_EXCEPTION:
+        elif ctx.result == models.Result.MESSAGE_EXCEPTION:
             raise exceptions.MessageException()
-        elif result == models.Result.PROCESSING_EXCEPTION:
+        elif ctx.result == models.Result.PROCESSING_EXCEPTION:
             raise exceptions.ProcessingException()
-        elif result == models.Result.UNHANDLED_EXCEPTION:
+        elif ctx.result == models.Result.UNHANDLED_EXCEPTION:
             if self.exc_info:
                 raise self.exc_info[1]
             raise AssertionError('UNHANDLED_EXCEPTION')

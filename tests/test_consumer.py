@@ -93,9 +93,9 @@ class ConsumerExecuteTests(unittest.IsolatedAsyncioTestCase):
         with mock.patch.object(
             self.obj, 'process', new_callable=mock.AsyncMock
         ) as process_mock:
-            result = await self.obj.execute(ctx)
+            await self.obj.execute(ctx)
             process_mock.assert_called_once()
-        self.assertEqual(result, models.Result.MESSAGE_ACK)
+        self.assertEqual(ctx.result, models.Result.MESSAGE_ACK)
 
     async def test_execute_sets_context(self):
         """During processing, self._context is set."""
@@ -124,8 +124,8 @@ class ConsumerExecuteTests(unittest.IsolatedAsyncioTestCase):
 
         obj = TypedConsumer(config_module.Settings({}), None)
         ctx = _make_ctx(_make_message(message_type='wrong'))
-        result = await obj.execute(ctx)
-        self.assertEqual(result, models.Result.MESSAGE_DROP)
+        await obj.execute(ctx)
+        self.assertEqual(ctx.result, models.Result.MESSAGE_DROP)
 
     async def test_execute_rejects_invalid_message_type(self):
         class TypedConsumer(consumer.Consumer):
@@ -136,8 +136,8 @@ class ConsumerExecuteTests(unittest.IsolatedAsyncioTestCase):
 
         obj = TypedConsumer(config_module.Settings({}), None)
         ctx = _make_ctx(_make_message(message_type='wrong'))
-        result = await obj.execute(ctx)
-        self.assertEqual(result, models.Result.MESSAGE_EXCEPTION)
+        await obj.execute(ctx)
+        self.assertEqual(ctx.result, models.Result.MESSAGE_EXCEPTION)
 
     async def test_execute_sets_result_on_ctx(self):
         ctx = _make_ctx()
@@ -150,8 +150,8 @@ class ConsumerExecuteTests(unittest.IsolatedAsyncioTestCase):
 
         self.obj.process = raise_consumer_exc
         ctx = _make_ctx()
-        result = await self.obj.execute(ctx)
-        self.assertEqual(result, models.Result.CONSUMER_EXCEPTION)
+        await self.obj.execute(ctx)
+        self.assertEqual(ctx.result, models.Result.CONSUMER_EXCEPTION)
 
     async def test_unhandled_exception_result(self):
         async def raise_value_error():
@@ -159,8 +159,8 @@ class ConsumerExecuteTests(unittest.IsolatedAsyncioTestCase):
 
         self.obj.process = raise_value_error
         ctx = _make_ctx()
-        result = await self.obj.execute(ctx)
-        self.assertEqual(result, models.Result.UNHANDLED_EXCEPTION)
+        await self.obj.execute(ctx)
+        self.assertEqual(ctx.result, models.Result.UNHANDLED_EXCEPTION)
 
 
 class ConsumerPropertyTests(unittest.IsolatedAsyncioTestCase):

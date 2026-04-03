@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import bz2
 import csv
+import gzip
 import io
 import json
 import logging
@@ -17,7 +18,6 @@ import pathlib
 import pickle
 import plistlib
 import typing
-import zlib
 
 import yaml
 
@@ -95,33 +95,43 @@ class Codec:
         content_type dispatch including Avro if configured.
 
         """
-        if content_encoding == 'bzip2':
-            body = bz2.decompress(body)
-        elif content_encoding == 'gzip':
-            body = zlib.decompress(body)
+        try:
+            if content_encoding == 'bzip2':
+                body = bz2.decompress(body)
+            elif content_encoding == 'gzip':
+                body = gzip.decompress(body)
 
-        if (
-            fastavro is not None
-            and content_type == AVRO_DATUM_MIME_TYPE
-            and message_type
-        ):
-            schema = await self._avro_schema(message_type)
-            return fastavro.schemaless_reader(io.BytesIO(body), schema)
+            if content_type == AVRO_DATUM_MIME_TYPE:
+                if fastavro is None:
+                    raise DecodeError(
+                        'fastavro is required for Avro decoding; '
+                        'install rejected[avro]'
+                    )
+                if not message_type:
+                    raise DecodeError(
+                        'message_type is required for Avro decoding'
+                    )
+                schema = await self._avro_schema(message_type)
+                return fastavro.schemaless_reader(io.BytesIO(body), schema)
 
-        if content_type == 'application/json':
-            return _load_json(body)
-        if umsgpack and content_type == 'application/msgpack':
-            return _load_msgpack(body)
-        if content_type in PICKLE_MIME_TYPES:
-            return pickle.loads(body)
-        if content_type == 'application/x-plist':
-            return plistlib.loads(body)
-        if content_type == 'text/csv':
-            return _load_csv(body)
-        if bs4 and content_type in BS4_MIME_TYPES:
-            return _load_bs4(body)
-        if content_type in YAML_MIME_TYPES:
-            return yaml.safe_load(body)
+            if content_type == 'application/json':
+                return _load_json(body)
+            if umsgpack and content_type == 'application/msgpack':
+                return _load_msgpack(body)
+            if content_type in PICKLE_MIME_TYPES:
+                return pickle.loads(body)
+            if content_type == 'application/x-plist':
+                return plistlib.loads(body)
+            if content_type == 'text/csv':
+                return _load_csv(body)
+            if bs4 and content_type in BS4_MIME_TYPES:
+                return _load_bs4(body)
+            if content_type in YAML_MIME_TYPES:
+                return yaml.safe_load(body)
+        except DecodeError:
+            raise
+        except Exception as error:
+            raise DecodeError(str(error)) from error
 
         return body
 
@@ -139,15 +149,8 @@ class Codec:
 
         """
         if not isinstance(body, (str, bytes)):
-            if (
-                fastavro
-                and content_type == AVRO_DATUM_MIME_TYPE
-                and message_type
-            ):
-                schema = await self._avro_schema(message_type)
-                stream = io.BytesIO()
-                fastavro.schemaless_writer(stream, schema, body)
-                body = stream.getvalue()
+            if content_type == AVRO_DATUM_MIME_TYPE:
+                body = await self._encode_avro(body, message_type)
             elif content_type == 'application/json':
                 body = json.dumps(body, ensure_ascii=True).encode('utf-8')
             elif umsgpack and content_type == 'application/msgpack':
@@ -171,11 +174,27 @@ class Codec:
             if isinstance(body, str):
                 body = body.encode('utf-8')
             if content_encoding == 'gzip':
-                body = zlib.compress(body)
+                body = gzip.compress(body)
             elif content_encoding == 'bzip2':
                 body = bz2.compress(body)
 
         return body
+
+    async def _encode_avro(
+        self, body: typing.Any, message_type: str | None
+    ) -> bytes:
+        """Encode a message body using Avro schemaless encoding."""
+        if fastavro is None:
+            raise EncodeError(
+                'fastavro is required for Avro encoding; '
+                'install rejected[avro]'
+            )
+        if not message_type:
+            raise EncodeError('message_type is required for Avro encoding')
+        schema = await self._avro_schema(message_type)
+        stream = io.BytesIO()
+        fastavro.schemaless_writer(stream, schema, body)
+        return stream.getvalue()
 
     async def close(self) -> None:
         """Close the HTTP client if one was created."""

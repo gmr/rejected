@@ -302,19 +302,18 @@ class Process(multiprocessing.Process, state.State):
                 return
 
         try:
-            result = await self.consumer.execute(ctx)
+            await self.consumer.execute(ctx)
         except Exception as error:
             LOGGER.exception(
                 'Unhandled exception from consumer in '
                 'process. This should not happen. %s',
                 error,
             )
-            result = models.Result.MESSAGE_REQUEUE
+            ctx.result = models.Result.MESSAGE_REQUEUE
         finally:
             self._in_flight.pop(tag, None)
 
-        ctx.result = result
-        LOGGER.debug('Finished processing message: %r', result)
+        LOGGER.debug('Finished processing message: %r', ctx.result)
         self.on_processed(ctx)
 
     def _schedule(
@@ -890,6 +889,10 @@ class Process(multiprocessing.Process, state.State):
             self.consumer.shutdown()
         except AttributeError:
             LOGGER.debug('Consumer does not have a shutdown method')
+        if self.codec:
+            if self.ioloop and self.ioloop.is_running():
+                self._schedule(self.codec.close())
+            self.codec = None
 
     def _submit_statsd(self, m: measurement.Measurement) -> None:
         """Submit a measurement for a message to statsd as individual items."""

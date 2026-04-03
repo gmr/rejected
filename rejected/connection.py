@@ -81,6 +81,8 @@ class Connection(state.State):
             )
         elif self.channel:
             self.channel.close()
+        else:
+            self.connection.close()
 
     def on_open(
         self, connection: asyncio_connection.AsyncioConnection
@@ -92,6 +94,12 @@ class Connection(state.State):
         """
         LOGGER.debug('Connection %s is open (%r)', self.name, connection)
         self.connection = connection
+        if self.is_shutting_down:
+            LOGGER.debug(
+                'Connection %s opened during shutdown, closing', self.name
+            )
+            self.connection.close()
+            return
         try:
             self.connection.channel(on_open_callback=self.on_channel_open)
         except pika.exceptions.ConnectionClosed:
@@ -154,6 +162,13 @@ class Connection(state.State):
 
         """
         LOGGER.debug('Connection %s channel is now open', self.name)
+        if self.is_shutting_down:
+            LOGGER.debug(
+                'Connection %s channel opened during shutdown, closing',
+                self.name,
+            )
+            channel.close()
+            return
         self.set_state(self.STATE_IDLE)
         self.channel = channel
         channel.add_on_close_callback(self.on_channel_closed)
@@ -176,7 +191,7 @@ class Connection(state.State):
         :param Exception closing_reason: The channel closed exception
 
         """
-        del self.channel
+        self.channel = None
 
         if isinstance(closing_reason, pika.exceptions.ChannelClosed):
             reply_code = closing_reason.reply_code
@@ -266,7 +281,7 @@ class Connection(state.State):
         LOGGER.info('Connection %s consumer has been cancelled', self.name)
         if not self.is_shutting_down:
             self.set_state(self.STATE_SHUTTING_DOWN)
-        elif self.channel:
+        if self.channel:
             self.channel.close()
 
     def on_confirmation(
@@ -342,7 +357,7 @@ class Connection(state.State):
             * ciphers
 
         """
-        if not self.config.ssl_options:
+        if not self.config.ssl and not self.config.ssl_options:
             return None
 
         protocol = self.config.ssl_options.get(
@@ -350,7 +365,10 @@ class Connection(state.State):
         )
         if isinstance(protocol, str):
             protocol = getattr(ssl, protocol)
-        context = ssl.SSLContext(protocol)
+        if protocol == ssl.PROTOCOL_TLS_CLIENT:
+            context = ssl.create_default_context()
+        else:
+            context = ssl.SSLContext(protocol)
 
         # Load a set of certification authority (CA) certificates
         if any(
@@ -377,4 +395,9 @@ class Connection(state.State):
         if self.config.ssl_options.get('ciphers'):
             context.set_ciphers(self.config.ssl_options['ciphers'])
 
-        return pika.SSLOptions(context=context)
+        return pika.SSLOptions(
+            context=context,
+            server_hostname=self.config.ssl_options.get(
+                'server_hostname', self.config.host
+            ),
+        )

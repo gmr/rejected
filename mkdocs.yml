@@ -44,6 +44,7 @@ nav:
   - Getting Started:
       - Consumer How-To: consumer_howto.md
       - Configuration: configuration.md
+  - Migrating from 3.x: migrating.md
   - API Reference: api.md
 
 markdown_extensions:

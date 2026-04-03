@@ -262,14 +262,25 @@ class Codec:
             )
         if self._http_client is None:
             self._http_client = httpx.AsyncClient(timeout=30)
-        response = await self._http_client.get(uri)
-        if response.status_code != 200:
-            raise DecodeError(
-                f'Failed to fetch Avro schema for {message_type}: '
-                f'HTTP {response.status_code}'
-            )
-        schema: dict[str, typing.Any] = response.json()
-        return schema
+        last_err: Exception | None = None
+        for attempt in range(3):
+            try:
+                response = await self._http_client.get(uri)
+                if response.status_code == 200:
+                    schema: dict[str, typing.Any] = response.json()
+                    return schema
+                last_err = DecodeError(
+                    f'Failed to fetch Avro schema for '
+                    f'{message_type}: HTTP {response.status_code}'
+                )
+            except httpx.RequestError as err:
+                last_err = err
+            if attempt < 2:
+                await asyncio.sleep(0.5 * (2**attempt))
+        raise DecodeError(
+            f'Failed to fetch Avro schema for {message_type} '
+            f'after 3 attempts: {last_err}'
+        ) from last_err
 
 
 # --- Internal helpers (stateless, sync) ---

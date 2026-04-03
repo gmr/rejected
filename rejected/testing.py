@@ -237,16 +237,21 @@ class AsyncTestCase(unittest.IsolatedAsyncioTestCase):
 
         await self.consumer.execute(ctx)
 
-        if ctx.result == models.Result.CONSUMER_EXCEPTION:
-            raise exceptions.ConsumerException()
-        elif ctx.result == models.Result.MESSAGE_EXCEPTION:
-            raise exceptions.MessageException()
-        elif ctx.result == models.Result.PROCESSING_EXCEPTION:
-            raise exceptions.ProcessingException()
-        elif ctx.result == models.Result.UNHANDLED_EXCEPTION:
-            if self.exc_info:
-                raise self.exc_info[1]
-            raise AssertionError('UNHANDLED_EXCEPTION')
+        match ctx.result:
+            case models.Result.CONSUMER_EXCEPTION:
+                raise exceptions.ConsumerException()
+            case models.Result.MESSAGE_EXCEPTION:
+                raise exceptions.MessageException()
+            case models.Result.PROCESSING_EXCEPTION:
+                raise exceptions.ProcessingException()
+            case models.Result.UNHANDLED_EXCEPTION:
+                if self.exc_info:
+                    raise self.exc_info[1]
+                raise AssertionError('UNHANDLED_EXCEPTION')
+            case models.Result.MESSAGE_REQUEUE:
+                raise AssertionError(
+                    'Message was requeued — consumer returned MESSAGE_REQUEUE'
+                )
         return ctx.measurement
 
     @staticmethod

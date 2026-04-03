@@ -19,7 +19,9 @@ LOGGER = logging.getLogger(__name__)
 
 class Connection(state.State):
     HB_INTERVAL: typing.ClassVar[int] = 300
-    STATE_CLOSED: typing.ClassVar[int] = 0x08
+    # Intentionally aliased to STATE_STOPPED — is_closed delegates
+    # to is_stopped so both report the same terminal state.
+    STATE_CLOSED: typing.ClassVar[int] = state.State.STATE_STOPPED
     STATES: typing.ClassVar[dict[int, str]] = {
         **state.State.STATES,
         STATE_CLOSED: 'Closed',

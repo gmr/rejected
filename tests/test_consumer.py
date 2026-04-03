@@ -24,7 +24,7 @@ def _make_message(**kwargs: typing.Any) -> models.Message:
         'expiration': '32768',
         'headers': {'foo': 'bar'},
         'message_id': 'mid123',
-        'message_type': 'test',
+        'type': 'test',
         'priority': 5,
         'redelivered': False,
         'reply_to': 'rtrk',
@@ -123,7 +123,7 @@ class ConsumerExecuteTests(unittest.IsolatedAsyncioTestCase):
                 pass
 
         obj = TypedConsumer(config_module.Settings({}), None)
-        ctx = _make_ctx(_make_message(message_type='wrong'))
+        ctx = _make_ctx(_make_message(type='wrong'))
         await obj.execute(ctx)
         self.assertEqual(ctx.result, models.Result.MESSAGE_DROP)
 
@@ -135,7 +135,7 @@ class ConsumerExecuteTests(unittest.IsolatedAsyncioTestCase):
                 pass
 
         obj = TypedConsumer(config_module.Settings({}), None)
-        ctx = _make_ctx(_make_message(message_type='wrong'))
+        ctx = _make_ctx(_make_message(type='wrong'))
         await obj.execute(ctx)
         self.assertEqual(ctx.result, models.Result.MESSAGE_EXCEPTION)
 
@@ -206,7 +206,7 @@ class ConsumerPropertyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(captured['expiration'], msg.expiration)
         self.assertEqual(captured['headers'], msg.headers)
         self.assertEqual(captured['message_id'], msg.message_id)
-        self.assertEqual(captured['message_type'], msg.message_type)
+        self.assertEqual(captured['message_type'], msg.type)
         self.assertEqual(captured['name'], 'PropConsumer')
         self.assertEqual(captured['priority'], msg.priority)
         self.assertEqual(captured['redelivered'], msg.redelivered)

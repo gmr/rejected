@@ -90,7 +90,7 @@ def _make_message(
         expiration='32768',
         headers={'foo': 'bar'},
         message_id='mid123',
-        message_type='test',
+        type='test',
         priority=5,
         redelivered=redelivered,
         reply_to='rtrk',

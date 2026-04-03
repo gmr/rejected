@@ -208,7 +208,8 @@ Key differences:
 
 - Properties are top-level fields on `Message`, not nested under
   `msg.properties`
-- The AMQP `type` property is accessed as `msg.message_type` (not `msg.type`)
+- The AMQP `type` property is accessed as `msg.type` (matching the AMQP
+  property name)
 - `Message` is a Pydantic `BaseModel` with validation
 - `body` starts as raw bytes; the `Codec` class decodes it asynchronously
   before the consumer sees it

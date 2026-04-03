@@ -155,19 +155,19 @@ class _Consumer:
             msg.correlation_id or msg.message_id or str(uuid.uuid4())
         )
 
-        if msg.message_type:
-            self.set_sentry_context('type', msg.message_type)
+        if msg.type:
+            self.set_sentry_context('type', msg.type)
 
         # Validate message type
         if self.MESSAGE_TYPE:
             expected = self.MESSAGE_TYPE
             if isinstance(expected, (tuple, list, set)):
-                supported = msg.message_type in expected
+                supported = msg.type in expected
             else:
-                supported = msg.message_type == expected
+                supported = msg.type == expected
             if not supported:
                 self.logger.warning(
-                    'Received unsupported message type: %s', msg.message_type
+                    'Received unsupported message type: %s', msg.type
                 )
                 if self._drop_invalid:
                     if self._drop_exchange:
@@ -619,7 +619,7 @@ class Consumer(_Consumer):
     def message_type(self) -> str | None:
         if not self._context:
             return None
-        return self._context.message.message_type
+        return self._context.message.type
 
     @property
     def priority(self) -> int | None:

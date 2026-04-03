@@ -10,7 +10,6 @@ each run in an isolated process. It has the ability to collect statistical
 data from the consumer processes and report on it.
 
 [![Version](https://img.shields.io/pypi/v/rejected.svg?)](https://pypi.python.org/pypi/rejected)
-[![Python](https://img.shields.io/pypi/pyversions/rejected.svg)](https://pypi.python.org/pypi/rejected)
 [![License](https://img.shields.io/pypi/l/rejected.svg?)](https://github.com/gmr/rejected/blob/main/LICENSE)
 
 ## Features
@@ -42,18 +41,19 @@ pip install rejected[sentry]      # Sentry error reporting
 
 ## Documentation
 
-Full documentation is available at [https://rejected.readthedocs.io](https://rejected.readthedocs.io).
+Full documentation is available at [https://gmr.github.io/rejected](https://gmr.github.io/rejected).
 
 ## Example Consumer
 
 ```python
-from rejected import consumer
 import logging
+
+import rejected
 
 LOGGER = logging.getLogger(__name__)
 
 
-class Test(consumer.Consumer):
+class Test(rejected.Consumer):
 
     async def process(self) -> None:
         LOGGER.debug('In Test.process: %s', self.body)
@@ -62,14 +62,15 @@ class Test(consumer.Consumer):
 For concurrent message processing, use `TransactionConsumer`:
 
 ```python
-from rejected import consumer, models
 import logging
+
+import rejected
 
 LOGGER = logging.getLogger(__name__)
 
 
-class Test(consumer.TransactionConsumer):
+class Test(rejected.TransactionConsumer):
 
-    async def process(self, ctx: models.ProcessingContext) -> None:
+    async def process(self, ctx: rejected.ProcessingContext) -> None:
         LOGGER.debug('Processing: %s', ctx.message.body)
 ```

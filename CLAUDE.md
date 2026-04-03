@@ -53,12 +53,12 @@ Each `Process` runs an asyncio event loop with one or more pika `AsyncioConnecti
 2. `Process.on_message` builds a `ProcessingContext` (Pydantic model) and schedules `invoke_consumer`
 3. `invoke_consumer` decodes the body via `Codec`, then calls `consumer.execute(ctx)`
 4. `_Consumer.execute` runs pre-validation (message type, retry limits), then delegates to `_run_consumer`
-5. `Consumer._run_consumer` acquires a lock and calls `prepare()` → `process()` → `finish()`; `TransactionConsumer._run_consumer` calls them without a lock, passing `ctx` as an argument
+5. `Consumer._run_consumer` acquires a lock and calls `prepare()` → `process()` → `finish()`; `FunctionalConsumer._run_consumer` calls them without a lock, passing `ctx` as an argument
 6. `Process.on_processed` handles the result: ack, nack, requeue, or republish based on the `Result` enum
 
 ### Key Module Responsibilities
 
-- **consumer.py**: `_Consumer` base, `Consumer` (locked, self.body-style), `TransactionConsumer` (concurrent, ctx-style)
+- **consumer.py**: `_Consumer` base, `Consumer` (locked, self.body-style), `FunctionalConsumer` (concurrent, ctx-style)
 - **codecs.py**: `Codec` class handles encode/decode dispatch by content_type/content_encoding, plus async Avro schema loading
 - **connection.py**: Wraps pika `AsyncioConnection`, manages channel lifecycle, QoS, consumer tags
 - **process.py**: `Process(multiprocessing.Process)` — the per-consumer child process with asyncio event loop

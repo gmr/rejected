@@ -1,6 +1,6 @@
 """
 The :py:class:`Consumer` provides the backward-compatible consumer class
-for rejected 3.x style consumers. :py:class:`TransactionConsumer` provides
+for rejected 3.x style consumers. :py:class:`FunctionalConsumer` provides
 a new concurrent consumer that receives a
 :class:`~rejected.models.ProcessingContext`.
 
@@ -46,7 +46,7 @@ class _Consumer:
     """Base consumer class implementing the core contract.
 
     Not intended to be used directly — extend :class:`Consumer` or
-    :class:`TransactionConsumer`.
+    :class:`FunctionalConsumer`.
 
     """
 
@@ -723,7 +723,7 @@ class Consumer(_Consumer):
             )
 
 
-class TransactionConsumer(_Consumer):
+class FunctionalConsumer(_Consumer):
     """Concurrent consumer that receives a ProcessingContext.
 
     No lock — multiple messages may be processed concurrently.

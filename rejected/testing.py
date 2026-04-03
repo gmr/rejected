@@ -68,7 +68,7 @@ LOGGER = logging.getLogger(__name__)
 class AsyncTestCase(unittest.IsolatedAsyncioTestCase):
     """:class:`unittest.IsolatedAsyncioTestCase` subclass for testing
     :class:`~rejected.consumer.Consumer` and
-    :class:`~rejected.consumer.TransactionConsumer` classes.
+    :class:`~rejected.consumer.FunctionalConsumer` classes.
 
     """
 

@@ -160,9 +160,9 @@ The `properties` parameter is a dict of AMQP properties (e.g., `content_type`,
 serialized and compressed based on the `content_type` and `content_encoding`
 properties.
 
-## TransactionConsumer
+## FunctionalConsumer
 
-`TransactionConsumer` is designed for concurrent message processing. Unlike
+`FunctionalConsumer` is designed for concurrent message processing. Unlike
 `Consumer`, it does not hold a lock -- multiple messages may be processed
 in parallel. Instead of accessing message properties via `self.body` etc.,
 the processing context is passed explicitly:
@@ -174,7 +174,7 @@ import logging
 LOGGER = logging.getLogger(__name__)
 
 
-class MyConcurrentConsumer(consumer.TransactionConsumer):
+class MyConcurrentConsumer(consumer.FunctionalConsumer):
 
     async def prepare(self, ctx: models.ProcessingContext):
         LOGGER.debug('Preparing to process %s', ctx.message.message_id)
@@ -196,7 +196,7 @@ The `ProcessingContext` provides:
 - `ctx.result` -- the `Result` enum indicating message disposition
 - `ctx.received_at` -- monotonic timestamp when the message was received
 
-Use `TransactionConsumer` with `qos_prefetch > 1` to process multiple
+Use `FunctionalConsumer` with `qos_prefetch > 1` to process multiple
 messages concurrently.
 
 ## Custom Metrics

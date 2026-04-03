@@ -97,22 +97,22 @@ class MyConsumer(rejected.Consumer):
         await self.publish_message(...)
 ```
 
-### TransactionConsumer (new)
+### FunctionalConsumer (new)
 
-4.0 introduces `TransactionConsumer` for concurrent message processing.
-Unlike `Consumer` (which holds a lock), `TransactionConsumer` passes a
+4.0 introduces `FunctionalConsumer` for concurrent message processing.
+Unlike `Consumer` (which holds a lock), `FunctionalConsumer` passes a
 `ProcessingContext` to each method and allows multiple messages to be
 processed in parallel:
 
 ```python
 import rejected
 
-class MyConcurrentConsumer(rejected.TransactionConsumer):
+class MyConcurrentConsumer(rejected.FunctionalConsumer):
     async def process(self, ctx: rejected.ProcessingContext):
         self.logger.info('Body: %s', ctx.message.body)
 ```
 
-Use `TransactionConsumer` with `qos_prefetch > 1` in the configuration.
+Use `FunctionalConsumer` with `qos_prefetch > 1` in the configuration.
 
 ### ACK_PROCESSING_EXCEPTIONS behavior
 
@@ -154,7 +154,7 @@ from rejected.data import Measurement
 import rejected
 
 class MyConsumer(rejected.Consumer): ...
-class MyConcurrent(rejected.TransactionConsumer): ...
+class MyConcurrent(rejected.FunctionalConsumer): ...
 
 # Exceptions
 raise rejected.ConsumerException('...')

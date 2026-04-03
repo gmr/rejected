@@ -14,7 +14,7 @@ data from the consumer processes and report on it.
 - Async consumers built on `asyncio`
 - Automatic exception handling including connection management and consumer restarting
 - Smart consumer classes that automatically decode and deserialize message bodies based on message headers
-- Concurrent message processing with `TransactionConsumer`
+- Concurrent message processing with `FunctionalConsumer`
 - Metrics via statsd and/or Prometheus
 - Built-in profiling of consumer code
 - Avro schema support with file and HTTP schema registries

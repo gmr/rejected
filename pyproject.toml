@@ -130,7 +130,7 @@ isort = { split-on-trailing-comma = false }
 max-complexity = 15
 
 [tool.ruff.lint.per-file-ignores]
-"*.py" = ["S101", "S301"]
+"*.py" = ["S101"]
 "rejected/consumer.py" = ["B904", "BLE001", "C901", "S506"]
 "rejected/process.py" = ["C901"]
 "examples.py" = ["S311"]

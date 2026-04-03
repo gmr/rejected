@@ -19,10 +19,14 @@ class GarbageCollectorMixin:
     DEFAULT_GC_FREQUENCY: typing.ClassVar[int] = 10000
 
     def __init__(self, *args: typing.Any, **kwargs: typing.Any) -> None:
-        self._collection_cycle: int = kwargs.get('settings', {}).get(
-            'gc_collection_frequency', self.DEFAULT_GC_FREQUENCY
-        )
         super().__init__(*args, **kwargs)
+        settings = kwargs.get('settings') or (args[0] if args else None)
+        gc_freq = self.DEFAULT_GC_FREQUENCY
+        if settings is not None and hasattr(settings, 'get'):
+            gc_freq = settings.get(
+                'gc_collection_frequency', self.DEFAULT_GC_FREQUENCY
+            )
+        self._collection_cycle: int = gc_freq
         self._cycles_left: int = self._collection_cycle
 
     @property

@@ -52,7 +52,7 @@ class Process(multiprocessing.Process, state.State):
     AMQP_APP_ID: typing.ClassVar[str] = f'rejected/{__version__}'
 
     # Additional State constants
-    STATE_PROCESSING: typing.ClassVar[int] = 0x04
+    STATE_PROCESSING: typing.ClassVar[int] = 0x09
     STATES: typing.ClassVar[dict[int, str]] = {
         **state.State.STATES,
         STATE_PROCESSING: 'Processing',
@@ -267,8 +267,9 @@ class Process(multiprocessing.Process, state.State):
 
         """
         if self.is_shutting_down or self.is_waiting_to_shutdown:
-            LOGGER.info('Requeueing message due to shutdown')
-            self.reject(ctx, True)
+            LOGGER.info('Dropping message due to shutdown')
+            if not self.no_ack:
+                self.reject(ctx, True)
             if not self._in_flight:
                 self.on_ready_to_stop()
             return
@@ -334,6 +335,15 @@ class Process(multiprocessing.Process, state.State):
 
         """
         return self.state in [self.STATE_PROCESSING, self.STATE_STOP_REQUESTED]
+
+    @property
+    def is_running(self) -> bool:
+        return self.state in [
+            self.STATE_IDLE,
+            self.STATE_ACTIVE,
+            self.STATE_SLEEPING,
+            self.STATE_PROCESSING,
+        ]
 
     def on_connection_closed(self, name: str) -> None:
         if self.is_running:
@@ -741,26 +751,6 @@ class Process(multiprocessing.Process, state.State):
         LOGGER.debug('Sending exception to sentry')
         with sentry_sdk.new_scope() as scope:
             scope.set_extra('consumer_name', self.consumer_name)
-            scope.set_extra(
-                'env',
-                {
-                    k: v
-                    for k, v in os.environ.items()
-                    if not any(
-                        s in k.upper()
-                        for s in (
-                            'KEY',
-                            'SECRET',
-                            'TOKEN',
-                            'PASSWORD',
-                            'DSN',
-                            'CREDENTIAL',
-                            'AUTH',
-                            'PRIVATE',
-                        )
-                    )
-                },
-            )
             scope.set_extra('message', message)
             scope.set_extra('time_spent', duration)
             sentry_sdk.capture_exception(exc_info, scope=scope)
@@ -886,7 +876,9 @@ class Process(multiprocessing.Process, state.State):
         """
         try:
             LOGGER.info('Shutting down the consumer')
-            self.consumer.shutdown()
+            result = self.consumer.shutdown()
+            if asyncio.iscoroutine(result):
+                self._schedule(result)
         except AttributeError:
             LOGGER.debug('Consumer does not have a shutdown method')
         if self.codec:

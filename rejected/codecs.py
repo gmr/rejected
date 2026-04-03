@@ -15,8 +15,8 @@ import io
 import json
 import logging
 import pathlib
-import pickle
 import plistlib
+import re
 import typing
 
 import yaml
@@ -49,13 +49,9 @@ except ImportError:
 AVRO_DATUM_MIME_TYPE = 'application/vnd.apache.avro.datum'
 
 BS4_MIME_TYPES = ('text/html', 'text/xml')
-PICKLE_MIME_TYPES = (
-    'application/pickle',
-    'application/x-pickle',
-    'application/x-vnd.python.pickle',
-    'application/vnd.python.pickle',
-)
 YAML_MIME_TYPES = ('text/yaml', 'text/x-yaml')
+
+_SAFE_MESSAGE_TYPE_RE = re.compile(r'^[a-zA-Z0-9._-]+$')
 
 
 class DecodeError(Exception):
@@ -118,8 +114,6 @@ class Codec:
                 return _load_json(body)
             if umsgpack and content_type == 'application/msgpack':
                 return _load_msgpack(body)
-            if content_type in PICKLE_MIME_TYPES:
-                return pickle.loads(body)
             if content_type == 'application/x-plist':
                 return plistlib.loads(body)
             if content_type == 'text/csv':
@@ -155,8 +149,6 @@ class Codec:
                 body = json.dumps(body, ensure_ascii=True).encode('utf-8')
             elif umsgpack and content_type == 'application/msgpack':
                 body = umsgpack.packb(body)
-            elif content_type in PICKLE_MIME_TYPES:
-                body = pickle.dumps(body)
             elif content_type == 'application/x-plist':
                 body = plistlib.dumps(body)
             elif content_type == 'text/csv':
@@ -225,6 +217,10 @@ class Codec:
             raise DecodeError(
                 'No schema_registry configured; cannot load Avro '
                 f'schema for {message_type}'
+            )
+        if not _SAFE_MESSAGE_TYPE_RE.match(message_type):
+            raise DecodeError(
+                f'Invalid message_type for schema lookup: {message_type!r}'
             )
         registry = self._schema_registry
         uri = registry.uri.format(message_type)

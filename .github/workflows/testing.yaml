@@ -27,18 +27,24 @@ jobs:
 
       - name: Install dependencies
         run: uv sync --all-groups
+        env:
+          UV_CONFIG_FILE: /dev/null
 
       - name: Create build directory
         run: mkdir -p build
 
       - name: Lint Check
         run: uv run pre-commit run --all-files
+        env:
+          UV_CONFIG_FILE: /dev/null
 
       - name: Run tests
         run: |
           uv run coverage run
           uv run coverage report
           uv run coverage xml
+        env:
+          UV_CONFIG_FILE: /dev/null
 
       - name: Upload Coverage
         uses: codecov/codecov-action@v5

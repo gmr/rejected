@@ -370,7 +370,14 @@ class Connection(state.State):
         if protocol == ssl.PROTOCOL_TLS_CLIENT:
             context = ssl.create_default_context()
         else:
+            LOGGER.warning(
+                'Using non-default SSL protocol %r; '
+                'prefer PROTOCOL_TLS_CLIENT for secure defaults',
+                protocol,
+            )
             context = ssl.SSLContext(protocol)
+            context.verify_mode = ssl.CERT_REQUIRED
+            context.load_default_certs()
 
         # Load a set of certification authority (CA) certificates
         if any(

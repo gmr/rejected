@@ -1,11 +1,7 @@
 """Common mocks for testing"""
 
 import time
-
-try:
-    from unittest import mock
-except ImportError:
-    from unittest import mock
+from unittest import mock
 
 from pika import spec
 

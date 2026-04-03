@@ -11,11 +11,14 @@ data from the consumer processes and report on it.
 
 ## Features
 
+- Async consumers built on `asyncio`
 - Automatic exception handling including connection management and consumer restarting
-- Smart consumer classes that can automatically decode and deserialize message bodies based upon message headers
+- Smart consumer classes that automatically decode and deserialize message bodies based on message headers
+- Concurrent message processing with `TransactionConsumer`
 - Metrics via statsd and/or Prometheus
 - Built-in profiling of consumer code
-- Ability to write asynchronous code in consumers allowing for parallel communication with external resources
+- Avro schema support with file and HTTP schema registries
+- YAML and TOML configuration file support
 
 ## Installation
 
@@ -44,12 +47,12 @@ LOGGER = logging.getLogger(__name__)
 
 class ExampleConsumer(consumer.Consumer):
 
-    def process(self):
+    async def process(self):
         LOGGER.info(self.body)
 ```
 
-All interaction with RabbitMQ — connection management, message handling,
-acknowledgements, and rejections — is automatically handled for you.
+All interaction with RabbitMQ -- connection management, message handling,
+acknowledgements, and rejections -- is automatically handled for you.
 
 ## Issues
 

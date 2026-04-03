@@ -1,109 +1,144 @@
-# Configuration File Syntax
+# Configuration
 
-The rejected configuration uses [YAML](http://yaml.org) as the markup language.
-YAML's format, like Python code, is whitespace dependent for control structure in
-blocks. If you're having problems with your rejected configuration, the first
-thing you should do is ensure that the YAML syntax is correct.
+Rejected supports both [YAML](http://yaml.org) and [TOML](https://toml.io)
+configuration files. The file format is determined by the file extension
+(`.yaml`/`.yml` or `.toml`).
 
-The configuration file is split into two main sections: `Application` and `Logging`.
+The configuration file is split into two main sections: `Application` and
+`Logging`.
 
 ## Application
 
-The application section of the configuration is broken down into multiple top-level options:
+The application section contains the following top-level options:
 
-| Option | Description |
-|--------|-------------|
-| `poll_interval` | How often rejected should poll consumer processes for status in seconds (int/float) |
-| `sentry_dsn` | If Sentry support is installed, optionally set a global DSN for all consumers (str) |
-| `stats` | Enable and configure metrics submission via statsd and/or Prometheus (obj) |
-| `Connections` | A subsection with RabbitMQ connection information for consumers (obj) |
-| `Consumers` | Where each consumer type is configured (obj) |
+| Option | Description | Default |
+|--------|-------------|---------|
+| `poll_interval` | How often to poll consumer processes for status (seconds) | `60.0` |
+| `sentry_dsn` | Global Sentry DSN for all consumers | |
+| `schema_registry` | Avro schema registry configuration (see below) | |
+| `stats` | Metrics submission configuration | |
+| `Connections` | RabbitMQ connection definitions | |
+| `Consumers` | Consumer type configurations | |
+
+### schema_registry
+
+Configure the Avro schema registry for automatic message
+serialization/deserialization. Requires `rejected[avro]`.
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `type` | Registry type: `file` or `http` | `file` |
+| `uri` | URI template with `{0}` placeholder for message type | |
+
+Examples:
+
+```yaml
+schema_registry:
+  type: file
+  uri: file:///etc/avro/schemas/{0}.avsc
+```
+
+```yaml
+schema_registry:
+  type: http
+  uri: https://schema-registry.example.com/subjects/{0}/versions/latest
+```
 
 ### stats
 
-| Option | Description |
-|--------|-------------|
-| `log` | Toggle top-level logging of consumer process stats (bool) |
-| `prometheus` | Configure the Prometheus metrics exporter (obj) |
-| `statsd` | Configure the submission of per-message measurements to statsd (obj) |
+| Option | Description | Default |
+|--------|-------------|---------|
+| `log` | Log consumer process stats at each poll interval | `false` |
+| `prometheus` | Prometheus metrics exporter configuration | |
+| `statsd` | Statsd metrics submission configuration | |
 
 #### prometheus
 
 Requires `rejected[prometheus]` to be installed.
 
-| Option | Description |
-|--------|-------------|
-| `enabled` | Toggle the Prometheus metrics HTTP endpoint on and off (bool) |
-| `port` | The port to serve the `/metrics` endpoint on. Default: `9090` (int) |
+| Option | Description | Default |
+|--------|-------------|---------|
+| `enabled` | Enable the Prometheus metrics HTTP endpoint | `false` |
+| `port` | Port to serve the `/metrics` endpoint on | `9090` |
 
-See [Prometheus Metrics](#prometheus-metrics) below for the full list of exposed metrics.
+See [Prometheus Metrics](#prometheus-metrics) below for the full list of
+exposed metrics.
 
 #### statsd
 
-| Option | Description |
-|--------|-------------|
-| `enabled` | Toggle statsd reporting off and on (bool) |
-| `prefix` | An optional prefix to use when creating the statsd metric path (str) |
-| `host` | The hostname or ip address of the statsd server (str) |
-| `port` | The port of the statsd server. Default: `8125` (int) |
-| `include_hostname` | Include the hostname in the measurement path. Default: `True` (bool) |
-| `tcp` | Use TCP to connect to statsd (true/false). Default: `false` (str) |
+| Option | Description | Default |
+|--------|-------------|---------|
+| `enabled` | Enable statsd metrics reporting | `false` |
+| `host` | Statsd server hostname or IP address | `localhost` |
+| `port` | Statsd server port | `8125` |
+| `prefix` | Prefix for all metric paths | `rejected` |
+| `include_hostname` | Include the hostname in the metric path | `true` |
+| `tcp` | Use TCP instead of UDP | `false` |
 
 ### Connections
 
-Each RabbitMQ connection entry should be a nested object with a unique name with connection attributes.
+Each RabbitMQ connection entry is a named object with connection attributes.
 
-| Option | Description |
-|--------|-------------|
-| `host` | The hostname or ip address of the RabbitMQ server (str) |
-| `port` | The port of the RabbitMQ server (int) |
-| `vhost` | The virtual host to connect to (str) |
-| `user` | The username to connect as (str) |
-| `pass` | The password to use (str) |
-| `ssl_options` | Optional: the SSL options for the SSL connection socket |
-| `heartbeat_interval` | Optional: the AMQP heartbeat interval (int) default: 300 sec |
+| Option | Description | Default |
+|--------|-------------|---------|
+| `host` | RabbitMQ server hostname or IP address | `localhost` |
+| `port` | RabbitMQ server port | `5672` |
+| `vhost` | Virtual host to connect to | `/` |
+| `user` | Username | `guest` |
+| `pass` | Password | `guest` |
+| `ssl` | Enable SSL/TLS for the connection | `false` |
+| `ssl_options` | SSL/TLS options (see below) | |
+| `heartbeat_interval` | AMQP heartbeat interval in seconds | `300` |
+| `frame_max` | Maximum AMQP frame size in bytes | `131072` |
+| `socket_timeout` | Socket timeout in seconds | `10` |
 
 #### ssl_options
 
 | Option | Description |
 |--------|-------------|
-| `ca_certs` | The file path to the concatenated list of CA certificates (str) |
-| `ca_path` | The directory path to the PEM formatted CA certificates (str) |
-| `ca_data` | The PEM encoded CA certificates (str) |
-| `protocol` | The ssl `PROTOCOL_*` enum integer value. Default: `2` for `PROTOCOL_TLS` (int) |
-| `certfile` | The file path to the PEM formatted certificate file (str) |
-| `keyfile` | The file path to the certificate private key (str) |
-| `password` | The password for decrypting the `keyfile` private key (str) |
-| `ciphers` | The set of available ciphers in the OpenSSL cipher list format (str) |
+| `ca_certs` | File path to concatenated CA certificates |
+| `ca_path` | Directory path to PEM formatted CA certificates |
+| `ca_data` | PEM encoded CA certificate data |
+| `protocol` | SSL protocol constant name or integer (default: `PROTOCOL_TLS_CLIENT`) |
+| `certfile` | File path to PEM formatted client certificate |
+| `keyfile` | File path to certificate private key |
+| `password` | Password for decrypting the private key |
+| `ciphers` | Available ciphers in OpenSSL cipher list format |
+| `server_hostname` | Override the expected server hostname for SNI |
+
+!!! warning
+    Using a protocol other than `PROTOCOL_TLS_CLIENT` will log a warning.
+    `PROTOCOL_TLS_CLIENT` is strongly recommended as it provides secure
+    defaults including certificate verification.
 
 ### Consumers
 
-Each consumer entry should be a nested object with a unique name with consumer attributes.
+Each consumer entry is a named object with the following attributes:
 
-| Option | Description |
-|--------|-------------|
-| `consumer` | The `package.module.Class` path to the consumer code (str) |
-| `connections` | The connections to connect to (list) |
-| `qty` | The number of consumers per connection to run (int) |
-| `queue` | The RabbitMQ queue name to consume from (str) |
-| `ack` | Explicitly acknowledge messages (no_ack = not ack) (bool) |
-| `max_errors` | Number of errors encountered before restarting a consumer (int) |
-| `sentry_dsn` | If Sentry support is installed, set a consumer specific sentry DSN (str) |
-| `drop_exchange` | The exchange to publish a message to when it is dropped (str) |
-| `drop_invalid_messages` | Drop a message if the type property doesn't match the specified message type (str) |
-| `message_type` | Used to validate the message type of a message before processing (str or list) |
-| `error_exchange` | The exchange to publish messages that raise `ProcessingException` to (str) |
-| `error_max_retry` | The number of `ProcessingException` raised on a message before dropping it (int) |
-| `schema_uri_format` | Avro schema URI format with `{0}` placeholder for message type. Supports `file://` and `http(s)://` schemes. Requires `rejected[avro]` (str) |
-| `config` | Free-form key-value configuration section for the consumer (obj) |
+| Option | Description | Default |
+|--------|-------------|---------|
+| `consumer` | The `package.module.Class` path to the consumer code | |
+| `connections` | Connections to use (see below) | |
+| `qty` | Number of consumer processes to run | `1` |
+| `queue` | RabbitMQ queue name to consume from (defaults to consumer name) | |
+| `ack` | Explicitly acknowledge messages (`no_ack = !ack`) | `true` |
+| `qos_prefetch` | QoS prefetch count (set > 1 for concurrent processing with `TransactionConsumer`) | `1` |
+| `max_errors` | Errors within 60s before restarting the consumer | `5` |
+| `error_exchange` | Exchange to republish messages to on `ProcessingException` | |
+| `error_max_retry` | Max `ProcessingException` retries before dropping | |
+| `sentry_dsn` | Consumer-specific Sentry DSN (overrides global) | |
+| `drop_exchange` | Exchange to publish dropped messages to | |
+| `drop_invalid_messages` | Drop messages with non-matching type instead of raising `MessageException` | |
+| `message_type` | Validate message `type` property before processing | |
+| `config` | Free-form key-value settings passed to the consumer | |
 
 #### Consumer Connections
 
-The consumer connections configuration allows for one or more connections to be
-made by a single consumer. Connections can be specified as a simple list:
+Connections can be specified as a simple list of connection names:
 
 ```yaml
-Consumer Name:
+Consumers:
+  my_consumer:
     connections:
       - connection1
       - connection2
@@ -112,71 +147,214 @@ Consumer Name:
 Or with structured values for finer control:
 
 ```yaml
-Consumer Name:
+Consumers:
+  my_consumer:
     connections:
       - name: connection1
-        consume: True
-        publisher_confirmation: False
+        consume: true
+        confirm: false
       - name: connection2
-        consume: False
-        publisher_confirmation: True
+        consume: false
+        confirm: true
 ```
 
 Structured connection options:
 
-| Option | Description |
-|--------|-------------|
-| `name` | The connection name, as specified in the Connections section |
-| `consume` | Specify if the connection should consume on the connection (bool) |
-| `publisher_confirmation` | Enable publisher confirmations (bool) |
+| Option | Description | Default |
+|--------|-------------|---------|
+| `name` | The connection name, as defined in the Connections section | |
+| `consume` | Whether to consume messages on this connection | `true` |
+| `confirm` | Enable publisher confirmations on this connection | `false` |
 
 ## Logging
 
-Rejected uses `logging.config.dictConfig` to create a flexible method for
-configuring the Python standard logging module.
+Rejected uses `logging.config.dictConfig` to configure the Python standard
+logging module. See the
+[Python logging.config documentation](https://docs.python.org/3/library/logging.config.html#dictionary-schema-details)
+for the full schema.
 
 ```yaml
-version: 1
-formatters:
-  verbose:
-    format: '%(levelname) -10s %(asctime)s %(process)-6d %(processName) -15s %(name) -10s %(funcName) -20s: %(message)s'
-    datefmt: '%Y-%m-%d %H:%M:%S'
-handlers:
-  console:
-    class: logging.StreamHandler
-    formatter: verbose
-    debug_only: True
-loggers:
-  rejected:
-    handlers: [console]
-    level: INFO
-    propagate: true
-  myconsumer:
-    handlers: [console]
-    level: DEBUG
-    propagate: true
-disable_existing_loggers: true
-incremental: false
+Logging:
+  version: 1
+  formatters:
+    verbose:
+      format: '%(levelname) -10s %(asctime)s %(process)-6d %(processName) -15s %(name) -10s %(funcName) -20s: %(message)s'
+      datefmt: '%Y-%m-%d %H:%M:%S'
+  handlers:
+    console:
+      class: logging.StreamHandler
+      formatter: verbose
+  loggers:
+    rejected:
+      handlers: [console]
+      level: INFO
+      propagate: true
+    myconsumer:
+      handlers: [console]
+      level: DEBUG
+      propagate: true
+  disable_existing_loggers: true
+  incremental: false
 ```
 
-!!! note
-    The `debug_only` node of the `Logging > handlers > console` section is not
-    part of the standard dictConfig format. When set to `true` and the application
-    is not running in the foreground, the handler and all references to it will be
-    removed from the logging configuration.
+!!! tip
+    If your application is not logging anything, ensure that you have created a
+    logger section for your consumer package. For example, if your consumer is
+    `myconsumer.MyConsumer`, make sure there is a `myconsumer` logger entry.
 
-### Troubleshooting
+### Correlation ID Logging
 
-If your application is not logging anything, ensure that you have created a
-logger section in your configuration for your consumer package. For example, if
-your Consumer instance is named `myconsumer.MyConsumer`, make sure there is a
-`myconsumer` logger in the logging configuration.
+Rejected provides `rejected.log.CorrelationFilter` and
+`rejected.log.CorrelationAdapter` for including the message correlation ID
+in log output. Use filters to route log records with and without correlation
+IDs to different formatters:
+
+```yaml
+Logging:
+  version: 1
+  formatters:
+    verbose:
+      format: '%(levelname) -10s %(asctime)s %(name)s: %(message)s'
+    verbose_correlation:
+      format: '%(levelname) -10s %(asctime)s %(name)s: %(message)s {CID %(correlation_id)s}'
+  filters:
+    correlation:
+      '()': rejected.log.CorrelationFilter
+      'exists': true
+    no_correlation:
+      '()': rejected.log.CorrelationFilter
+      'exists': false
+  handlers:
+    console:
+      class: logging.StreamHandler
+      formatter: verbose
+      filters: [no_correlation]
+    console_correlation:
+      class: logging.StreamHandler
+      formatter: verbose_correlation
+      filters: [correlation]
+  loggers:
+    rejected:
+      handlers: [console, console_correlation]
+      level: INFO
+```
+
+## Example Configuration
+
+```yaml
+%YAML 1.2
+---
+Application:
+  poll_interval: 10.0
+  # sentry_dsn: https://your-sentry-dsn
+  stats:
+    log: true
+    prometheus:
+      enabled: false
+      port: 9090
+    statsd:
+      enabled: false
+      host: localhost
+      port: 8125
+      prefix: application.rejected
+  Connections:
+    rabbitmq:
+      host: localhost
+      port: 5672
+      user: guest
+      pass: guest
+      ssl: false
+      vhost: /
+      heartbeat_interval: 60
+    rabbitmq2:
+      host: localhost
+      port: 5672
+      user: rejected
+      pass: rabbitmq
+      ssl: false
+      vhost: /
+      heartbeat_interval: 60
+  Consumers:
+    async:
+      consumer: mypackage.AsyncConsumer
+      connections:
+        - rabbitmq
+        - name: rabbitmq2
+          consume: false
+          confirm: false
+      qty: 1
+      queue: test
+      ack: true
+      qos_prefetch: 100
+      max_errors: 100
+
+    sync:
+      consumer: mypackage.SyncConsumer
+      connections:
+        - rabbitmq
+      qty: 1
+      queue: generated_messages
+      ack: true
+      max_errors: 100
+      error_exchange: errors
+      qos_prefetch: 1
+      config:
+        foo: true
+        bar: baz
+
+Logging:
+  version: 1
+  formatters:
+    verbose:
+      format: "%(levelname) -10s %(asctime)s %(process)-6d %(processName) -25s %(name) -20s %(funcName) -25s: %(message)s"
+      datefmt: "%Y-%m-%d %H:%M:%S"
+  handlers:
+    console:
+      class: logging.StreamHandler
+      formatter: verbose
+  loggers:
+    rejected:
+      level: INFO
+      propagate: true
+      handlers: [console]
+    mypackage:
+      level: DEBUG
+      propagate: true
+      handlers: [console]
+  disable_existing_loggers: true
+  incremental: false
+```
+
+## Command-Line Interface
+
+```
+usage: rejected [-h] -c FILE [-P DIR] [-o CONSUMER] [-p PATH] [-q N]
+                [--version]
+
+RabbitMQ consumer framework
+
+options:
+  -h, --help            show this help message and exit
+  -c FILE, --config FILE
+                        Path to the configuration file (YAML or TOML)
+  -P DIR, --profile DIR
+                        Profile consumer modules, writing output to DIR
+  -o CONSUMER, --only CONSUMER
+                        Only run the named consumer
+  -p PATH, --prepend-path PATH
+                        Prepend PATH to sys.path before importing consumers
+  -q N, --qty N         Override the consumer quantity (use with -o)
+  --version             show program's version number and exit
+```
+
+If you specify `-P /path/to/write/data/to`, rejected will automatically enable
+`cProfile`, writing the profiling data to the specified path.
 
 ## Prometheus Metrics
 
-When `stats.prometheus.enabled` is `true` and `rejected[prometheus]` is installed,
-rejected exposes a `/metrics` HTTP endpoint on the configured port for Prometheus
-to scrape.
+When `stats.prometheus.enabled` is `true` and `rejected[prometheus]` is
+installed, rejected exposes a `/metrics` HTTP endpoint on the configured port
+for Prometheus to scrape.
 
 ### Built-in Counters
 
@@ -214,9 +392,8 @@ All labeled by `consumer` name.
 
 ### Custom Metrics
 
-Metrics created via `Consumer.stats_add_duration`, `Consumer.stats_incr`, and
-`Consumer.stats_set_value` are automatically forwarded to Prometheus as
-dynamically created metrics:
+Metrics created via consumer stats methods are automatically forwarded to
+Prometheus as dynamically created metrics:
 
 | Consumer Method | Prometheus Type | Metric Name Pattern |
 |----------------|----------------|---------------------|

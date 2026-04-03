@@ -193,6 +193,8 @@ The `ProcessingContext` provides:
 - `ctx.connection` -- the connection object
 - `ctx.measurement` -- per-message `Measurement` for custom metrics
 - `ctx.raw_body` -- the original bytes before decoding
+- `ctx.result` -- the `Result` enum indicating message disposition
+- `ctx.received_at` -- monotonic timestamp when the message was received
 
 Use `TransactionConsumer` with `qos_prefetch > 1` to process multiple
 messages concurrently.

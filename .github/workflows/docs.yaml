@@ -7,8 +7,6 @@ on:
       - 'docs/**'
       - 'mkdocs.yml'
       - 'rejected/**'
-  release:
-    types: [published]
   workflow_dispatch:
 
 permissions:

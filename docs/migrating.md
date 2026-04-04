@@ -284,6 +284,41 @@ Application:
     uri: file:///etc/avro/{0}.avsc
 ```
 
+### Connection changes
+
+The `ssl` field is now a top-level boolean on connection entries, separate
+from `ssl_options`:
+
+```yaml
+# 3.x (ssl was implied by the presence of ssl_options)
+Connections:
+  rabbitmq:
+    host: rabbitmq.example.com
+    ssl_options:
+      ca_certs: /etc/ssl/certs/ca-bundle.crt
+
+# 4.0 (explicit ssl toggle + ssl_options)
+Connections:
+  rabbitmq:
+    host: rabbitmq.example.com
+    ssl: true
+    ssl_options:
+      ca_certs: /etc/ssl/certs/ca-bundle.crt
+```
+
+New optional connection fields have been added:
+
+| Field | Description | Default |
+|-------|-------------|---------|
+| `frame_max` | Maximum AMQP frame size in bytes | `131072` |
+| `socket_timeout` | Socket timeout in seconds | `10` |
+
+The default SSL protocol has changed from `PROTOCOL_TLS` to
+`PROTOCOL_TLS_CLIENT`, which enables certificate verification by default.
+If you were relying on the old default without explicit certificate
+validation, you may need to provide `ca_certs` or `ca_path` in your
+`ssl_options`.
+
 ### Consumer connections
 
 The structured connection `publisher_confirmation` field has been renamed to
@@ -303,14 +338,40 @@ connections:
     confirm: true
 ```
 
+### Consumer configuration changes
+
+The `influxdb_measurement` consumer field has been removed along with
+InfluxDB support. Use Prometheus metrics instead.
+
+### Logging changes
+
+The `debug_only` handler option has been removed. In 3.x, this was used to
+suppress console handlers when running as a daemon. Since 4.0 always runs
+in the foreground, this option is no longer needed. Remove `debug_only` from
+any handler definitions in your logging configuration.
+
 ### Removed configuration
 
 | Removed | Notes |
 |---------|-------|
 | `Daemon` section | Rejected no longer daemonizes; use systemd/supervisord |
 | `stats.influxdb` | InfluxDB support removed; use Prometheus |
+| `influxdb_measurement` | Consumer-level InfluxDB measurement name removed |
 | `dynamic_qos` | QoS is now static via `qos_prefetch` |
+| `debug_only` (logging handler) | No longer needed without daemon mode |
 | `-f` / `--foreground` CLI flag | Rejected always runs in the foreground |
+
+### New CLI options
+
+| Flag | Description |
+|------|-------------|
+| `-n` / `--max-messages N` | Process N messages per consumer then shut down |
+
+### SIGHUP reload
+
+4.0 supports configuration reloading via `SIGHUP`. When the process receives
+`SIGHUP`, it reloads the configuration file and restarts consumer processes
+with the updated settings — no full process restart required.
 
 ## Removed APIs
 
@@ -362,7 +423,10 @@ to Prometheus.
    `rejected.measurement.Measurement`, etc.
 9. Update tests to use `async def` test methods (no `@gen_test`)
 10. Rename `publisher_confirmation` to `confirm` in connection config
-11. Remove `Daemon` section from config (if present)
-12. Remove `stats.influxdb` from config (use Prometheus instead)
-13. Remove any `pickle` content type usage
-14. Replace deprecated `statsd_*` method calls with `stats_*` equivalents
+11. Add `ssl: true` to connections that use `ssl_options`
+12. Remove `Daemon` section from config (if present)
+13. Remove `stats.influxdb` from config (use Prometheus instead)
+14. Remove `influxdb_measurement` from consumer configs
+15. Remove `debug_only` from logging handler configs
+16. Remove any `pickle` content type usage
+17. Replace deprecated `statsd_*` method calls with `stats_*` equivalents

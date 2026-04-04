@@ -125,8 +125,11 @@ class AsyncTestCase(unittest.IsolatedAsyncioTestCase):
         """Create a :class:`~rejected.models.ProcessingContext` for
         testing.
 
-        If ``message_body`` is a dict and ``content_type`` is
-        ``application/json``, the body is JSON-serialized.
+        The body is stored as raw bytes on the message, matching what
+        RabbitMQ delivers. Non-bytes/str bodies are serialized via the
+        :class:`~rejected.codecs.Codec`. Use :meth:`process_message`
+        to also run the codec decode step before the consumer sees the
+        message (matching production behavior).
 
         """
         properties = properties or {}
@@ -143,6 +146,8 @@ class AsyncTestCase(unittest.IsolatedAsyncioTestCase):
             and properties.get('content_type') == 'application/json'
         ):
             message_body = json.dumps(message_body)
+        if isinstance(message_body, str):
+            message_body = message_body.encode('utf-8')
 
         mock_conn = mock.Mock(spec=connection.Connection)
         mock_conn.is_running = True
@@ -221,6 +226,20 @@ class AsyncTestCase(unittest.IsolatedAsyncioTestCase):
             routing_key,
         )
         self._last_ctx = ctx
+
+        # Decode body through the codec, matching process.py behavior
+        if self.process.codec and ctx.message.body is not None:
+            msg = ctx.message
+            ctx.raw_body = msg.body if isinstance(msg.body, bytes) else b''
+            try:
+                msg.body = await self.process.codec.decode(
+                    msg.body, msg.content_type, msg.content_encoding, msg.type
+                )
+            except codecs.DecodeError as err:
+                ctx.result = models.Result.MESSAGE_EXCEPTION
+                raise exceptions.MessageException(
+                    'Failed to decode message body'
+                ) from err
 
         # Patch _log_exception to capture exc_info for re-raising
         original_log = self.consumer._log_exception

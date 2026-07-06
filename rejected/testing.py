@@ -132,7 +132,7 @@ class AsyncTestCase(unittest.IsolatedAsyncioTestCase):
         message (matching production behavior).
 
         """
-        properties = properties or {}
+        properties = dict(properties) if properties else {}
         properties.setdefault('content_type', content_type)
         properties.setdefault('correlation_id', self.correlation_id)
         properties.setdefault(

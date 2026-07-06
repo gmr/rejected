@@ -81,3 +81,23 @@ class TestUnhandledException(testing.AsyncTestCase):
     async def test_stacktrace(self):
         with self.assertRaises(ValueError):
             await self.process_message({'foo': 'bar'})
+
+
+class TestPropertiesNotMutated(testing.AsyncTestCase):
+    def get_consumer(self):
+        class TestConsumer(consumer.Consumer):
+            async def process(self):
+                pass
+
+        return TestConsumer
+
+    async def test_reused_properties_dict_not_mutated(self):
+        props = {'app_id': 'custom'}
+        ctx = self.create_context(
+            content_type='application/json', properties=props
+        )
+        self.assertEqual({'app_id': 'custom'}, props)
+        self.assertEqual('application/json', ctx.message.content_type)
+        ctx2 = self.create_context(content_type='text/plain', properties=props)
+        self.assertEqual({'app_id': 'custom'}, props)
+        self.assertEqual('text/plain', ctx2.message.content_type)

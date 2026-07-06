@@ -1,5 +1,6 @@
 """Tests for rejected.process"""
 
+import asyncio
 import copy
 import datetime
 import signal
@@ -7,7 +8,7 @@ import typing
 import unittest
 from unittest import mock
 
-from rejected import __version__, consumer, models, process
+from rejected import __version__, codecs, consumer, models, process
 from rejected import config as config_module
 from rejected import connection as connection_mod
 
@@ -105,8 +106,11 @@ def _make_ctx(
     channel: typing.Any = None,
     message: models.Message | None = None,
 ) -> models.ProcessingContext:
+    if conn is None:
+        conn = mock.Mock(spec=connection_mod.Connection)
+        conn.name = 'MockConnection'
     return models.ProcessingContext(
-        connection=conn or mock.Mock(spec=connection_mod.Connection),
+        connection=conn,
         channel=channel or mocks.CHANNEL,
         message=message or _make_message(),
     )
@@ -192,7 +196,7 @@ class TestProcess(unittest.IsolatedAsyncioTestCase, test_state.TestState):
     def test_setup_signal_handlers(self) -> None:
         signals = [
             mock.call(signal.SIGPROF, self._obj.on_sigprof),
-            mock.call(signal.SIGABRT, self._obj.stop),
+            mock.call(signal.SIGABRT, self._obj.on_sigabrt),
         ]
         with mock.patch('signal.signal') as signal_signal:
             self._obj.setup_sighandlers()
@@ -291,6 +295,7 @@ class TestProcess(unittest.IsolatedAsyncioTestCase, test_state.TestState):
 
         mock_conn = mock.Mock(spec=connection_mod.Connection)
         mock_conn.is_running = True
+        mock_conn.name = 'MockConnection'
         p.connections[mock_conn] = mock_conn
 
         ctx = _make_ctx(conn=mock_conn)
@@ -306,6 +311,7 @@ class TestProcess(unittest.IsolatedAsyncioTestCase, test_state.TestState):
 
         mock_conn = mock.Mock(spec=connection_mod.Connection)
         mock_conn.is_running = True
+        mock_conn.name = 'MockConnection'
         p.connections[mock_conn] = mock_conn
 
         ctx = _make_ctx(conn=mock_conn)
@@ -372,3 +378,185 @@ class TestProcess(unittest.IsolatedAsyncioTestCase, test_state.TestState):
 
         mocks.CHANNEL.basic_nack.assert_not_called()
         mock_conn.shutdown.assert_called_once()
+
+    async def test_decode_error_pops_in_flight(self) -> None:
+        """#70 a decode failure must not leak the in-flight entry."""
+        p = self.mock_setup()
+        p.state = p.STATE_IDLE
+        p.codec = mock.Mock()
+        p.codec.decode = mock.AsyncMock(side_effect=codecs.DecodeError('boom'))
+        mock_conn = mock.Mock(spec=connection_mod.Connection)
+        mock_conn.is_running = True
+        mock_conn.name = 'MockConnection'
+        p.connections[mock_conn] = mock_conn
+        ctx = _make_ctx(conn=mock_conn)
+        mocks.CHANNEL.basic_nack = mock.Mock()
+
+        await p.invoke_consumer(ctx)
+
+        self.assertEqual(len(p._in_flight), 0)
+
+    async def test_in_flight_keyed_by_connection(self) -> None:
+        """#73 same delivery tag on two connections does not collide."""
+        p = self.mock_setup()
+        p.state = p.STATE_IDLE
+        release = asyncio.Event()
+
+        async def execute(ctx: models.ProcessingContext) -> None:
+            await release.wait()
+            ctx.result = models.Result.MESSAGE_ACK
+
+        p.consumer.execute = execute
+        p.codec = None
+
+        conn_a = mock.Mock(spec=connection_mod.Connection)
+        conn_a.name, conn_a.is_running = 'a', True
+        conn_b = mock.Mock(spec=connection_mod.Connection)
+        conn_b.name, conn_b.is_running = 'b', True
+        ctx_a = _make_ctx(conn=conn_a, message=_make_message(delivery_tag=1))
+        ctx_b = _make_ctx(conn=conn_b, message=_make_message(delivery_tag=1))
+        mocks.CHANNEL.basic_ack = mock.Mock()
+
+        t1 = asyncio.ensure_future(p.invoke_consumer(ctx_a))
+        t2 = asyncio.ensure_future(p.invoke_consumer(ctx_b))
+        await asyncio.sleep(0)
+        self.assertEqual(len(p._in_flight), 2)
+        release.set()
+        await asyncio.gather(t1, t2)
+        self.assertEqual(len(p._in_flight), 0)
+
+    def test_stop_while_processing_defers_shutdown(self) -> None:
+        """#71 stop() while processing sets STOP_REQUESTED and waits."""
+        p = self.mock_setup()
+        p.state = p.STATE_PROCESSING
+        with mock.patch.object(p, 'shutdown_connections') as sc:
+            p.stop()
+            sc.assert_not_called()
+        self.assertEqual(p.state, p.STATE_STOP_REQUESTED)
+
+    def test_deferred_shutdown_fires_when_in_flight_drains(self) -> None:
+        """#71 deferred shutdown runs once the last in-flight drains."""
+        p = self.mock_setup()
+        p.state = p.STATE_PROCESSING
+        p.stop()
+        self.assertEqual(p.state, p.STATE_STOP_REQUESTED)
+
+        # invoke_consumer pops the tag from _in_flight before calling
+        # on_processed, so the last message finishing leaves it empty.
+        ctx = _make_ctx(message=_make_message())
+        ctx.result = models.Result.MESSAGE_ACK
+        self.assertEqual(len(p._in_flight), 0)
+        with mock.patch.object(p, 'shutdown_connections') as sc:
+            with mock.patch.object(p, 'ack_message'):
+                p.on_processed(ctx)
+        sc.assert_called_once()
+
+    def test_complete_pending_tasks_runs_them(self) -> None:
+        """#72 shutdown-scheduled tasks are run to completion."""
+        loop = asyncio.new_event_loop()
+        self.addCleanup(loop.close)
+        ran: list[bool] = []
+
+        async def work() -> None:
+            ran.append(True)
+
+        self._obj.ioloop = loop
+        task = loop.create_task(work())
+        self._obj._complete_pending_tasks()
+        self.assertTrue(task.done())
+        self.assertEqual(ran, [True])
+
+    def test_on_connection_failure_while_processing_reconnects(self) -> None:
+        """#75 a terminal failure while processing triggers a reconnect."""
+        p = self.mock_setup()
+        conn = mock.Mock(spec=connection_mod.Connection)
+        conn.name = 'c'
+        p.connections['c'] = conn
+        p.state = p.STATE_PROCESSING
+        p.on_connection_failure('c')
+        conn.connect.assert_called_once()
+
+    def test_on_connection_ready_reconnect_consumes(self) -> None:
+        """#84 a reconnecting connection re-issues its own consume."""
+        p = self.mock_setup()
+        p.consumer = mock.Mock()
+        conn = mock.Mock(spec=connection_mod.Connection)
+        conn.name = 'c'
+        conn.should_consume = True
+        conn.channel = mock.Mock()
+        p.connections['c'] = conn
+        p.state = p.STATE_PROCESSING
+        p.on_connection_ready('c')
+        conn.consume.assert_called_once()
+
+    def test_reject_no_ack_does_not_raise(self) -> None:
+        """#85 reject() is a metrics-only no-op when ack is disabled."""
+        raw = copy.deepcopy(_CONFIG_RAW)
+        raw['Consumers']['MockConsumer']['ack'] = False
+        args = {**self.mock_args, 'config': _make_config(raw)}
+        p = self.mock_setup(self.new_process(args))
+        mock_conn = mock.Mock(spec=connection_mod.Connection)
+        mock_conn.is_running = True
+        ctx = _make_ctx(conn=mock_conn)
+        mocks.CHANNEL.basic_nack = mock.Mock()
+
+        p.reject(ctx, requeue=True)
+
+        mocks.CHANNEL.basic_nack.assert_not_called()
+        self.assertTrue(ctx.measurement.tags.get(p.NACKED))
+
+    def test_ack_returned_message_skips_broker(self) -> None:
+        """#86 returned messages have no delivery tag to ack."""
+        p = self.mock_setup()
+        mock_conn = mock.Mock(spec=connection_mod.Connection)
+        mock_conn.is_running = True
+        ctx = _make_ctx(
+            conn=mock_conn,
+            message=_make_message(delivery_tag=None, returned=True),
+        )
+        mocks.CHANNEL.basic_ack = mock.Mock()
+
+        p.ack_message(ctx)
+
+        mocks.CHANNEL.basic_ack.assert_not_called()
+
+    def test_reject_returned_message_skips_broker(self) -> None:
+        """#86 returned messages are not nacked on the broker."""
+        p = self.mock_setup()
+        mock_conn = mock.Mock(spec=connection_mod.Connection)
+        mock_conn.is_running = True
+        ctx = _make_ctx(
+            conn=mock_conn,
+            message=_make_message(delivery_tag=None, returned=True),
+        )
+        mocks.CHANNEL.basic_nack = mock.Mock()
+
+        p.reject(ctx, requeue=True)
+
+        mocks.CHANNEL.basic_nack.assert_not_called()
+
+    def test_shutdown_connections_shuts_down_connecting(self) -> None:
+        """#87 connections still connecting are also shut down."""
+        p = self.mock_setup()
+        conn = mock.Mock(spec=connection_mod.Connection)
+        conn.is_running = False
+        conn.is_connecting = True
+        p.connections['c'] = conn
+        p.shutdown_connections()
+        conn.shutdown.assert_called_once()
+
+    def test_on_sigabrt_schedules_stop(self) -> None:
+        """#88 SIGABRT schedules stop() on the loop, no direct I/O."""
+        p = self.mock_setup()
+        p.ioloop = mock.Mock()
+        p.on_sigabrt(signal.SIGABRT, None)
+        p.ioloop.call_soon_threadsafe.assert_called_once_with(
+            p.stop, signal.SIGABRT
+        )
+
+    def test_on_sigprof_schedules_report(self) -> None:
+        """#88 SIGPROF schedules the stats report on the loop."""
+        p = self.mock_setup()
+        p.ioloop = mock.Mock()
+        p.on_sigprof(signal.SIGPROF, None)
+        p.ioloop.call_soon_threadsafe.assert_called_once_with(p._report_stats)

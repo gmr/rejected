@@ -72,17 +72,25 @@ class Controller:
                 quantity=self.args.quantity,
                 max_messages=self.args.max_messages,
             )
+            # A shutdown signal may have arrived while constructing the MCP
+            if self._shutdown_requested:
+                break
             try:
                 self._mcp.run()
             except KeyboardInterrupt:
                 LOGGER.info('Caught CTRL-C, shutting down')
-                break
+                self._shutdown_requested = True
             except Exception:
                 exc_info = sys.exc_info()
                 if self._sentry_client:
                     LOGGER.debug('Sending exception to sentry')
                     sentry_sdk.capture_exception(exc_info)
                 raise
+            finally:
+                # Always stop children on the main thread once the run loop
+                # has exited so non-daemon processes cannot leak or wedge the
+                # parent at atexit.
+                self._mcp.stop_processes()
 
             if not self._reload_requested:
                 break
@@ -106,16 +114,24 @@ class Controller:
     def _on_sighup(self, _signum: int, _frame: types.FrameType | None) -> None:
         LOGGER.info('Received SIGHUP — reloading configuration')
         self._reload_requested = True
-        if self._mcp:
-            self._mcp.stop_processes()
+        self._request_stop()
 
     def _on_sigterm(
         self, _signum: int, _frame: types.FrameType | None
     ) -> None:
         LOGGER.info('Received SIGTERM, initiating shutdown')
         self._shutdown_requested = True
+        self._request_stop()
+
+    def _request_stop(self) -> None:
+        """Signal the run loop to exit without stopping children from within
+        the signal handler. Cancel the poll itimer and flag the MCP; the main
+        flow performs the actual ``stop_processes()`` once the loop unwinds,
+        so a poll cannot interleave and respawn orphaned children.
+        """
+        signal.setitimer(signal.ITIMER_REAL, 0, 0)
         if self._mcp:
-            self._mcp.stop_processes()
+            self._mcp.stop_requested = True
 
 
 def _build_parser() -> argparse.ArgumentParser:

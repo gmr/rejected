@@ -105,6 +105,17 @@ class AvroHttpSchemaTests(unittest.IsolatedAsyncioTestCase):
                 await codec._avro_schema('flaky_type')
         self.assertEqual(codec._http_client.get.await_count, 3)
 
+    async def test_failed_load_does_not_leak_lock(self):
+        codec = _http_codec()
+        response = mock.Mock(status_code=404)
+        codec._http_client = mock.Mock()
+        codec._http_client.get = mock.AsyncMock(return_value=response)
+        with mock.patch.object(codecs, 'httpx', _fake_httpx()):
+            with self.assertRaises(codecs.DecodeError):
+                await codec._avro_schema('missing_type')
+        self.assertNotIn('missing_type', codec._schema_locks)
+        self.assertNotIn('missing_type', codec._avro_schemas)
+
     async def test_different_types_load_concurrently(self):
         codec = _http_codec()
         release = asyncio.Event()

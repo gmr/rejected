@@ -205,12 +205,17 @@ class Codec:
         lock = self._schema_locks.get(message_type)
         if lock is None:
             lock = self._schema_locks[message_type] = asyncio.Lock()
-        async with lock:
-            if message_type not in self._avro_schemas:
-                self._avro_schemas[
-                    message_type
-                ] = await self._load_avro_schema(message_type)
-            return self._avro_schemas[message_type]
+        try:
+            async with lock:
+                if message_type not in self._avro_schemas:
+                    self._avro_schemas[
+                        message_type
+                    ] = await self._load_avro_schema(message_type)
+                return self._avro_schemas[message_type]
+        except Exception:
+            if self._schema_locks.get(message_type) is lock:
+                self._schema_locks.pop(message_type, None)
+            raise
 
     async def _load_avro_schema(
         self, message_type: str

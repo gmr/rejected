@@ -112,11 +112,6 @@ class TCPSendTestCase(TestCase):
         expectation = self.payload_format('bar', 2, 'c')
         self.socket.sendall.assert_called_once_with(expectation)
 
-    def test_blocking_io_error_is_non_fatal(self):
-        self.socket.sendall.side_effect = BlockingIOError
-        self.statsd.incr('bar', 2)
-        self.failure_callback.assert_not_called()
-
     def test_timeout_reconnects(self):
         self.socket.sendall.side_effect = TimeoutError
         with mock.patch.object(self.statsd, '_tcp_socket') as tcp_socket:

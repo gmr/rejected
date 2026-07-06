@@ -121,10 +121,6 @@ class Client:
                 self._tcp_writer.sendall(data)
             elif self._udp_sock:
                 self._udp_sock.sendto(data, self._address)
-        except BlockingIOError as error:
-            LOGGER.warning(
-                'Dropping statsd metric, socket not ready: %s', error
-            )
         except TimeoutError as error:
             LOGGER.warning('Timeout sending statsd metric: %s', error)
             if self._tcp_writer:

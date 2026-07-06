@@ -1,5 +1,6 @@
 """Tests for rejected.consumer"""
 
+import asyncio
 import datetime
 import typing
 import unittest
@@ -7,7 +8,7 @@ from unittest import mock
 
 from rejected import config as config_module
 from rejected import connection as connection_mod
-from rejected import consumer, exceptions, models
+from rejected import consumer, exceptions, log, models
 
 
 def _make_message(**kwargs: typing.Any) -> models.Message:
@@ -227,3 +228,131 @@ class ConsumerPropertyTests(unittest.IsolatedAsyncioTestCase):
     async def test_settings_accessible(self):
         obj = TestConsumer(config_module.Settings({'foo': 'bar'}), None)
         self.assertEqual(obj.settings.get('foo'), 'bar')
+
+
+class ConsumerLifecycleTests(unittest.IsolatedAsyncioTestCase):
+    async def test_finish_is_called(self):
+        """#68 finish() runs after process() in the standard lifecycle."""
+        calls: list[str] = []
+
+        class LC(consumer.Consumer):
+            async def prepare(self):
+                calls.append('prepare')
+
+            async def process(self):
+                calls.append('process')
+
+            async def finish(self):
+                calls.append('finish')
+
+        obj = LC(config_module.Settings({}), None)
+        await obj.execute(_make_ctx())
+        self.assertEqual(calls, ['prepare', 'process', 'finish'])
+
+
+class RepublishPropertyTests(unittest.IsolatedAsyncioTestCase):
+    async def test_processing_error_preserves_properties(self):
+        """#69 republished messages keep the original AMQP properties."""
+
+        class PC(consumer.Consumer):
+            async def process(self):
+                raise exceptions.ProcessingException('boom')
+
+        proc = mock.Mock()
+        proc.queue_name = 'q'
+        proc.sentry_client = None
+        obj = PC(config_module.Settings({}), proc)
+        msg = _make_message()
+        ctx = _make_ctx(msg)
+        await obj.execute(ctx)
+        self.assertEqual(ctx.result, models.Result.PROCESSING_EXCEPTION)
+        props = ctx.channel.basic_publish.call_args.kwargs['properties']
+        self.assertEqual(props.content_type, msg.content_type)
+        self.assertEqual(props.correlation_id, msg.correlation_id)
+        self.assertEqual(props.type, msg.type)
+        self.assertEqual(props.priority, msg.priority)
+        self.assertEqual(props.expiration, msg.expiration)
+
+
+class ProcessingExceptionsHeaderTests(unittest.IsolatedAsyncioTestCase):
+    async def test_non_numeric_header_does_not_raise(self):
+        """#80 a non-numeric X-Processing-Exceptions header is tolerated."""
+
+        class MR(consumer.Consumer):
+            ERROR_MAX_RETRY = 3
+
+            async def process(self):
+                pass
+
+        obj = MR(config_module.Settings({}), None)
+        msg = _make_message(headers={'X-Processing-Exceptions': 'not-a-num'})
+        ctx = _make_ctx(msg)
+        await obj.execute(ctx)
+        self.assertEqual(ctx.result, models.Result.MESSAGE_ACK)
+
+
+class KeyboardInterruptTests(unittest.IsolatedAsyncioTestCase):
+    async def test_keyboard_interrupt_does_not_reject(self):
+        """#82 the KeyboardInterrupt handler no longer double-nacks."""
+
+        class KC(consumer.Consumer):
+            async def process(self):
+                raise KeyboardInterrupt()
+
+        proc = mock.Mock()
+        proc.sentry_client = None
+        obj = KC(config_module.Settings({}), proc)
+        ctx = _make_ctx()
+        await obj.execute(ctx)
+        proc.reject.assert_not_called()
+        proc.stop.assert_called_once()
+        self.assertEqual(ctx.result, models.Result.MESSAGE_REQUEUE)
+
+
+class CorrelationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_correlation_id_set_on_message(self):
+        """#81 a missing correlation id is generated and carried on ctx."""
+
+        class C(consumer.Consumer):
+            async def process(self):
+                pass
+
+        obj = C(config_module.Settings({}), None)
+        msg = _make_message(correlation_id=None, message_id=None)
+        ctx = _make_ctx(msg)
+        await obj.execute(ctx)
+        self.assertIsNotNone(ctx.message.correlation_id)
+
+    async def test_correlation_isolated_per_message(self):
+        """#81 concurrent messages do not clobber each other's id."""
+        seen: dict[str, str | None] = {}
+
+        class C(consumer.FunctionalConsumer):
+            async def process(self, ctx):
+                await asyncio.sleep(0.01)
+                seen[ctx.message.correlation_id] = log.correlation_id.get()
+
+        obj = C(config_module.Settings({}), None)
+        ctx1 = _make_ctx(_make_message(correlation_id='a'))
+        ctx2 = _make_ctx(_make_message(correlation_id='b'))
+        await asyncio.gather(obj.execute(ctx1), obj.execute(ctx2))
+        self.assertEqual(seen['a'], 'a')
+        self.assertEqual(seen['b'], 'b')
+
+    async def test_initialize_called_once_concurrently(self):
+        """#81 initialize() runs exactly once under concurrency."""
+        calls: list[int] = []
+
+        class C(consumer.FunctionalConsumer):
+            async def initialize(self):
+                calls.append(1)
+                await asyncio.sleep(0.01)
+
+            async def process(self, ctx):
+                pass
+
+        obj = C(config_module.Settings({}), None)
+        await asyncio.gather(
+            obj.execute(_make_ctx()), obj.execute(_make_ctx())
+        )
+        self.assertEqual(len(calls), 1)

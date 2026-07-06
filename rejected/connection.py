@@ -67,6 +67,9 @@ class Connection(state.State):
         return self.is_stopped
 
     def shutdown(self) -> None:
+        if self.is_closed:
+            LOGGER.debug('Connection %s is already closed', self.name)
+            return
         if self.is_shutting_down:
             LOGGER.debug('Connection %s is already shutting down', self.name)
             return
@@ -84,7 +87,10 @@ class Connection(state.State):
         elif self.channel:
             self.channel.close()
         else:
-            self.connection.close()
+            try:
+                self.connection.close()
+            except (AttributeError, pika.exceptions.ConnectionWrongStateError):
+                pass
 
     def on_open(
         self, connection: asyncio_connection.AsyncioConnection
@@ -241,7 +247,6 @@ class Connection(state.State):
             self.connection.close()
         except (AttributeError, pika.exceptions.ConnectionWrongStateError):
             pass
-        del self.connection
         self.callbacks.on_connection_failure(self.name)
 
     def consume(
@@ -380,6 +385,7 @@ class Connection(state.State):
                 protocol,
             )
             context = ssl.SSLContext(protocol)
+            context.check_hostname = True
             context.verify_mode = ssl.CERT_REQUIRED
             context.load_default_certs()
 

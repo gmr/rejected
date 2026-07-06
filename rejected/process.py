@@ -117,8 +117,9 @@ class Process(multiprocessing.Process, state.State):
         self.state_start = time.time()
         self.statsd: statsd.Client | None = None
 
-        # Concurrent message tracking
-        self._in_flight: dict[int, models.ProcessingContext] = {}
+        # Concurrent message tracking, keyed by (connection_name,
+        # delivery_tag) so tags from different connections do not collide.
+        self._in_flight: dict[tuple[str, int], models.ProcessingContext] = {}
         self._tasks: set[asyncio.Task[typing.Any]] = set()
 
         # Cumulative counts for stats reporting
@@ -140,6 +141,11 @@ class Process(multiprocessing.Process, state.State):
         :param ctx: The processing context containing the message
 
         """
+        if ctx.message.returned or ctx.message.delivery_tag is None:
+            LOGGER.debug('Skipping ack for returned message')
+            ctx.measurement.set_tag(self.ACKED, True)
+            return
+
         if not ctx.connection.is_running:
             LOGGER.warning('Can not ack message, disconnected from RabbitMQ')
             ctx.measurement.set_tag(self.CLOSED_ON_COMPLETE, True)
@@ -275,9 +281,10 @@ class Process(multiprocessing.Process, state.State):
             return
 
         tag = (
+            ctx.connection.name,
             ctx.message.delivery_tag
             if ctx.message.delivery_tag is not None
-            else id(ctx.message)
+            else id(ctx.message),
         )
         if not self._in_flight and self.is_idle:
             self.set_state(self.STATE_PROCESSING)
@@ -296,6 +303,7 @@ class Process(multiprocessing.Process, state.State):
             except codecs.DecodeError as error:
                 LOGGER.error('Failed to decode message body: %s', error)
                 ctx.result = models.Result.MESSAGE_EXCEPTION
+                self._in_flight.pop(tag, None)
                 self.on_processed(ctx)
                 return
 
@@ -345,7 +353,9 @@ class Process(multiprocessing.Process, state.State):
     def on_connection_closed(self, name: str) -> None:
         if self.is_running:
             LOGGER.warning('Connection %s was closed, reconnecting', name)
-            self.connections[name].connect()
+            self.connections[name].connection = self.connections[
+                name
+            ].connect()
             return
 
         ready = all(c.is_closed for c in self.connections.values())
@@ -355,6 +365,18 @@ class Process(multiprocessing.Process, state.State):
     def on_connection_failure(
         self, *args: typing.Any, **kwargs: typing.Any
     ) -> None:
+        name = args[0] if args else None
+        # A terminal channel/connection error while actively processing must
+        # not leave a zombie: reconnect so the process can keep working.
+        if self.state == self.STATE_PROCESSING and name in self.connections:
+            LOGGER.warning(
+                'Connection %s failed while processing, reconnecting', name
+            )
+            self.connections[name].connection = self.connections[
+                name
+            ].connect()
+            return
+
         ready = all(c.is_closed for c in self.connections.values())
         LOGGER.warning(
             'Connection failure while %s - Ready to stop: %r',
@@ -372,14 +394,21 @@ class Process(multiprocessing.Process, state.State):
     def on_connection_ready(self, name: str) -> None:
         LOGGER.debug('Connection %s indicated it is ready', name)
         self.consumer.set_channel(name, self.connections[name].channel)
-        if all(c.is_idle for c in self.connections.values()):
-            for key in self.connections.keys():
-                if self.connections[key].should_consume:
-                    self.connections[key].consume(
-                        self.queue_name, self.no_ack, self.qos_prefetch
-                    )
-            if self.is_connecting:
+        if self.is_connecting:
+            # Initial startup: wait for every connection before consuming.
+            if all(c.is_idle for c in self.connections.values()):
+                for key in self.connections.keys():
+                    if self.connections[key].should_consume:
+                        self.connections[key].consume(
+                            self.queue_name, self.no_ack, self.qos_prefetch
+                        )
                 self.set_state(self.STATE_IDLE)
+        elif self.connections[name].should_consume:
+            # A reconnecting connection became ready: re-issue its consume
+            # rather than waiting on all connections to be idle again.
+            self.connections[name].consume(
+                self.queue_name, self.no_ack, self.qos_prefetch
+            )
 
     def on_connection_blocked(self, name: str) -> None:
         LOGGER.warning('Connection %s blocked', name)
@@ -606,9 +635,29 @@ class Process(multiprocessing.Process, state.State):
         :param frame _unused_frame: The python frame the signal was received at
 
         """
+        # Do the actual work on the event loop; a Unix signal handler must
+        # not touch pika/loop state directly.
+        if self.ioloop:
+            self.ioloop.call_soon_threadsafe(self._report_stats)
+        signal.siginterrupt(signal.SIGPROF, False)
+
+    def _report_stats(self) -> None:
+        """Push a stats snapshot onto the MCP queue from the event loop."""
         self.stats_queue.put(self.report_stats(), True)
         self.last_stats_time = time.time()
-        signal.siginterrupt(signal.SIGPROF, False)
+
+    def on_sigabrt(
+        self, signum: int, _unused_frame: types.FrameType | None = None
+    ) -> None:
+        """Handle SIGABRT by scheduling stop() on the event loop so all pika
+        interaction happens from a loop callback rather than the signal
+        handler.
+
+        """
+        if self.ioloop:
+            self.ioloop.call_soon_threadsafe(self.stop, signum)
+        else:
+            self.stop(signum)
 
     def on_startup_error(self, error: str) -> None:
         """Invoked when a pre-condition for starting the consumer has failed.
@@ -627,8 +676,18 @@ class Process(multiprocessing.Process, state.State):
         :param requeue: Specify if the message should be re-queued
 
         """
+        if ctx.message.returned or ctx.message.delivery_tag is None:
+            LOGGER.debug('Skipping nack for returned message')
+            ctx.measurement.set_tag(self.NACKED, True)
+            ctx.measurement.set_tag(self.REQUEUED, requeue)
+            return
+
         if self.no_ack:
-            raise RuntimeError('Can not reject messages when ack is False')
+            # Auto-ack mode: there is nothing to nack on the broker, but the
+            # metrics still reflect the intended disposition.
+            ctx.measurement.set_tag(self.NACKED, True)
+            ctx.measurement.set_tag(self.REQUEUED, requeue)
+            return
 
         if not ctx.connection.is_running:
             LOGGER.warning('Can not nack message, disconnected from RabbitMQ')
@@ -727,6 +786,25 @@ class Process(multiprocessing.Process, state.State):
                 self.ioloop.run_forever()
             except KeyboardInterrupt:
                 LOGGER.warning('CTRL-C while waiting for clean shutdown')
+            finally:
+                self._complete_pending_tasks()
+
+    def _complete_pending_tasks(self) -> None:
+        """Run any tasks scheduled during shutdown (consumer.shutdown and
+        codec.close) to completion, since the loop was stopped before they
+        had a chance to run.
+
+        """
+        if not self.ioloop or self.ioloop.is_running():
+            return
+        pending = [
+            task for task in asyncio.all_tasks(self.ioloop) if not task.done()
+        ]
+        if pending:
+            LOGGER.debug('Completing %i pending task(s)', len(pending))
+            self.ioloop.run_until_complete(
+                asyncio.gather(*pending, return_exceptions=True)
+            )
 
     def send_exception_to_sentry(
         self,
@@ -828,7 +906,7 @@ class Process(multiprocessing.Process, state.State):
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
 
         signal.signal(signal.SIGPROF, self.on_sigprof)
-        signal.signal(signal.SIGABRT, self.stop)
+        signal.signal(signal.SIGABRT, self.on_sigabrt)
 
         signal.siginterrupt(signal.SIGPROF, False)
         signal.siginterrupt(signal.SIGABRT, False)
@@ -839,8 +917,11 @@ class Process(multiprocessing.Process, state.State):
         if not self.is_shutting_down:
             self.set_state(self.STATE_SHUTTING_DOWN)
         for name in self.connections:
-            if self.connections[name].is_running:
-                self.connections[name].shutdown()
+            conn = self.connections[name]
+            # Also shut down connections still connecting, otherwise their
+            # in-progress open blocks shutdown from ever completing.
+            if conn.is_running or conn.is_connecting:
+                conn.shutdown()
 
     def stop(
         self, signum: int | None = None, _unused: types.FrameType | None = None
@@ -863,16 +944,18 @@ class Process(multiprocessing.Process, state.State):
             LOGGER.warning('Stop requested but already waiting to shut down')
             return
 
-        # Stop consuming and close AMQP connections
-        self.shutdown_connections()
-
-        # Wait until the consumer has finished processing to shutdown
+        # If we are mid-processing, wait for in-flight messages to drain
+        # before tearing down connections. on_processed calls
+        # shutdown_connections once _in_flight is empty.
         if self.is_processing:
             LOGGER.info('Waiting for consumer to finish processing')
             self.set_state(self.STATE_STOP_REQUESTED)
             if signum == signal.SIGTERM:
                 signal.siginterrupt(signal.SIGTERM, False)
             return
+
+        # Stop consuming and close AMQP connections
+        self.shutdown_connections()
 
     def stop_consumer(self) -> None:
         """Stop the consumer object and allow it to do a clean shutdown if it

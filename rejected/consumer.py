@@ -85,6 +85,7 @@ class _Consumer:
         self._process = process
         self._settings = settings
         self._initialized = False
+        self._init_lock: asyncio.Lock | None = None
 
         self._logger = logging.getLogger(
             settings.get('_import_module', __name__)
@@ -128,9 +129,7 @@ class _Consumer:
         The result is stored on ``ctx.result``.
 
         """
-        if not self._initialized:
-            await self.initialize()
-            self._initialized = True
+        await self._ensure_initialized()
 
         result = self._pre_execute(ctx)
         if result is not None:
@@ -138,6 +137,20 @@ class _Consumer:
             return
 
         ctx.result = await self._run_consumer(ctx)
+
+    async def _ensure_initialized(self) -> None:
+        """Run :meth:`initialize` exactly once, even when multiple messages
+        are processed concurrently.
+
+        """
+        if self._initialized:
+            return
+        if self._init_lock is None:
+            self._init_lock = asyncio.Lock()
+        async with self._init_lock:
+            if not self._initialized:
+                await self.initialize()
+                self._initialized = True
 
     def _pre_execute(
         self, ctx: models.ProcessingContext
@@ -150,10 +163,14 @@ class _Consumer:
         """
         msg = ctx.message
 
-        # Ensure correlation ID
-        self._correlation_id = (
-            msg.correlation_id or msg.message_id or str(uuid.uuid4())
-        )
+        # Ensure correlation ID, carrying it on the message so it stays
+        # correct per-message when processing concurrently. The contextvar
+        # is what the logging adapter reads, isolating it per asyncio task.
+        cid = msg.correlation_id or msg.message_id or str(uuid.uuid4())
+        if msg.correlation_id is None:
+            msg.correlation_id = cid
+        self._correlation_id = cid
+        log.correlation_id.set(cid)
 
         if msg.type:
             self.set_sentry_context('type', msg.type)
@@ -180,11 +197,12 @@ class _Consumer:
             msg.headers or {}
         ):
             raw_count = msg.headers[_PROCESSING_EXCEPTIONS]
-            count = (
-                int(raw_count)
-                if isinstance(raw_count, (int, float, str))
-                else 0
-            )
+            try:
+                count = int(raw_count)  # type: ignore[arg-type]
+            except (ValueError, TypeError):
+                # Unparseable counts are treated as 0 so the message keeps
+                # flowing rather than looping forever on a ValueError.
+                count = 0
             if count >= self._error_max_retry:
                 self.logger.warning(
                     'Dropping message with %i deaths due to ERROR_MAX_RETRY',
@@ -219,7 +237,6 @@ class _Consumer:
             await handler()
         except KeyboardInterrupt:
             self.logger.debug('CTRL-C')
-            self._process.reject(ctx, True)
             self._process.stop()
             return models.Result.MESSAGE_REQUEUE
         except pika_exceptions.ChannelClosed as error:
@@ -474,11 +491,28 @@ class _Consumer:
         headers['X-Original-Exchange'] = msg.exchange or ''
         headers['X-Original-Queue'] = self._process.queue_name
         headers.update(extra_headers)
+        # Preserve the original AMQP properties (content type/encoding,
+        # type, correlation id, priority, expiration, etc.) so downstream
+        # error/drop pipelines can still decode and route the message.
+        properties = pika.BasicProperties(
+            app_id=msg.app_id,
+            content_encoding=msg.content_encoding,
+            content_type=msg.content_type,
+            correlation_id=msg.correlation_id,
+            delivery_mode=msg.delivery_mode,
+            expiration=msg.expiration,
+            message_id=msg.message_id,
+            priority=msg.priority,
+            reply_to=msg.reply_to,
+            type=msg.type,
+            user_id=msg.user_id,
+            headers=headers,
+        )
         ctx.channel.basic_publish(
             exchange=exchange,
             routing_key=msg.routing_key or '',
             body=ctx.raw_body or msg.body,
-            properties=pika.BasicProperties(headers=headers),
+            properties=properties,
         )
 
     def _republish_dropped_message(
@@ -504,7 +538,10 @@ class _Consumer:
             headers['X-Processing-Exception'] = error
         msg_headers = ctx.message.headers or {}
         raw_prev = msg_headers.get(_PROCESSING_EXCEPTIONS, 0)
-        prev = int(raw_prev) if isinstance(raw_prev, (int, float, str)) else 0
+        try:
+            prev = int(raw_prev)  # type: ignore[arg-type]
+        except (ValueError, TypeError):
+            prev = 0
         headers[_PROCESSING_EXCEPTIONS] = prev + 1
         self._republish(ctx, self._error_exchange or '', headers)
 
@@ -540,26 +577,40 @@ class Consumer(_Consumer):
         """Called after processing completes."""
         pass
 
-    async def _run_consumer(
-        self, ctx: models.ProcessingContext
-    ) -> models.Result:
+    async def execute(self, ctx: models.ProcessingContext) -> None:
+        """Serialize the entire message lifecycle behind the lock.
+
+        Pre-validation (which sets ``self._correlation_id`` and other
+        per-message state) must run inside the lock so a second message
+        can not clobber it while the first is still processing.
+
+        """
+        await self._ensure_initialized()
         if self._lock is None:
             self._lock = asyncio.Lock()
         async with self._lock:
-            self._context = ctx
+            result = self._pre_execute(ctx)
+            if result is not None:
+                ctx.result = result
+                return
+            ctx.result = await self._run_consumer(ctx)
+
+    async def _run_consumer(
+        self, ctx: models.ProcessingContext
+    ) -> models.Result:
+        self._context = ctx
+        self._message_body = _UNSET
+        try:
+            return await self._handle_execution(ctx, self._process_standard)
+        finally:
+            await self.on_finish()
+            self._context = None
             self._message_body = _UNSET
-            try:
-                return await self._handle_execution(
-                    ctx, self._process_standard
-                )
-            finally:
-                await self.on_finish()
-                self._context = None
-                self._message_body = _UNSET
 
     async def _process_standard(self) -> None:
         await self.prepare()
         await self.process()
+        await self.finish()
 
     # --- Quick-access properties (read from self._context) ---
 

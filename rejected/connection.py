@@ -85,7 +85,10 @@ class Connection(state.State):
                 self.consumer_tag, self.on_consumer_cancelled
             )
         elif self.channel:
-            self.channel.close()
+            try:
+                self.channel.close()
+            except (AttributeError, pika.exceptions.ChannelWrongStateError):
+                pass
         else:
             try:
                 self.connection.close()

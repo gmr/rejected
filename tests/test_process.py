@@ -434,6 +434,23 @@ class TestProcess(unittest.IsolatedAsyncioTestCase, test_state.TestState):
             sc.assert_not_called()
         self.assertEqual(p.state, p.STATE_STOP_REQUESTED)
 
+    def test_deferred_shutdown_fires_when_in_flight_drains(self) -> None:
+        """#71 deferred shutdown runs once the last in-flight drains."""
+        p = self.mock_setup()
+        p.state = p.STATE_PROCESSING
+        p.stop()
+        self.assertEqual(p.state, p.STATE_STOP_REQUESTED)
+
+        # invoke_consumer pops the tag from _in_flight before calling
+        # on_processed, so the last message finishing leaves it empty.
+        ctx = _make_ctx(message=_make_message())
+        ctx.result = models.Result.MESSAGE_ACK
+        self.assertEqual(len(p._in_flight), 0)
+        with mock.patch.object(p, 'shutdown_connections') as sc:
+            with mock.patch.object(p, 'ack_message'):
+                p.on_processed(ctx)
+        sc.assert_called_once()
+
     def test_complete_pending_tasks_runs_them(self) -> None:
         """#72 shutdown-scheduled tasks are run to completion."""
         loop = asyncio.new_event_loop()

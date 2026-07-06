@@ -326,11 +326,13 @@ class CorrelationTests(unittest.IsolatedAsyncioTestCase):
     async def test_correlation_isolated_per_message(self):
         """#81 concurrent messages do not clobber each other's id."""
         seen: dict[str, str | None] = {}
+        prop: dict[str, str | None] = {}
 
         class C(consumer.FunctionalConsumer):
             async def process(self, ctx):
                 await asyncio.sleep(0.01)
                 seen[ctx.message.correlation_id] = log.correlation_id.get()
+                prop[ctx.message.correlation_id] = self.correlation_id
 
         obj = C(config_module.Settings({}), None)
         ctx1 = _make_ctx(_make_message(correlation_id='a'))
@@ -338,6 +340,10 @@ class CorrelationTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.gather(obj.execute(ctx1), obj.execute(ctx2))
         self.assertEqual(seen['a'], 'a')
         self.assertEqual(seen['b'], 'b')
+        # The public property must also be task-local, not clobbered by
+        # the other in-flight message via shared instance state.
+        self.assertEqual(prop['a'], 'a')
+        self.assertEqual(prop['b'], 'b')
 
     async def test_initialize_called_once_concurrently(self):
         """#81 initialize() runs exactly once under concurrency."""

@@ -167,7 +167,7 @@ class _Consumer:
         # correct per-message when processing concurrently. The contextvar
         # is what the logging adapter reads, isolating it per asyncio task.
         cid = msg.correlation_id or msg.message_id or str(uuid.uuid4())
-        if msg.correlation_id is None:
+        if not msg.correlation_id:
             msg.correlation_id = cid
         self._correlation_id = cid
         log.correlation_id.set(cid)
@@ -313,7 +313,10 @@ class _Consumer:
 
     @property
     def correlation_id(self) -> str | None:
-        return self._correlation_id
+        # Prefer the task-local contextvar so concurrent FunctionalConsumer
+        # messages don't read another in-flight message's id via shared
+        # instance state.
+        return log.correlation_id.get() or self._correlation_id
 
     @property
     def name(self) -> str:

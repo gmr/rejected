@@ -22,6 +22,18 @@ class TestState(unittest.TestCase):
         self._obj.set_state(self._obj.STATE_CONNECTING)
         self.assertEqual(self._obj.state, self._obj.STATE_CONNECTING)
 
+    def test_set_state_stopped_to_active_rejected(self):
+        self._obj.state = self._obj.STATE_STOPPED
+        self.assertRaises(
+            ValueError, self._obj.set_state, self._obj.STATE_ACTIVE
+        )
+        self.assertEqual(self._obj.state, self._obj.STATE_STOPPED)
+
+    def test_set_state_stopped_to_shutting_down_allowed(self):
+        self._obj.state = self._obj.STATE_STOPPED
+        self._obj.set_state(self._obj.STATE_SHUTTING_DOWN)
+        self.assertEqual(self._obj.state, self._obj.STATE_SHUTTING_DOWN)
+
     def test_set_state_state_start(self):
         self.state = self._obj.STATE_IDLE
         value = 86400

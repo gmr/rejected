@@ -81,6 +81,7 @@ class MasterControlProgram(state.State):
         )
         self.consumers: dict[str, Consumer] = {}
         self.config: models.Config = config
+        self.consumer_baselines: dict[str, collections.Counter[str]] = {}
         self.last_poll_results: dict[str, typing.Any] = {}
         self.poll_data: dict[str, typing.Any] = {'time': 0, 'processes': []}
         self.poll_timer: float | None = None
@@ -95,6 +96,9 @@ class MasterControlProgram(state.State):
 
         # Flag to indicate child creation error
         self.child_abort: bool = False
+
+        # Flag set by the controller to request the run loop to exit
+        self.stop_requested: bool = False
 
         # Carry for logging internal stats collection data
         self.log_stats_enabled: bool = config.stats.log
@@ -171,27 +175,40 @@ class MasterControlProgram(state.State):
         :type data: dict
 
         """
-        timestamp = data['timestamp']
-        del data['timestamp']
+        # Read the timestamp without mutating the caller's data
+        timestamp = data.get('timestamp')
 
         # Iterate through the last poll results
         stats = self.consumer_stats_counter()
         consumer_stats: dict[str, dict[str, typing.Any]] = {}
         for name in data.keys():
+            if name == 'timestamp':
+                continue
             consumer_stats[name] = self.consumer_stats_counter()
             consumer_stats[name]['processes'] = self.process_count(name)
+            # Fold in counts retired from pruned dead processes so the
+            # per-consumer totals stay monotonic for Prometheus deltas
+            baseline = self.consumer_baselines.get(name, {})
             for proc in data[name].keys():
                 for key in stats:
                     value = data[name][proc]['counts'].get(key, 0)
                     stats[key] += value
                     consumer_stats[name][key] += value
+            for key in stats:
+                value = baseline.get(key, 0)
+                stats[key] += value
+                consumer_stats[name][key] += value
 
         # Return a data structure that can be used in reporting out the stats
         stats['processes'] = len(self.active_processes())
         return {
             'last_poll': timestamp,
             'consumers': consumer_stats,
-            'process_data': data,
+            'process_data': {
+                name: procs
+                for name, procs in data.items()
+                if name != 'timestamp'
+            },
             'counts': stats,
         }
 
@@ -200,6 +217,9 @@ class MasterControlProgram(state.State):
         processes needed.
 
         """
+        if not self.is_running:
+            LOGGER.debug('Not checking process counts, not running')
+            return
         if self.max_messages:
             LOGGER.debug(
                 'Skipping process respawn (max_messages=%i)', self.max_messages
@@ -460,10 +480,20 @@ class MasterControlProgram(state.State):
 
         """
         LOGGER.info('SIGCHLD received from child')
-        if not self.active_processes(False):
-            LOGGER.info('Stopping with no active processes and child error')
+
+        # active_processes prunes any children that have exited
+        if self.active_processes(False):
+            return
+
+        # Only tear the daemon down when we are not meant to keep running:
+        # a child failed to spawn, max_messages mode has drained, or we are
+        # already shutting down. Otherwise let the next poll respawn.
+        if self.child_abort or self.max_messages or self.is_shutting_down:
+            LOGGER.info('Stopping with no active processes')
             signal.setitimer(signal.ITIMER_REAL, 0, 0)
             self.set_state(self.STATE_STOPPED)
+        else:
+            LOGGER.info('All children exited; next poll will respawn')
 
     def on_timer(
         self, _signum: int, _unused_frame: types.FrameType | None
@@ -597,6 +627,23 @@ class MasterControlProgram(state.State):
         """
         return self.consumers[name].qty - self.process_count(name)
 
+    def retire_poll_results(self, consumer: str, name: str) -> None:
+        """Fold a dead process's final counts into the consumer baseline and
+        drop its per-process poll entry so ``last_poll_results`` stays bounded
+        while the per-consumer totals remain monotonic for Prometheus deltas.
+
+        :param str consumer: The consumer name
+        :param str name: The process name
+
+        """
+        proc_results = self.last_poll_results.get(consumer, {}).pop(name, None)
+        if not proc_results:
+            return
+        baseline = self.consumer_baselines.setdefault(
+            consumer, collections.Counter()
+        )
+        baseline.update(proc_results.get('counts', {}))
+
     def remove_consumer_process(self, consumer: str, name: str) -> None:
         """Remove all details for the specified consumer and process name.
 
@@ -605,6 +652,7 @@ class MasterControlProgram(state.State):
 
         """
         my_pid = os.getpid()
+        self.retire_poll_results(consumer, name)
         if name in self.consumers[consumer].processes.keys():
             try:
                 child = self.consumers[consumer].processes[name]
@@ -651,11 +699,13 @@ class MasterControlProgram(state.State):
         # Kick off the poll timer
         signal.setitimer(signal.ITIMER_REAL, self.poll_interval, 0)
 
-        # Loop for the lifetime of the app, pausing for a signal to pop up
-        while self.is_running:
+        # Loop for the lifetime of the app. Use a bounded sleep rather than
+        # signal.pause() so a stop request or signal delivered between the
+        # loop check and the wait cannot wedge us forever (lost wakeup).
+        while self.is_running and not self.stop_requested:
             if not self.is_sleeping:
                 self.set_state(self.STATE_SLEEPING)
-            signal.pause()
+            time.sleep(1)
 
         # Note we're exiting run
         LOGGER.info('Exiting Master Control Program')
@@ -717,6 +767,7 @@ class MasterControlProgram(state.State):
             LOGGER.critical(
                 'Failed to start %s for %s: %r', process_name, name, error
             )
+            self.child_abort = True
             try:
                 del self.consumers[name].processes[process_name]
             except AttributeError as error:
@@ -730,6 +781,9 @@ class MasterControlProgram(state.State):
         :param int quantity: The quantity of processes to start
 
         """
+        if not self.is_running:
+            LOGGER.debug('Not starting processes, not running')
+            return
         for _i in range(0, quantity or 0):
             self.start_process(name)
 

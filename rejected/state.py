@@ -47,6 +47,10 @@ class State:
         if new_state not in self.STATES:
             raise ValueError(f'Invalid state value: {new_state!r}')
 
+        # A stopped object must not be resurrected into an active state
+        if self.state == self.STATE_STOPPED and new_state == self.STATE_ACTIVE:
+            raise ValueError('Cannot transition from Stopped to Active')
+
         LOGGER.debug(
             'State changing from %s to %s',
             self.STATES[self.state],

@@ -54,9 +54,13 @@ class ControllerSignalTests(unittest.TestCase):
         self.ctrl._on_sigterm(signal.SIGTERM, None)
         self.assertTrue(self.ctrl._shutdown_requested)
 
-    def test_on_sigterm_calls_stop_processes(self):
+    def test_on_sigterm_requests_mcp_stop(self):
         self.ctrl._on_sigterm(signal.SIGTERM, None)
-        self.ctrl._mcp.stop_processes.assert_called_once()
+        self.assertTrue(self.ctrl._mcp.stop_requested)
+
+    def test_on_sigterm_does_not_stop_processes_in_handler(self):
+        self.ctrl._on_sigterm(signal.SIGTERM, None)
+        self.ctrl._mcp.stop_processes.assert_not_called()
 
     def test_on_sigterm_no_mcp(self):
         self.ctrl._mcp = None
@@ -67,9 +71,13 @@ class ControllerSignalTests(unittest.TestCase):
         self.ctrl._on_sighup(signal.SIGHUP, None)
         self.assertTrue(self.ctrl._reload_requested)
 
-    def test_on_sighup_calls_stop_processes(self):
+    def test_on_sighup_requests_mcp_stop(self):
         self.ctrl._on_sighup(signal.SIGHUP, None)
-        self.ctrl._mcp.stop_processes.assert_called_once()
+        self.assertTrue(self.ctrl._mcp.stop_requested)
+
+    def test_on_sighup_does_not_stop_processes_in_handler(self):
+        self.ctrl._on_sighup(signal.SIGHUP, None)
+        self.ctrl._mcp.stop_processes.assert_not_called()
 
     def test_on_sighup_no_mcp(self):
         self.ctrl._mcp = None
@@ -141,6 +149,56 @@ class ControllerRunTests(unittest.TestCase):
             with mock.patch.object(self.ctrl, '_setup_signals'):
                 self.ctrl.run()
         mock_cls.assert_not_called()
+
+    def test_normal_run_stops_processes(self):
+        mock_mcp = mock.Mock()
+        with mock.patch(
+            'rejected.controller.mcp.MasterControlProgram',
+            return_value=mock_mcp,
+        ):
+            with mock.patch.object(self.ctrl, '_setup_signals'):
+                self.ctrl.run()
+        mock_mcp.stop_processes.assert_called_once()
+
+    def test_keyboard_interrupt_stops_processes(self):
+        mock_mcp = mock.Mock()
+        mock_mcp.run.side_effect = KeyboardInterrupt
+        with mock.patch(
+            'rejected.controller.mcp.MasterControlProgram',
+            return_value=mock_mcp,
+        ):
+            with mock.patch.object(self.ctrl, '_setup_signals'):
+                self.ctrl.run()
+        mock_mcp.stop_processes.assert_called_once()
+
+    def test_exception_stops_processes_before_reraise(self):
+        mock_mcp = mock.Mock()
+        mock_mcp.run.side_effect = RuntimeError('boom')
+        with mock.patch(
+            'rejected.controller.mcp.MasterControlProgram',
+            return_value=mock_mcp,
+        ):
+            with mock.patch.object(self.ctrl, '_setup_signals'):
+                with self.assertRaises(RuntimeError):
+                    self.ctrl.run()
+        mock_mcp.stop_processes.assert_called_once()
+
+    def test_shutdown_during_construction_skips_run(self):
+        mock_mcp = mock.Mock()
+
+        def construct(*_args, **_kwargs):
+            # Simulate a SIGTERM arriving while the MCP is being built
+            self.ctrl._shutdown_requested = True
+            return mock_mcp
+
+        with mock.patch(
+            'rejected.controller.mcp.MasterControlProgram',
+            side_effect=construct,
+        ):
+            with mock.patch.object(self.ctrl, '_setup_signals'):
+                self.ctrl.run()
+        mock_mcp.run.assert_not_called()
+        mock_mcp.stop_processes.assert_not_called()
 
 
 class ControllerReloadTests(unittest.TestCase):

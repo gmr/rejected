@@ -125,7 +125,7 @@ def start(port: int, address: str = '127.0.0.1') -> None:
 
     prometheus_client.start_http_server(port, addr=address)
     _started = True
-    LOGGER.info('Prometheus metrics server started on port %d', port)
+    LOGGER.info('Prometheus metrics server started on %s:%d', address, port)
 
     for key, name, help_text in _COUNTER_DEFS:
         _metrics[key] = prometheus_client.Counter(

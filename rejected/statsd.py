@@ -31,6 +31,7 @@ class Client:
     PAYLOAD_HOSTNAME: typing.ClassVar[str] = '{}.{}.{}.{}:{}|{}\n'
     PAYLOAD_NO_HOSTNAME: typing.ClassVar[str] = '{}.{}.{}:{}|{}\n'
     TCP_TIMEOUT: typing.ClassVar[float] = 0.1
+    TCP_CONNECT_TIMEOUT: typing.ClassVar[float] = 5.0
 
     def __init__(
         self,
@@ -120,10 +121,16 @@ class Client:
                 self._tcp_writer.sendall(data)
             elif self._udp_sock:
                 self._udp_sock.sendto(data, self._address)
-        except (BlockingIOError, TimeoutError) as error:
+        except BlockingIOError as error:
             LOGGER.warning(
                 'Dropping statsd metric, socket not ready: %s', error
             )
+        except TimeoutError as error:
+            LOGGER.warning('Timeout sending statsd metric: %s', error)
+            if self._tcp_writer:
+                # sendall may have written a partial metric, leaving the
+                # stream unusable; reconnect before the next write.
+                self._tcp_on_closed()
         except OSError as error:
             LOGGER.warning('Error sending statsd metric: %s', error)
             if self._tcp_writer:
@@ -161,7 +168,7 @@ class Client:
         sock = socket.socket(
             socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP
         )
-        sock.settimeout(self.TCP_TIMEOUT)
+        sock.settimeout(self.TCP_CONNECT_TIMEOUT)
         try:
             sock.connect(self._address)
         except OSError as error:
@@ -170,6 +177,7 @@ class Client:
             )
             self._failure_callback()
             return None
+        sock.settimeout(self.TCP_TIMEOUT)
         LOGGER.debug('Connected to statsd at %s via TCP', self._address)
         self._connected = True
         return sock

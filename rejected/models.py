@@ -13,6 +13,15 @@ from . import measurement as measurement_mod
 # Configuration models
 
 
+def _statsd_port() -> int:
+    """Return the STATSD_PORT env value, falling back to 8125 when it is
+    unset or not a valid integer so a bad env var can't abort startup."""
+    try:
+        return int(os.environ.get('STATSD_PORT', '8125'))
+    except ValueError:
+        return 8125
+
+
 class ConnectionRef(pydantic.BaseModel):
     """A named connection reference used in a consumer's connections list."""
 
@@ -50,9 +59,7 @@ class StatsdConfig(pydantic.BaseModel):
     host: str = pydantic.Field(
         default_factory=lambda: os.environ.get('STATSD_HOST', 'localhost')
     )
-    port: int = pydantic.Field(
-        default_factory=lambda: int(os.environ.get('STATSD_PORT', '8125'))
-    )
+    port: int = pydantic.Field(default_factory=_statsd_port)
     prefix: str = pydantic.Field(
         default_factory=lambda: os.environ.get('STATSD_PREFIX', 'rejected')
     )

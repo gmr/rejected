@@ -21,6 +21,13 @@ class RejectedExceptionTestCase(unittest.TestCase):
         error = exceptions.MessageException('bad value: {}', 42)
         self.assertEqual(str(error), 'bad value: 42')
 
+    def test_single_positional_with_placeholder(self):
+        # The lone positional is the template with no substitution args,
+        # so the unfilled placeholder is returned verbatim rather than
+        # the template being fed back into its own format() call.
+        error = exceptions.MessageException('bad value: {0}')
+        self.assertEqual(str(error), 'bad value: {0}')
+
     def test_keyword_format_string(self):
         error = exceptions.MessageException('value {v}', v=7)
         self.assertEqual(str(error), 'value 7')

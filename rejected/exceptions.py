@@ -24,8 +24,8 @@ class RejectedException(Exception):
     METRIC_NAME: typing.ClassVar[str] = 'rejected-exception'
 
     def __init__(self, *args: typing.Any, **kwargs: typing.Any) -> None:
-        if len(args) > 1:
-            self.args = args[1:] if 'value' not in kwargs else args
+        if args and 'value' not in kwargs:
+            self.args = args[1:]
         else:
             self.args = args
         self.metric: str | None = kwargs.pop('metric', None)

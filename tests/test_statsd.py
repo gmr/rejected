@@ -117,10 +117,15 @@ class TCPSendTestCase(TestCase):
         self.statsd.incr('bar', 2)
         self.failure_callback.assert_not_called()
 
-    def test_timeout_is_non_fatal(self):
+    def test_timeout_reconnects(self):
         self.socket.sendall.side_effect = TimeoutError
-        self.statsd.incr('bar', 2)
+        with mock.patch.object(self.statsd, '_tcp_socket') as tcp_socket:
+            new_sock = mock.Mock()
+            tcp_socket.return_value = new_sock
+            self.statsd.incr('bar', 2)
+            tcp_socket.assert_called_once()
         self.failure_callback.assert_not_called()
+        self.assertIs(self.statsd._tcp_writer, new_sock)
 
     def test_broken_connection_reconnects(self):
         self.socket.sendall.side_effect = BrokenPipeError
@@ -170,6 +175,10 @@ class EnvFallbackTestCase(unittest.TestCase):
             client = self._client()
         self.assertEqual(client._address, ('localhost', 8125))
         self.assertEqual(client._prefix, 'rejected')
+
+    def test_invalid_port_env_falls_back_to_default(self):
+        with mock.patch.dict(os.environ, {'STATSD_PORT': 'not-a-number'}):
+            self.assertEqual(models.StatsdConfig().port, 8125)
 
 
 class NoHostnameTestCase(TestCase):

@@ -75,7 +75,7 @@ class Codec:
     ) -> None:
         self._schema_registry = schema_registry
         self._avro_schemas: dict[str, dict[str, typing.Any]] = {}
-        self._schema_lock = asyncio.Lock()
+        self._schema_locks: dict[str, asyncio.Lock] = {}
         self._http_client: typing.Any | None = None
 
     async def decode(
@@ -110,24 +110,11 @@ class Codec:
                 schema = await self._avro_schema(message_type)
                 return fastavro.schemaless_reader(io.BytesIO(body), schema)
 
-            if content_type == 'application/json':
-                return _load_json(body)
-            if umsgpack and content_type == 'application/msgpack':
-                return _load_msgpack(body)
-            if content_type == 'application/x-plist':
-                return plistlib.loads(body)
-            if content_type == 'text/csv':
-                return _load_csv(body)
-            if bs4 and content_type in BS4_MIME_TYPES:
-                return _load_bs4(body, content_type)
-            if content_type in YAML_MIME_TYPES:
-                return yaml.safe_load(body)
+            return _decode_body(body, content_type)
         except DecodeError:
             raise
         except Exception as error:
             raise DecodeError(str(error)) from error
-
-        return body
 
     async def encode(
         self,
@@ -210,11 +197,15 @@ class Codec:
 
     async def _avro_schema(self, message_type: str) -> dict[str, typing.Any]:
         """Return the parsed Avro schema, loading and caching on
-        first access. Lock prevents duplicate fetches under
-        concurrent message processing."""
+        first access. A per-message-type lock prevents duplicate
+        fetches for the same type without serializing loads of
+        different types."""
         if message_type in self._avro_schemas:
             return self._avro_schemas[message_type]
-        async with self._schema_lock:
+        lock = self._schema_locks.get(message_type)
+        if lock is None:
+            lock = self._schema_locks[message_type] = asyncio.Lock()
+        async with lock:
             if message_type not in self._avro_schemas:
                 self._avro_schemas[
                     message_type
@@ -277,6 +268,11 @@ class Codec:
                 if response.status_code == 200:
                     schema: dict[str, typing.Any] = response.json()
                     return schema
+                if 400 <= response.status_code < 500:
+                    raise DecodeError(
+                        f'Failed to fetch Avro schema for '
+                        f'{message_type}: HTTP {response.status_code}'
+                    )
                 last_err = DecodeError(
                     f'Failed to fetch Avro schema for '
                     f'{message_type}: HTTP {response.status_code}'
@@ -294,6 +290,38 @@ class Codec:
 # --- Internal helpers (stateless, sync) ---
 
 
+def _decode_body(body: bytes, content_type: str | None) -> typing.Any:
+    """Deserialize a (decompressed) body by content type.
+
+    Raises DecodeError when the content type requires an optional
+    dependency that is not installed. Returns the raw body when the
+    content type has no registered deserializer.
+
+    """
+    if content_type == 'application/json':
+        return _load_json(body)
+    if content_type == 'application/msgpack':
+        if umsgpack is None:
+            raise DecodeError(
+                'umsgpack is required for MessagePack decoding; '
+                'install rejected[msgpack]'
+            )
+        return _load_msgpack(body)
+    if content_type == 'application/x-plist':
+        return plistlib.loads(body)
+    if content_type == 'text/csv':
+        return _load_csv(body)
+    if content_type in BS4_MIME_TYPES:
+        if bs4 is None:
+            raise DecodeError(
+                'bs4 is required for HTML/XML decoding; install rejected[html]'
+            )
+        return _load_bs4(body, content_type)
+    if content_type in YAML_MIME_TYPES:
+        return yaml.safe_load(body)
+    return body
+
+
 def _compress(body: typing.Any, content_encoding: str) -> bytes:
     """Apply content-encoding compression to a body."""
     if isinstance(body, str):
@@ -302,7 +330,7 @@ def _compress(body: typing.Any, content_encoding: str) -> bytes:
         return gzip.compress(body)
     if content_encoding == 'bzip2':
         return bz2.compress(body)
-    return body
+    raise EncodeError(f'Unsupported content_encoding: {content_encoding!r}')
 
 
 def _load_json(value: bytes | str) -> typing.Any:

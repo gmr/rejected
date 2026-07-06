@@ -30,6 +30,8 @@ class Client:
     DEFAULT_PREFIX: typing.ClassVar[str] = 'rejected'
     PAYLOAD_HOSTNAME: typing.ClassVar[str] = '{}.{}.{}.{}:{}|{}\n'
     PAYLOAD_NO_HOSTNAME: typing.ClassVar[str] = '{}.{}.{}:{}|{}\n'
+    TCP_TIMEOUT: typing.ClassVar[float] = 0.1
+    TCP_CONNECT_TIMEOUT: typing.ClassVar[float] = 5.0
 
     def __init__(
         self,
@@ -113,14 +115,23 @@ class Client:
         """Send the specified value to the statsd daemon."""
         payload = self._build_payload(key, value, metric_type)
         LOGGER.debug('Sending statsd payload: %r', payload)
+        data = payload.encode('utf-8')
         try:
             if self._tcp_writer:
-                self._tcp_writer.send(payload.encode('utf-8'))
+                self._tcp_writer.sendall(data)
             elif self._udp_sock:
-                self._udp_sock.sendto(payload.encode('utf-8'), self._address)
-        except OSError as error:  # pragma: nocover
-            if self._connected:
-                LOGGER.exception('Error sending statsd metric: %s', error)
+                self._udp_sock.sendto(data, self._address)
+        except TimeoutError as error:
+            LOGGER.warning('Timeout sending statsd metric: %s', error)
+            if self._tcp_writer:
+                # sendall may have written a partial metric, leaving the
+                # stream unusable; reconnect before the next write.
+                self._tcp_on_closed()
+        except OSError as error:
+            LOGGER.warning('Error sending statsd metric: %s', error)
+            if self._tcp_writer:
+                self._tcp_on_closed()
+            elif self._connected:
                 self._connected = False
                 self._failure_callback()
 
@@ -138,9 +149,14 @@ class Client:
         return self._settings[key]
 
     def _tcp_on_closed(self) -> None:
-        """Invoked when the socket is closed."""
+        """Invoked when the socket is closed, reconnecting to statsd."""
         LOGGER.warning('Disconnected from statsd, reconnecting')
         self._connected = False
+        if self._tcp_writer:
+            try:
+                self._tcp_writer.close()
+            except OSError:
+                pass
         self._tcp_writer = self._tcp_socket()
 
     def _tcp_socket(self) -> socket.socket | None:
@@ -148,6 +164,7 @@ class Client:
         sock = socket.socket(
             socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP
         )
+        sock.settimeout(self.TCP_CONNECT_TIMEOUT)
         try:
             sock.connect(self._address)
         except OSError as error:
@@ -156,7 +173,7 @@ class Client:
             )
             self._failure_callback()
             return None
-        sock.setblocking(False)
+        sock.settimeout(self.TCP_TIMEOUT)
         LOGGER.debug('Connected to statsd at %s via TCP', self._address)
         self._connected = True
         return sock

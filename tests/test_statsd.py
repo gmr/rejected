@@ -1,12 +1,13 @@
 import asyncio
 import logging
+import os
 import re
 import socket
 import unittest
 import uuid
 from unittest import mock
 
-from rejected import statsd
+from rejected import models, statsd
 
 LOGGER = logging.getLogger(__name__)
 
@@ -88,6 +89,91 @@ class UDPSendTestCase(TestCase):
         self.socket.sendto.assert_called_once_with(
             expectation, self.statsd._address
         )
+
+
+class TCPSendTestCase(TestCase):
+    @staticmethod
+    def get_settings():
+        return {
+            'host': '10.1.1.1',
+            'port': 8124,
+            'prefix': str(uuid.uuid4()),
+            'tcp': True,
+        }
+
+    def setUp(self):
+        with mock.patch.object(statsd.Client, '_tcp_socket') as tcp_socket:
+            tcp_socket.return_value = mock.Mock()
+            super().setUp()
+        self.socket = self.statsd._tcp_writer
+
+    def test_sendall_used(self):
+        self.statsd.incr('bar', 2)
+        expectation = self.payload_format('bar', 2, 'c')
+        self.socket.sendall.assert_called_once_with(expectation)
+
+    def test_timeout_reconnects(self):
+        self.socket.sendall.side_effect = TimeoutError
+        with mock.patch.object(self.statsd, '_tcp_socket') as tcp_socket:
+            new_sock = mock.Mock()
+            tcp_socket.return_value = new_sock
+            self.statsd.incr('bar', 2)
+            tcp_socket.assert_called_once()
+        self.failure_callback.assert_not_called()
+        self.assertIs(self.statsd._tcp_writer, new_sock)
+
+    def test_broken_connection_reconnects(self):
+        self.socket.sendall.side_effect = BrokenPipeError
+        with mock.patch.object(self.statsd, '_tcp_socket') as tcp_socket:
+            new_sock = mock.Mock()
+            tcp_socket.return_value = new_sock
+            self.statsd.incr('bar', 2)
+            tcp_socket.assert_called_once()
+        self.failure_callback.assert_not_called()
+        self.assertIs(self.statsd._tcp_writer, new_sock)
+
+
+class EnvFallbackTestCase(unittest.TestCase):
+    """STATSD_* env vars should feed the statsd Client through the
+    StatsdConfig model that process.py passes via model_dump()."""
+
+    def _client(self):
+        settings = models.StatsdConfig().model_dump()
+        return statsd.Client('c', settings, mock.Mock())
+
+    def test_env_used_when_config_not_set(self):
+        with mock.patch.dict(
+            os.environ,
+            {
+                'STATSD_HOST': '10.9.9.9',
+                'STATSD_PORT': '9999',
+                'STATSD_PREFIX': 'envprefix',
+            },
+        ):
+            client = self._client()
+        self.assertEqual(client._address, ('10.9.9.9', 9999))
+        self.assertEqual(client._prefix, 'envprefix')
+
+    def test_config_wins_over_env(self):
+        with mock.patch.dict(os.environ, {'STATSD_HOST': '10.9.9.9'}):
+            settings = models.StatsdConfig(host='1.2.3.4').model_dump()
+        client = statsd.Client('c', settings, mock.Mock())
+        self.assertEqual(client._address[0], '1.2.3.4')
+
+    def test_default_when_no_env(self):
+        env = {
+            k: v
+            for k, v in os.environ.items()
+            if k not in {'STATSD_HOST', 'STATSD_PORT', 'STATSD_PREFIX'}
+        }
+        with mock.patch.dict(os.environ, env, clear=True):
+            client = self._client()
+        self.assertEqual(client._address, ('localhost', 8125))
+        self.assertEqual(client._prefix, 'rejected')
+
+    def test_invalid_port_env_falls_back_to_default(self):
+        with mock.patch.dict(os.environ, {'STATSD_PORT': 'not-a-number'}):
+            self.assertEqual(models.StatsdConfig().port, 8125)
 
 
 class NoHostnameTestCase(TestCase):

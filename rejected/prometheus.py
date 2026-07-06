@@ -104,10 +104,11 @@ def _safe_name(key: str) -> str:
     return _SAFE_NAME_RE.sub('_', key)
 
 
-def start(port: int) -> None:
+def start(port: int, address: str = '127.0.0.1') -> None:
     """Start the Prometheus HTTP metrics server.
 
     :param int port: The port to listen on
+    :param str address: The address to bind to (defaults to ``127.0.0.1``)
 
     """
     global _started
@@ -122,9 +123,9 @@ def start(port: int) -> None:
         LOGGER.warning('Prometheus exporter already running')
         return
 
-    prometheus_client.start_http_server(port)
+    prometheus_client.start_http_server(port, addr=address)
     _started = True
-    LOGGER.info('Prometheus metrics server started on port %d', port)
+    LOGGER.info('Prometheus metrics server started on %s:%d', address, port)
 
     for key, name, help_text in _COUNTER_DEFS:
         _metrics[key] = prometheus_client.Counter(
@@ -160,9 +161,9 @@ def start(port: int) -> None:
 
 def _get_custom_histogram(key: str) -> 'prometheus_client.Histogram':
     """Get or create a custom duration Histogram for ad-hoc consumer stats."""
-    metric_key = f'custom_duration_{key}'
+    safe = _safe_name(key)
+    metric_key = f'custom_duration_{safe}'
     if metric_key not in _metrics:
-        safe = _safe_name(key)
         _metrics[metric_key] = prometheus_client.Histogram(
             f'rejected_custom_{safe}_seconds',
             f'Custom duration: {key}',
@@ -174,9 +175,9 @@ def _get_custom_histogram(key: str) -> 'prometheus_client.Histogram':
 
 def _get_custom_counter(key: str) -> 'prometheus_client.Counter':
     """Get or create a custom Counter for ad-hoc consumer stats."""
-    metric_key = f'custom_counter_{key}'
+    safe = _safe_name(key)
+    metric_key = f'custom_counter_{safe}'
     if metric_key not in _metrics:
-        safe = _safe_name(key)
         _metrics[metric_key] = prometheus_client.Counter(
             f'rejected_custom_{safe}_total',
             f'Custom counter: {key}',
@@ -187,9 +188,9 @@ def _get_custom_counter(key: str) -> 'prometheus_client.Counter':
 
 def _get_custom_gauge(key: str) -> 'prometheus_client.Gauge':
     """Get or create a custom Gauge for ad-hoc consumer stats."""
-    metric_key = f'custom_gauge_{key}'
+    safe = _safe_name(key)
+    metric_key = f'custom_gauge_{safe}'
     if metric_key not in _metrics:
-        safe = _safe_name(key)
         _metrics[metric_key] = prometheus_client.Gauge(
             f'rejected_custom_{safe}', f'Custom gauge: {key}', ['consumer']
         )
@@ -220,25 +221,30 @@ def observe(
     if not _started:
         return
 
-    duration_hist = _metrics['duration'].labels(consumer=consumer_name)
-    for value in durations:
-        duration_hist.observe(value)
+    try:
+        duration_hist = _metrics['duration'].labels(consumer=consumer_name)
+        for value in durations:
+            duration_hist.observe(value)
 
-    age_hist = _metrics['message_age'].labels(consumer=consumer_name)
-    for value in message_ages:
-        age_hist.observe(value)
+        age_hist = _metrics['message_age'].labels(consumer=consumer_name)
+        for value in message_ages:
+            age_hist.observe(value)
 
-    for key, values in (custom_durations or {}).items():
-        hist = _get_custom_histogram(key).labels(consumer=consumer_name)
-        for value in values:
-            hist.observe(value)
+        for key, values in (custom_durations or {}).items():
+            hist = _get_custom_histogram(key).labels(consumer=consumer_name)
+            for value in values:
+                hist.observe(value)
 
-    for key, value in (custom_counters or {}).items():
-        if value > 0:
-            _get_custom_counter(key).labels(consumer=consumer_name).inc(value)
+        for key, value in (custom_counters or {}).items():
+            if value > 0:
+                _get_custom_counter(key).labels(consumer=consumer_name).inc(
+                    value
+                )
 
-    for key, value in (custom_gauges or {}).items():
-        _get_custom_gauge(key).labels(consumer=consumer_name).set(value)
+        for key, value in (custom_gauges or {}).items():
+            _get_custom_gauge(key).labels(consumer=consumer_name).set(value)
+    except Exception as error:  # noqa: BLE001
+        LOGGER.warning('Error recording Prometheus observations: %s', error)
 
 
 def update(stats: dict[str, typing.Any]) -> None:

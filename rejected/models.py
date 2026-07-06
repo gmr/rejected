@@ -2,6 +2,7 @@
 
 import datetime
 import enum
+import os
 import time
 import typing
 
@@ -10,6 +11,15 @@ import pydantic
 from . import measurement as measurement_mod
 
 # Configuration models
+
+
+def _statsd_port() -> int:
+    """Return the STATSD_PORT env value, falling back to 8125 when it is
+    unset or not a valid integer so a bad env var can't abort startup."""
+    try:
+        return int(os.environ.get('STATSD_PORT', '8125'))
+    except ValueError:
+        return 8125
 
 
 class ConnectionRef(pydantic.BaseModel):
@@ -38,16 +48,28 @@ class ConnectionConfig(pydantic.BaseModel):
 
 
 class StatsdConfig(pydantic.BaseModel):
+    """Statsd configuration. When a value is not set explicitly, ``host``,
+    ``port``, and ``prefix`` fall back to the ``STATSD_HOST``,
+    ``STATSD_PORT``, and ``STATSD_PREFIX`` environment variables before
+    the hardcoded defaults.
+
+    """
+
     enabled: bool = False
-    host: str = 'localhost'
-    port: int = 8125
-    prefix: str = 'rejected'
+    host: str = pydantic.Field(
+        default_factory=lambda: os.environ.get('STATSD_HOST', 'localhost')
+    )
+    port: int = pydantic.Field(default_factory=_statsd_port)
+    prefix: str = pydantic.Field(
+        default_factory=lambda: os.environ.get('STATSD_PREFIX', 'rejected')
+    )
     tcp: bool = False
     include_hostname: bool = True
 
 
 class PrometheusConfig(pydantic.BaseModel):
     enabled: bool = False
+    address: str = '127.0.0.1'
     port: int = 9090
 
 

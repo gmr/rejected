@@ -688,7 +688,10 @@ class MasterControlProgram(state.State):
         self.setup_consumers()
 
         if self.config.stats.prometheus.enabled:
-            prometheus.start(self.config.stats.prometheus.port)
+            prometheus.start(
+                self.config.stats.prometheus.port,
+                self.config.stats.prometheus.address,
+            )
 
         # Set the SIGCHLD handler for child creation errors
         signal.signal(signal.SIGCHLD, self.on_sigchld)

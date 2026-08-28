@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import ssl
@@ -35,6 +36,7 @@ class Connection(state.State):
         should_consume: bool,
         publisher_confirmations: bool,
         callbacks: models.Callbacks,
+        ioloop: asyncio.AbstractEventLoop | None = None,
     ):
         super().__init__()
         self.blocked: bool = False
@@ -43,6 +45,7 @@ class Connection(state.State):
         self.config: models.ConnectionConfig = config
         self.should_consume: bool = should_consume
         self.consumer_tag: str = f'{consumer_name}-{os.getpid()}'
+        self.ioloop: asyncio.AbstractEventLoop | None = ioloop
         self.name: str = name
         self.publisher_confirm: bool = publisher_confirmations
         self.connection: asyncio_connection.AsyncioConnection = self.connect()
@@ -53,6 +56,11 @@ class Connection(state.State):
         opened, when there is an error opening a connection or when a
         previously opened connection is closed.
 
+        ``ioloop`` must be passed when connecting from outside a running
+        event loop (Process creates connections before starting its loop);
+        otherwise pika binds the connection workflow to a new event loop
+        that never runs and the connection silently never completes.
+
         """
         self.set_state(self.STATE_CONNECTING)
         return asyncio_connection.AsyncioConnection(
@@ -60,6 +68,7 @@ class Connection(state.State):
             on_open_callback=self.on_open,
             on_open_error_callback=self.on_open_error,
             on_close_callback=self.on_closed,
+            custom_ioloop=self.ioloop,
         )
 
     @property

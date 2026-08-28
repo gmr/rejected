@@ -208,6 +208,7 @@ class Process(multiprocessing.Process, state.State):
                 consume,
                 confirm,
                 self.callbacks,
+                self.ioloop,
             )
 
     @staticmethod

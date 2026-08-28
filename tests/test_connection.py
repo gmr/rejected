@@ -59,6 +59,37 @@ def _make_connection(
         )
 
 
+class EventLoopBindingTests(unittest.TestCase):
+    def test_connect_passes_ioloop_to_pika(self) -> None:
+        """The connection workflow must run on the loop the caller owns:
+        pika creates its own never-run loop when connecting from outside
+        a running loop, so the ioloop must be passed through explicitly.
+
+        """
+        ioloop = mock.Mock()
+        cfg = _config().connections['MockConnection']
+        with mock.patch.object(
+            connection_mod.asyncio_connection, 'AsyncioConnection'
+        ) as asyncio_connection:
+            conn = connection_mod.Connection(
+                'MockConnection',
+                cfg,
+                'consumer',
+                True,
+                False,
+                _callbacks(),
+                ioloop,
+            )
+        self.assertIs(
+            asyncio_connection.call_args.kwargs['custom_ioloop'], ioloop
+        )
+        self.assertIs(conn.ioloop, ioloop)
+
+    def test_ioloop_defaults_to_none(self) -> None:
+        conn = _make_connection()
+        self.assertIsNone(conn.ioloop)
+
+
 class ShutdownTests(unittest.TestCase):
     def test_shutdown_is_noop_when_closed(self) -> None:
         """#74 shutting down an already-closed connection is a no-op."""

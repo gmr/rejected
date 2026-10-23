@@ -8,6 +8,8 @@ import typing
 import unittest
 from unittest import mock
 
+import pika.spec
+
 from rejected import __version__, codecs, consumer, models, process
 from rejected import config as config_module
 from rejected import connection as connection_mod
@@ -560,3 +562,96 @@ class TestProcess(unittest.IsolatedAsyncioTestCase, test_state.TestState):
         p.ioloop = mock.Mock()
         p.on_sigprof(signal.SIGPROF, None)
         p.ioloop.call_soon_threadsafe.assert_called_once_with(p._report_stats)
+
+    def _deliver(
+        self,
+        p: process.Process,
+        headers: dict[str, typing.Any] | None = None,
+        delivery_tag: int | None = 1,
+        **properties: typing.Any,
+    ) -> mock.Mock:
+        channel = mock.Mock(spec=['basic_reject', 'basic_nack'])
+        if delivery_tag is None:
+            method = pika.spec.Basic.Return(
+                exchange='ex', routing_key='k', reply_code=312
+            )
+        else:
+            method = pika.spec.Basic.Deliver(
+                delivery_tag=delivery_tag, exchange='ex', routing_key='k'
+            )
+        properties = pika.spec.BasicProperties(headers=headers, **properties)
+        p.on_message('MockConnection', channel, method, properties, b'{}')
+        return channel
+
+    async def test_on_message_with_x_death_header_schedules_consumer(
+        self,
+    ) -> None:
+        """A dead-lettered message carries an array-of-tables header, which
+        must build a Message and be handed to the consumer."""
+        p = self.mock_setup()
+        p.connections['MockConnection'] = mock.Mock(
+            spec=connection_mod.Connection
+        )
+        headers = {'x-death': [{'count': 1, 'routing-keys': ['k']}]}
+        with mock.patch.object(p, '_schedule') as schedule:
+            with mock.patch.object(
+                p, 'invoke_consumer', new_callable=mock.Mock
+            ) as invoke:
+                channel = self._deliver(p, headers)
+        schedule.assert_called_once()
+        invoke.assert_called_once()
+        ctx = invoke.call_args.args[0]
+        self.assertEqual(ctx.message.headers, headers)
+        channel.basic_reject.assert_not_called()
+
+    async def test_on_message_invalid_properties_rejects_delivery(
+        self,
+    ) -> None:
+        """A message that fails Message validation is rejected without
+        requeue instead of raising into pika's delivery callback."""
+        p = self.mock_setup()
+        p.connections['MockConnection'] = mock.Mock(
+            spec=connection_mod.Connection
+        )
+        with mock.patch.object(p, '_schedule') as schedule:
+            with self.assertLogs('rejected.process', level='ERROR') as logs:
+                channel = self._deliver(p, priority='not-an-int')
+        schedule.assert_not_called()
+        channel.basic_reject.assert_called_once_with(
+            delivery_tag=1, requeue=False
+        )
+        self.assertIn('Rejecting message 1', logs.output[0])
+
+    async def test_on_message_out_of_range_timestamp_rejects_delivery(
+        self,
+    ) -> None:
+        """A timestamp that cannot be converted to a datetime follows the
+        same reject-without-requeue path as other invalid properties."""
+        p = self.mock_setup()
+        p.connections['MockConnection'] = mock.Mock(
+            spec=connection_mod.Connection
+        )
+        with mock.patch.object(p, '_schedule') as schedule:
+            with self.assertLogs('rejected.process', level='ERROR'):
+                channel = self._deliver(p, timestamp=10**20)
+        schedule.assert_not_called()
+        channel.basic_reject.assert_called_once_with(
+            delivery_tag=1, requeue=False
+        )
+
+    async def test_on_message_invalid_properties_returned_message(
+        self,
+    ) -> None:
+        """A returned message has no delivery tag so there is nothing to
+        reject, but it still must not raise."""
+        p = self.mock_setup()
+        p.connections['MockConnection'] = mock.Mock(
+            spec=connection_mod.Connection
+        )
+        with mock.patch.object(p, '_schedule') as schedule:
+            with self.assertLogs('rejected.process', level='ERROR'):
+                channel = self._deliver(
+                    p, delivery_tag=None, priority='not-an-int'
+                )
+        schedule.assert_not_called()
+        channel.basic_reject.assert_not_called()

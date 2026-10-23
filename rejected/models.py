@@ -160,9 +160,7 @@ class Message(pydantic.BaseModel):
     correlation_id: str | None
     delivery_mode: int | None
     expiration: str | None
-    headers: dict[
-        str, bool | dict[str, typing.Any] | float | int | str | bytes
-    ]
+    headers: dict[str, typing.Any]
     message_id: str | None
     type: str | None
     priority: int | None

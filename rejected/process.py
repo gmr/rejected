@@ -21,6 +21,7 @@ from os import path
 import pika
 import pika.channel
 import pika.spec
+import pydantic
 
 try:
     import sentry_sdk
@@ -442,13 +443,6 @@ class Process(multiprocessing.Process, state.State):
         body: bytes,
     ) -> None:
         """Process a message from Rabbit"""
-        timestamp = (
-            datetime.datetime.fromtimestamp(
-                properties.timestamp, tz=datetime.UTC
-            )
-            if properties.timestamp
-            else None
-        )
         if isinstance(method, pika.spec.Basic.Deliver):
             delivery_tag = method.delivery_tag
             redelivered = method.redelivered
@@ -458,11 +452,15 @@ class Process(multiprocessing.Process, state.State):
             redelivered = False
             returned = True
 
-        ctx = models.ProcessingContext(
-            connection=self.connections[name],
-            channel=channel,
-            raw_body=body,
-            message=models.Message(
+        try:
+            timestamp = (
+                datetime.datetime.fromtimestamp(
+                    properties.timestamp, tz=datetime.UTC
+                )
+                if properties.timestamp
+                else None
+            )
+            message = models.Message(
                 delivery_tag=delivery_tag,
                 exchange=method.exchange,
                 routing_key=method.routing_key,
@@ -484,7 +482,28 @@ class Process(multiprocessing.Process, state.State):
                 returned=returned,
                 timestamp=timestamp,
                 user_id=properties.user_id,
-            ),
+            )
+        except (
+            pydantic.ValidationError,
+            OverflowError,
+            OSError,
+            ValueError,
+        ) as error:
+            LOGGER.error(
+                'Rejecting message %s on %s: invalid message properties: %s',
+                delivery_tag,
+                name,
+                error,
+            )
+            if delivery_tag is not None:
+                channel.basic_reject(delivery_tag=delivery_tag, requeue=False)
+            return
+
+        ctx = models.ProcessingContext(
+            connection=self.connections[name],
+            channel=channel,
+            raw_body=body,
+            message=message,
         )
         self._schedule(self.invoke_consumer(ctx))
 

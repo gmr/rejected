@@ -4,6 +4,7 @@ connection state and collects stats about the consuming process.
 
 """
 import collections
+import inspect
 import logging
 import math
 import multiprocessing
@@ -781,8 +782,30 @@ class Process(multiprocessing.Process, state.State):
 
         # Allow the consumer to gracefully stop and then stop the IOLoop
         if self.consumer:
-            self.stop_consumer()
+            result = self.stop_consumer()
+            if inspect.isawaitable(result) and self.ioloop:
+                LOGGER.debug('Waiting for consumer shutdown to complete')
+                self.ioloop.add_future(gen.convert_yielded(result),
+                                       self.on_consumer_stopped)
+                return
 
+        self.stop_ioloop()
+
+    def on_consumer_stopped(self, future):
+        """Invoked when an asynchronous consumer shutdown has completed.
+
+        :param tornado.concurrent.Future future: The shutdown result
+
+        """
+        try:
+            future.result()
+        except Exception as error:
+            LOGGER.exception('Exception while shutting down the consumer: %s',
+                             error)
+        self.stop_ioloop()
+
+    def stop_ioloop(self):
+        """Stop the IOLoop and mark the shutdown as complete."""
         # Clear IOLoop constructs
         self.consumer_lock = None
 
@@ -1106,10 +1129,14 @@ class Process(multiprocessing.Process, state.State):
         """Stop the consumer object and allow it to do a clean shutdown if it
         has the ability to do so.
 
+        :returns: the value returned by the consumer's ``shutdown`` method,
+            which may be an awaitable that completes when the consumer has
+            finished shutting down
+
         """
         try:
             LOGGER.info('Shutting down the consumer')
-            self.consumer.shutdown()
+            return self.consumer.shutdown()
         except AttributeError:
             LOGGER.debug('Consumer does not have a shutdown method')
 

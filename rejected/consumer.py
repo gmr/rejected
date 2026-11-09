@@ -304,6 +304,13 @@ class Consumer(object):
         This could be used for closing database connections or other such
         activities.
 
+        .. note:: Asynchronous support: Decorate this method with
+            :func:`tornado.gen.coroutine` or define it with ``async def``
+            to make it asynchronous.
+
+        If this method returns an awaitable, the IOLoop is not stopped until
+        the awaitable has completed.
+
         """
         self.logger.debug('shutdown invoked')
 

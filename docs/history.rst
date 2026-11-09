@@ -1,6 +1,10 @@
 Changelog
 =========
 
+Unreleased
+----------
+- Allow :meth:`rejected.consumer.Consumer.shutdown` to be asynchronous. When it returns an awaitable, the process waits for it to complete before stopping the IOLoop so that consumers can flush or close asynchronous clients during shutdown.
+
 3.23.0
 ------
 - Update on channel and connection callback to accept any `*args, **kwargs` to accommodate Pika updates. Since arguments are not used, except logging only.

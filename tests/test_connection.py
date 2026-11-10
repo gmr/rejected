@@ -1,5 +1,6 @@
 """Tests for rejected.connection"""
 
+import asyncio
 import ssl
 import typing
 import unittest
@@ -55,8 +56,63 @@ def _make_connection(
         connection_mod.asyncio_connection, 'AsyncioConnection'
     ):
         return connection_mod.Connection(
-            name, cfg, 'consumer', True, False, _callbacks()
+            name,
+            cfg,
+            'consumer',
+            True,
+            False,
+            _callbacks(),
+            ioloop=mock.Mock(spec=asyncio.AbstractEventLoop),
         )
+
+
+class EventLoopBindingTests(unittest.TestCase):
+    """Process creates its connections before calling ``run_forever()``.
+    pika 1.4 picks the loop with ``asyncio.get_running_loop()`` and falls
+    back to a brand new loop when none is running, so unless the loop is
+    passed explicitly the connect workflow is scheduled on a loop that
+    never runs and the consumer hangs in Connecting forever.
+
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.loop = asyncio.new_event_loop()
+        self.addCleanup(self.loop.close)
+
+    def test_connection_workflow_runs_on_the_process_loop(self) -> None:
+        cfg = _config().connections['MockConnection']
+        conn = connection_mod.Connection(
+            'MockConnection',
+            cfg,
+            'consumer',
+            True,
+            False,
+            _callbacks(),
+            ioloop=self.loop,
+        )
+        self.addCleanup(conn.connection.close)
+        self.assertIs(conn.ioloop, self.loop)
+        self.assertIs(conn.connection._nbio.get_native_ioloop(), self.loop)
+        # The connect workflow must already be scheduled on our loop.
+        self.assertTrue(self.loop._ready or self.loop._scheduled)
+
+    def test_reconnect_runs_on_the_process_loop(self) -> None:
+        cfg = _config().connections['MockConnection']
+        conn = connection_mod.Connection(
+            'MockConnection',
+            cfg,
+            'consumer',
+            True,
+            False,
+            _callbacks(),
+            ioloop=self.loop,
+        )
+        self.addCleanup(conn.connection.close)
+        conn.set_state(conn.STATE_CLOSED)
+        reconnected = conn.connect()
+        self.addCleanup(reconnected.close)
+        self.assertIs(reconnected._nbio.get_native_ioloop(), self.loop)
 
 
 class ShutdownTests(unittest.TestCase):

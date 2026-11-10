@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import ssl
@@ -35,6 +36,7 @@ class Connection(state.State):
         should_consume: bool,
         publisher_confirmations: bool,
         callbacks: models.Callbacks,
+        ioloop: asyncio.AbstractEventLoop,
     ):
         super().__init__()
         self.blocked: bool = False
@@ -43,6 +45,7 @@ class Connection(state.State):
         self.config: models.ConnectionConfig = config
         self.should_consume: bool = should_consume
         self.consumer_tag: str = f'{consumer_name}-{os.getpid()}'
+        self.ioloop: asyncio.AbstractEventLoop = ioloop
         self.name: str = name
         self.publisher_confirm: bool = publisher_confirmations
         self.connection: asyncio_connection.AsyncioConnection = self.connect()
@@ -53,6 +56,15 @@ class Connection(state.State):
         opened, when there is an error opening a connection or when a
         previously opened connection is closed.
 
+        The event loop is always passed to pika as ``custom_ioloop``.
+        pika 1.4 changed how it picks a loop when ``custom_ioloop`` is not
+        given: it now calls :func:`asyncio.get_running_loop` and, when no
+        loop is running, falls back to :func:`asyncio.new_event_loop`
+        instead of :func:`asyncio.get_event_loop`. Because ``Process``
+        creates its connections before calling ``run_forever()``, the
+        connect workflow would be scheduled on that new loop, which never
+        runs, and the connection would silently never complete.
+
         """
         self.set_state(self.STATE_CONNECTING)
         return asyncio_connection.AsyncioConnection(
@@ -60,6 +72,7 @@ class Connection(state.State):
             on_open_callback=self.on_open,
             on_open_error_callback=self.on_open_error,
             on_close_callback=self.on_closed,
+            custom_ioloop=self.ioloop,
         )
 
     @property

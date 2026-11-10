@@ -40,6 +40,7 @@ class FieldTableTests(unittest.TestCase):
         self.assertEqual(_message({}).headers, {})
 
     def test_scalar_values_keep_type(self):
+        """Each scalar header value keeps its exact type after validation."""
         now = datetime.datetime.now(datetime.UTC)
         headers = {
             'bool': True,

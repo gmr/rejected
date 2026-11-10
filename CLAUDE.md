@@ -17,7 +17,7 @@ UV_CONFIG_FILE=/dev/null uv run pre-commit run -a     # Run linting (ruff format
 
 To run a single test:
 ```bash
-UV_CONFIG_FILE=/dev/null .venv/bin/python -m unittest tests.test_consumer.ConsumerExecuteTests.test_execute_calls_process
+UV_CONFIG_FILE=/dev/null uv run python -m unittest tests.test_consumer.ConsumerExecuteTests.test_execute_calls_process
 ```
 
 Documentation:

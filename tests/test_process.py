@@ -214,8 +214,24 @@ class TestProcess(unittest.IsolatedAsyncioTestCase, test_state.TestState):
             ):
                 if not new_process:
                     new_process = self.new_process(self.mock_args)
+                    self.attach_ioloop(new_process)
                     new_process.setup()
                 return new_process
+
+    def attach_ioloop(self, p: process.Process) -> None:
+        """setup() creates real connections bound to the process loop."""
+        p.ioloop = asyncio.new_event_loop()
+        self.addCleanup(p.ioloop.close)
+
+    def test_create_connections_requires_ioloop(self) -> None:
+        """Without a loop pika 1.4 would bind the connect workflow to a
+        new loop that never runs, so this must fail loudly instead.
+
+        """
+        self.assertIsNone(self._obj.ioloop)
+        with self.assertRaises(RuntimeError):
+            self._obj.create_connections()
+        self.assertEqual(self._obj.connections, {})
 
     def test_setup_stats_queue(self) -> None:
         p = self.mock_setup()
@@ -255,6 +271,7 @@ class TestProcess(unittest.IsolatedAsyncioTestCase, test_state.TestState):
         cfg = _make_config(raw)
         args = {**self.mock_args, 'config': cfg}
         p = self.new_process(args)
+        self.attach_ioloop(p)
         p.setup()
         self.assertEqual(p.qos_prefetch, process.Process.QOS_PREFETCH_COUNT)
 

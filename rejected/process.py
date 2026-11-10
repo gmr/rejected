@@ -183,6 +183,11 @@ class Process(multiprocessing.Process, state.State):
         object to the connections dict.
 
         """
+        ioloop = self.ioloop
+        if ioloop is None:
+            raise RuntimeError(
+                'create_connections() requires the event loop to exist'
+            )
         self.set_state(self.STATE_CONNECTING)
         for conn in self.consumer_config.connections:
             if isinstance(conn, str):
@@ -208,7 +213,7 @@ class Process(multiprocessing.Process, state.State):
                 consume,
                 confirm,
                 self.callbacks,
-                self.ioloop,
+                ioloop=ioloop,
             )
 
     @staticmethod

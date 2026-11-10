@@ -305,11 +305,10 @@ class Consumer(object):
         activities.
 
         .. note:: Asynchronous support: Decorate this method with
-            :func:`tornado.gen.coroutine` or define it with ``async def``
-            to make it asynchronous.
+            :func:`tornado.gen.coroutine` to make it asynchronous.
 
-        If this method returns an awaitable, the IOLoop is not stopped until
-        the awaitable has completed.
+        If this method returns a :class:`~tornado.concurrent.Future`, the
+        IOLoop is not stopped until the future has completed.
 
         """
         self.logger.debug('shutdown invoked')
@@ -1054,6 +1053,17 @@ class Consumer(object):
         self._message_body = None
 
     def _get_exc_info(self, result):
+        """Return the exception info for the exception being handled.
+
+        When ``result`` is a future that exposes ``exc_info``, the
+        exception info from the future is preferred over
+        :func:`sys.exc_info` so that the traceback refers to where the
+        exception was raised inside the coroutine.
+
+        :param result: the value returned by the ``process`` method
+        :rtype: tuple
+
+        """
         if concurrent.is_future(result):
             try:
                 return result.exc_info()

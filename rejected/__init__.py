@@ -18,7 +18,7 @@ from rejected.consumer import (  # noqa: E402
 
 __author__ = 'Gavin M. Roy <gavinmroy@gmail.com>'
 __since__ = '2009-09-10'
-__version__ = '3.23.1'
+__version__ = '3.23.2'
 
 __all__ = [
     '__author__',

@@ -1,10 +1,14 @@
 Changelog
 =========
 
-Unreleased
-----------
+3.23.2
+------
 - Allow :meth:`rejected.consumer.Consumer.shutdown` to be asynchronous by decorating it with :func:`tornado.gen.coroutine`. When it returns a future, the process waits for it to complete before stopping the IOLoop so that consumers can flush or close asynchronous clients during shutdown.
 - Ignore repeated ready-to-stop notifications while the consumer is already shutting down so that an asynchronous shutdown is not interrupted.
+
+3.23.1
+------
+- Fix an error in ``log_exception`` and clean up flake8 warnings
 
 3.23.0
 ------

@@ -8,7 +8,7 @@ except ImportError:
 
 from helper import config as helper_config
 from rejected import __version__, consumer, data, process
-from tornado import locks, testing
+from tornado import concurrent, gen, locks, testing
 
 from . import mocks, test_state
 
@@ -361,3 +361,109 @@ class TestProcess(testing.AsyncTestCase, test_state.TestState):
         self.assertEqual(mocks.CHANNEL.basic_ack.call_count, 0)
         self.assertEqual(
             mock_process.counters[mock_process.CLOSED_ON_COMPLETE], 6)
+
+    def test_stop_consumer_returns_shutdown_result(self):
+        self._obj.consumer = mock.Mock()
+        self._obj.consumer.shutdown.return_value = mock.sentinel.result
+        self.assertIs(self._obj.stop_consumer(), mock.sentinel.result)
+
+    def test_stop_consumer_without_shutdown_method(self):
+        self._obj.consumer = object()
+        self.assertIsNone(self._obj.stop_consumer())
+
+    def stop_ioloop_setup(self, shutdown):
+        """Prepare the process to call ``on_ready_to_stop``.
+
+        :param shutdown: the callable to use as the consumer's shutdown
+        :returns: the mock that stands in for ``IOLoop.stop``
+
+        """
+        self._obj.consumer = mock.Mock()
+        self._obj.consumer.shutdown = shutdown
+        self._obj.ioloop = mock.Mock(spec=self.io_loop)
+        self._obj.ioloop.add_future.side_effect = self.io_loop.add_future
+        self._obj.set_state(self._obj.STATE_SHUTTING_DOWN)
+        patcher = mock.patch('rejected.process.signal.signal')
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return self._obj.ioloop.stop
+
+    @gen.coroutine
+    def wait_for_ioloop_stop(self, stop):
+        """Yield to the IOLoop until ``stop`` is called or a second passes.
+
+        :param mock.Mock stop: the mock standing in for ``IOLoop.stop``
+
+        """
+        deadline = self.io_loop.time() + 1
+        while not stop.called and self.io_loop.time() < deadline:
+            yield gen.moment
+
+    def test_on_ready_to_stop_with_synchronous_shutdown(self):
+        stop = self.stop_ioloop_setup(mock.Mock(return_value=None))
+        self._obj.on_ready_to_stop()
+        self.assertEqual(self._obj.consumer.shutdown.call_count, 1)
+        self.assertEqual(stop.call_count, 1)
+        self.assertTrue(self._obj.is_stopped)
+
+    @testing.gen_test
+    def test_on_ready_to_stop_waits_for_future_shutdown(self):
+        future = concurrent.Future()
+        stop = self.stop_ioloop_setup(mock.Mock(return_value=future))
+        self._obj.on_ready_to_stop()
+        self.assertEqual(stop.call_count, 0)
+        self.assertTrue(self._obj.is_shutting_down)
+        future.set_result(None)
+        yield self.wait_for_ioloop_stop(stop)
+        self.assertEqual(stop.call_count, 1)
+        self.assertTrue(self._obj.is_stopped)
+
+    @testing.gen_test
+    def test_on_ready_to_stop_waits_for_coroutine_shutdown(self):
+        finished = locks.Event()
+
+        @gen.coroutine
+        def shutdown():
+            yield finished.wait()
+
+        stop = self.stop_ioloop_setup(shutdown)
+        self._obj.on_ready_to_stop()
+        yield gen.moment
+        self.assertEqual(stop.call_count, 0)
+        self.assertTrue(self._obj.is_shutting_down)
+        finished.set()
+        yield self.wait_for_ioloop_stop(stop)
+        self.assertEqual(stop.call_count, 1)
+        self.assertTrue(self._obj.is_stopped)
+
+    @testing.gen_test
+    def test_on_ready_to_stop_ignores_reentry_while_shutdown_pending(self):
+        future = concurrent.Future()
+        stop = self.stop_ioloop_setup(mock.Mock(return_value=future))
+        self._obj.on_ready_to_stop()
+        self._obj.on_ready_to_stop()
+        self.assertEqual(self._obj.consumer.shutdown.call_count, 1)
+        self.assertEqual(stop.call_count, 0)
+        future.set_result(None)
+        yield self.wait_for_ioloop_stop(stop)
+        self.assertEqual(self._obj.consumer.shutdown.call_count, 1)
+        self.assertEqual(stop.call_count, 1)
+        self.assertTrue(self._obj.is_stopped)
+
+    def test_on_ready_to_stop_ignores_reentry_after_stopped(self):
+        stop = self.stop_ioloop_setup(mock.Mock(return_value=None))
+        self._obj.on_ready_to_stop()
+        self._obj.on_ready_to_stop()
+        self.assertEqual(self._obj.consumer.shutdown.call_count, 1)
+        self.assertEqual(stop.call_count, 1)
+        self.assertTrue(self._obj.is_stopped)
+
+    @testing.gen_test
+    def test_on_ready_to_stop_stops_when_shutdown_raises(self):
+        future = concurrent.Future()
+        stop = self.stop_ioloop_setup(mock.Mock(return_value=future))
+        self._obj.on_ready_to_stop()
+        future.set_exception(RuntimeError('flush failed'))
+        yield self.wait_for_ioloop_stop(stop)
+        self.assertEqual(stop.call_count, 1)
+        self.assertTrue(self._obj.is_stopped)

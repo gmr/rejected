@@ -1,6 +1,11 @@
 Changelog
 =========
 
+Unreleased
+----------
+- Allow :meth:`rejected.consumer.Consumer.shutdown` to be asynchronous by decorating it with :func:`tornado.gen.coroutine`. When it returns a future, the process waits for it to complete before stopping the IOLoop so that consumers can flush or close asynchronous clients during shutdown.
+- Ignore repeated ready-to-stop notifications while the consumer is already shutting down so that an asynchronous shutdown is not interrupted.
+
 3.23.0
 ------
 - Update on channel and connection callback to accept any `*args, **kwargs` to accommodate Pika updates. Since arguments are not used, except logging only.

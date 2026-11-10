@@ -1,6 +1,7 @@
 """Pydantic models for rejected configuration, messages, and data."""
 
 import datetime
+import decimal
 import enum
 import os
 import time
@@ -141,6 +142,23 @@ class Callbacks(pydantic.BaseModel):
     on_return: typing.Callable[..., typing.Any]
 
 
+# AMQ Field Table definition
+
+type FieldValue = (
+    bool
+    | int
+    | float
+    | decimal.Decimal
+    | str
+    | bytes
+    | datetime.datetime
+    | None
+    | list[FieldValue]
+    | FieldTable
+)
+type FieldTable = dict[str, FieldValue]
+
+
 # Message model
 
 
@@ -160,9 +178,7 @@ class Message(pydantic.BaseModel):
     correlation_id: str | None
     delivery_mode: int | None
     expiration: str | None
-    headers: dict[
-        str, bool | dict[str, typing.Any] | float | int | str | bytes
-    ]
+    headers: FieldTable | None
     message_id: str | None
     type: str | None
     priority: int | None

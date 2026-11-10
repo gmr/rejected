@@ -152,9 +152,9 @@ type FieldValue = (
     | str
     | bytes
     | datetime.datetime
-    | None
     | list[FieldValue]
     | FieldTable
+    | None
 )
 type FieldTable = dict[str, FieldValue]
 

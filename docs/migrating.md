@@ -6,7 +6,7 @@ changes and how to update your consumers.
 
 ## Python Version
 
-Rejected 4.0 requires **Python 3.11+**. Python 2.7 and 3.5-3.10 are no longer
+Rejected 4.0 requires **Python 3.12+**. Python 2.7 and 3.5-3.11 are no longer
 supported.
 
 ## Tornado Removed
@@ -412,7 +412,7 @@ to Prometheus.
 
 ## Quick Migration Checklist
 
-1. Ensure Python >= 3.11
+1. Ensure Python >= 3.12
 2. Update imports to use `import rejected` and `rejected.Consumer`, etc.
 3. Replace `@gen.coroutine` / `yield` with `async def` / `await`
 4. Make `process()`, `prepare()`, `finish()` async

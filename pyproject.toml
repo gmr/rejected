@@ -7,7 +7,7 @@ name = "rejected"
 version = "4.0.0b1"
 description = "Rejected is a Python RabbitMQ Consumer Framework and Controller Daemon"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 license = "BSD-3-Clause"
 license-files = ["LICENSE"]
 authors = [
@@ -19,7 +19,6 @@ classifiers = [
   "Natural Language :: English",
   "Operating System :: OS Independent",
   "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
   "Programming Language :: Python :: 3.14",
@@ -92,7 +91,7 @@ include = ["rejected"]
 
 [tool.ruff]
 line-length = 79
-target-version = "py311"
+target-version = "py312"
 
 [tool.ruff.format]
 quote-style = "single"
